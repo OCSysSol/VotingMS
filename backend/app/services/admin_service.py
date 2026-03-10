@@ -250,6 +250,17 @@ async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession) -> list[LotO
     return list(result.scalars().all())
 
 
+_CSV_LOT_OWNER_ALIASES: dict[str, str] = {
+    "lot#": "lot_number",
+    "uoe2": "unit_entitlement",
+}
+
+
+def _normalise_lot_owner_fieldnames(fieldnames: list[str]) -> list[str]:
+    """Map alternate header names (Lot#, UOE2) to canonical names."""
+    return [_CSV_LOT_OWNER_ALIASES.get(f.strip().lower(), f.strip().lower()) for f in fieldnames]
+
+
 async def import_lot_owners_from_csv(
     building_id: uuid.UUID,
     content: bytes,
@@ -257,19 +268,24 @@ async def import_lot_owners_from_csv(
 ) -> dict[str, int]:
     """
     Parse a CSV of lot owners and replace all existing lot owners for the building.
+    Accepts canonical headers (lot_number, unit_entitlement) or SBT aliases (Lot#, UOE2).
     Returns {"imported": int}.
     """
     await get_building_or_404(building_id, db)
 
     text = content.decode("utf-8-sig")
-    reader = csv.DictReader(io.StringIO(text))
+    raw_reader = csv.DictReader(io.StringIO(text))
 
-    required_headers = {"lot_number", "email", "unit_entitlement"}
-    if reader.fieldnames is None:
+    if raw_reader.fieldnames is None:
         raise HTTPException(status_code=422, detail="CSV has no headers")
 
-    fieldnames_lower = {f.strip().lower() for f in reader.fieldnames}
-    missing = required_headers - fieldnames_lower
+    normalised_fieldnames = _normalise_lot_owner_fieldnames(list(raw_reader.fieldnames))
+    # Re-read with normalised fieldnames
+    reader = csv.DictReader(io.StringIO(text), fieldnames=normalised_fieldnames)
+    next(reader)  # skip original header row
+
+    required_headers = {"lot_number", "email", "unit_entitlement"}
+    missing = required_headers - set(normalised_fieldnames)
     if missing:
         raise HTTPException(
             status_code=422,

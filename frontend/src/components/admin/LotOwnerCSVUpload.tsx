@@ -39,8 +39,8 @@ export default function LotOwnerCSVUpload({ buildingId, onSuccess }: LotOwnerCSV
       </div>
       <div className="admin-upload">
         <p className="admin-upload__hint">
-          CSV: <code>lot_number</code>, <code>email</code>, <code>unit_entitlement</code>.
-          Excel (Owners_SBT format): Lot#, UOE2, Email.
+          CSV or Excel. Canonical headers: <code>lot_number</code>, <code>email</code>, <code>unit_entitlement</code>.
+          SBT aliases also accepted: <code>Lot#</code>, <code>UOE2</code>, <code>Email</code>.
           This replaces all existing lot owners.
         </p>
         <div className="admin-upload__row">

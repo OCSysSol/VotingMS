@@ -157,7 +157,7 @@ A web application for body corporates to run voting during Annual General Meetin
 **Acceptance Criteria:**
 
 - [ ] Host can upload a CSV or Excel (.xlsx / .xls) file; the file input accepts both formats
-- [ ] CSV format uses headers: `lot_number`, `email`, `unit_entitlement`
+- [ ] CSV format accepts canonical headers (`lot_number`, `email`, `unit_entitlement`) **or** SBT aliases (`Lot#` → lot_number, `UOE2` → unit_entitlement, `Email` → email); both naming conventions work interchangeably
 - [ ] Excel format (matching the `Owners_SBT.xlsx` template in `examples/`) uses headers: `Lot#` (lot number), `UOE2` (unit entitlement), `Email` (email address); other columns are ignored
 - [ ] System validates the file format and reports errors (missing required columns, duplicate lot numbers, blank required fields) before importing
 - [ ] Successful import shows count of records imported
@@ -235,7 +235,7 @@ A web application for body corporates to run voting during Annual General Meetin
 - FR-5: A **ballot** represents one formal submission per voter (unique email) per AGM. A ballot contains one vote record per motion with values `yes`, `no`, or `abstained`. Ballots are immutable once submitted — no updates or deletions allowed under any circumstances. A second submission attempt for the same voter and AGM is rejected with a 409 error.
 - FR-5a: When a lot owner submits their ballot, any motion without an explicit selection is automatically recorded as `abstained`.
 - FR-5b: Vote tallies use four categories per motion: **Yes**, **No**, **Abstained** (submitted with no or explicit abstain selection), and **Absent** (voter never submitted; draft discarded on close). Tallies are the sum of snapshotted ballot weights in each category.
-- FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). CSV format uses headers `lot_number`, `email`, `unit_entitlement`. Excel format uses headers `Lot#` (→ lot_number), `UOE2` (→ unit_entitlement), `Email` (→ email); all other columns are ignored. Completely blank rows are skipped. Import performs a full replacement of existing records for the building. Changes do not affect the weight snapshot of any already-open AGM.
+- FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). Both CSV and Excel accept canonical headers (`lot_number`, `email`, `unit_entitlement`) or SBT aliases (`Lot#` → lot_number, `UOE2` → unit_entitlement, `Email` → email); all other columns are ignored. Completely blank rows are skipped. Import performs a full replacement of existing records for the building. Changes do not affect the weight snapshot of any already-open AGM.
 - FR-6a: Lot owner records can be created or edited individually via the host admin UI. Deletion is not permitted. Changes do not affect the weight snapshot of any already-open AGM.
 - FR-7: PropertyIQ sync is manually triggered (not scheduled) and replaces all lot owner records for the building. Changes do not affect the weight snapshot of any already-open AGM.
 - FR-8: The results report is sent as an HTML email via Resend to the manager email stored on the building. On failure, the system retries with exponential backoff up to 30 attempts; each attempt outcome is logged using OTEL-compliant structured logging (attempt number, delay, error message, timestamp). Persistent failure is surfaced in the admin portal with a manual retry option. The report is also accessible in-app regardless of email delivery status.
