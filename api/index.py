@@ -40,4 +40,19 @@ if "DATABASE_URL" in os.environ:
 
 from app.main import app  # noqa: E402 — must come after sys.path manipulation
 
+# Serve the React SPA from the bundled frontend/dist directory.
+# frontend/dist is included in the Lambda via vercel.json includeFiles.
+_dist_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+if os.path.isdir(_dist_dir):
+    from fastapi.staticfiles import StaticFiles  # noqa: E402
+    from fastapi.responses import FileResponse  # noqa: E402
+
+    _assets_dir = os.path.join(_dist_dir, "assets")
+    if os.path.isdir(_assets_dir):
+        app.mount("/assets", StaticFiles(directory=_assets_dir), name="static_assets")
+
+    @app.get("/{full_path:path}", include_in_schema=False)  # pragma: no cover
+    async def _serve_spa(full_path: str) -> FileResponse:  # pragma: no cover
+        return FileResponse(os.path.join(_dist_dir, "index.html"))  # pragma: no cover
+
 __all__ = ["app"]
