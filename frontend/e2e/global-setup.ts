@@ -155,7 +155,7 @@ export default async function globalSetup(_config: FullConfig) {
   const closesAt = new Date(future);
   closesAt.setDate(closesAt.getDate() + 7);
 
-  await api.post("/api/admin/agms", {
+  const createAgmRes = await api.post("/api/admin/agms", {
     data: {
       building_id: building.id,
       title: E2E_AGM_TITLE,
@@ -170,6 +170,13 @@ export default async function globalSetup(_config: FullConfig) {
       ],
     },
   });
+  const newAgm = (await createAgmRes.json()) as { id: string };
+
+  // Wipe any ballot submissions on the new AGM (safety net for retried test
+  // runs: if a previous attempt submitted a ballot before the suite failed,
+  // global-setup needs to clear it so the voting-flow test can re-vote
+  // without hitting a 409 conflict).
+  await api.delete(`/api/admin/agms/${newAgm.id}/ballots`);
 
   await api.dispose();
 }
