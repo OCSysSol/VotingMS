@@ -106,6 +106,14 @@ cd backend && uv run alembic -x dburl="$DB" upgrade head
 
 **Note:** `DATABASE_URL` env var set on the command line does NOT work with alembic — it reads `sqlalchemy.url` from `alembic.ini`. Always use `-x dburl=...`.
 
+**Note:** Neon connection strings may include `channel_binding=require`. Strip this before passing to alembic/asyncpg — neither supports it. Use `ssl=require` only:
+```bash
+# Correct form for alembic:
+DB="postgresql+asyncpg://user:pass@host/db?ssl=require"
+# NOT: ?sslmode=require&channel_binding=require
+```
+`api/index.py` already strips `channel_binding=require` at runtime for the deployed Lambda.
+
 ---
 
 ## Container Management
