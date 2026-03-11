@@ -25,7 +25,7 @@ This applies equally to small bug fixes and large features. If feedback is recei
 
 Every feature or bugfix must follow this process, executed by a sub-agent:
 
-1. **Create a new branch** from `preview` (e.g. `git checkout -b feat/my-feature`)
+1. **Create a new branch** from `master` (e.g. `git checkout -b feat/my-feature`)
 2. **Do all work on that branch** — multiple commits are fine and encouraged
 3. **Run local tests** — `npm run test:coverage` (frontend) and `pytest --cov` (backend), both must pass at 100%
 4. **Signal the orchestrator** — report local test results, indicate ready to push. **Pause and wait** for the orchestrator to grant the push slot
@@ -40,7 +40,7 @@ Every feature or bugfix must follow this process, executed by a sub-agent:
 8. **Fix all recorded failures** — work through every issue while the next agent may be using the slot. Do not push during this phase
 9. If fixes were needed: **re-queue** (back to step 4) for another push + test cycle
 10. Once all E2E tests pass: **raise a PR** to merge into `preview`
-11. **Monitor the GitHub Actions post-deploy workflow** — it runs automatically after the PR is merged to `preview`. Check for any failures
+11. **Monitor the GitHub Actions post-deploy workflow** — it runs automatically after the PR is raised. Check for any failures
 12. If the CI workflow fails: fix the issues and re-queue (back to step 4) to push and re-test
 13. When all tests pass including the CI workflow: **ask the user to approve and merge the PR**
 
@@ -175,114 +175,17 @@ DB="postgresql+asyncpg://user:pass@host/db?ssl=require"
 
 ## Container Management
 
-**Always use Podman** — never Docker — for all container and compose operations in this project.
+> See user-level `~/.claude/CLAUDE.md` for general Podman rules. Project-specific note:
 
-```bash
-# Start services
-podman compose up -d
-
-# Stop services
-podman compose down
-
-# View logs
-podman compose logs -f
-
-# Run a one-off command inside a container
-podman compose exec <service> <command>
-```
-
-- Use `podman compose` (not `docker compose` or `docker-compose`)
-- Use `podman` (not `docker`) for any direct container commands
-- The compose file is `podman-compose.yml` at the project root
+- The compose file for this project is `podman-compose.yml` at the project root
 
 ---
 
 ## Testing Standards
 
-### Coverage Target
+> See user-level `~/.claude/CLAUDE.md` for coverage targets, backend/frontend/Playwright testing standards and best practices. Project-specific scenarios are below.
 
-**100% line coverage is required** — every line of code, both backend and frontend, must be exercised by at least one test. Coverage reports must be generated on every test run and a build/CI check should fail if coverage drops below 100%.
-
-- Backend: `pytest-cov` with `--cov-fail-under=100`
-- Frontend: Vitest with `coverage.thresholds` set to 100 for lines, functions, branches, and statements
-
-The only acceptable exclusions are lines explicitly marked with `# pragma: no cover` (backend) or `/* istanbul ignore */` (frontend), and these must have a comment justifying the exclusion.
-
----
-
-### Backend Testing (pytest)
-
-Every API endpoint must have thorough tests. Apply the following techniques for all backend test suites.
-
-#### Input Partition Testing
-
-Divide inputs into equivalence classes and test at least one value from each class. For every endpoint parameter, identify:
-
-- Valid inputs (normal case)
-- Invalid type (e.g. string where integer expected)
-- Missing required fields
-- Null / empty values
-- Unexpected extra fields
-
-#### Boundary Value Analysis
-
-Test at the edges of valid ranges, not just the middle:
-
-- Min valid value, max valid value
-- One below min, one above max
-- Zero and negative numbers where relevant
-- Empty string vs single character vs max-length string
-
-#### State-Based Testing
-
-Many endpoints behave differently depending on entity state. Test each state transition explicitly:
-
-- AGM status: `open` → `closed` (test that actions valid in one state are rejected in the other)
-- Lot owner: authenticated session vs unauthenticated vs already-voted
-- Vote: before submission vs after submission (immutable)
-
-#### Error and Edge Cases
-
-- Duplicate records (e.g. same lot number in same building)
-- Foreign key violations (e.g. AGM ID that does not exist)
-- Concurrent requests (e.g. two submissions for the same lot at the same time)
-- Empty collections (e.g. AGM with zero motions, building with zero lot owners)
-
-#### Test Structure
-
-Each API test file should be organised with clearly labelled sections:
-
-```python
-# --- Happy path ---
-# --- Input validation ---
-# --- Boundary values ---
-# --- State / precondition errors ---
-# --- Edge cases ---
-```
-
-Tests that exercise DB state must use isolated transactions or a dedicated test database — never the development database.
-
----
-
-### Frontend Testing (Vitest + React Testing Library)
-
-All React components and utility functions must be covered by unit and integration tests using Vitest and React Testing Library (RTL).
-
-#### Unit Tests (per component)
-
-- Render the component with required props and assert the output contains expected elements
-- Test every conditional render branch (e.g. loading state, error state, empty state, populated state)
-- Test all user interactions: clicks, form input, form submission, keyboard events
-- Assert that the correct callbacks are called with the correct arguments
-- Test components in isolation using mocked API calls (use `msw` — Mock Service Worker — to intercept fetch/axios requests)
-
-#### Integration Tests
-
-- Test complete user flows across multiple components wired together (e.g. building select → lot auth → vote page)
-- Use RTL's `userEvent` (not `fireEvent`) to simulate realistic user interactions
-- Assert on visible UI outcomes, not internal component state
-
-#### What to Test Per User Story
+### What to Test Per User Story
 
 - **US-002 Building selector:** dropdown renders all buildings, selecting one shows AGM details, submitting without selection shows error
 - **US-003 Auth form:** valid credentials advance to vote page, invalid credentials show error message, empty fields show validation errors
@@ -292,15 +195,7 @@ All React components and utility functions must be covered by unit and integrati
 
 ---
 
-### End-to-End / Browser Testing (Playwright)
-
-Playwright automates a real browser (Chromium by default) and must be used to verify complete user journeys from browser open to final state. Tests run headlessly and should be part of CI.
-
-#### Setup
-
-Playwright runs against the Vite dev server (or a test server). Configure `baseURL` in `playwright.config.ts` to point to the local dev server.
-
-#### What to Cover with E2E Tests
+### E2E Tests — AGM User Flows
 
 Write one E2E test per major user flow:
 
@@ -309,14 +204,6 @@ Write one E2E test per major user flow:
 3. **AGM closed state:** attempt to vote on a closed AGM → see "Voting has closed" message → see read-only confirmation if already submitted
 4. **CSV import flow:** navigate to host page → upload valid CSV → verify success message and record count
 5. **Close AGM and report:** manager closes AGM → confirm status changes → verify lot owners can no longer vote
-
-#### Playwright Best Practices
-
-- Use `page.getByRole()` and `page.getByLabel()` locators (not CSS selectors or `data-testid`) wherever possible — this tests accessibility as a side effect
-- Add `data-testid` attributes only when no semantic locator is available
-- Each test must be fully independent — seed the database to a known state before each test using API calls or a test fixture helper
-- Assert on visible UI state after each action, not just at the end of the flow
-- Use Playwright's `expect(page).toHaveURL()` and `expect(locator).toBeVisible()` assertions rather than arbitrary waits
 
 ---
 
