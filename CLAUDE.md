@@ -79,22 +79,24 @@ Used for AGM motion pre-fill at creation time (US-014, Excel motion import featu
 
 **IMPORTANT — CLI deployments go to Development only.** Never run `vercel deploy --prod` or target preview from the CLI. Production and Preview are exclusively managed by git push.
 
-When investigating a Vercel deployment issue, always check which environment is affected before acting. Use `vercel env pull --environment preview` (or `production`) to retrieve the correct database URL for running migrations.
+When investigating a Vercel deployment issue, always check which environment is affected before acting.
 
-**Database migrations on Vercel:** Alembic migrations are never run automatically on deploy — they must be applied manually using the unpooled connection string:
+**Database migrations on Vercel:** Alembic migrations are never run automatically on deploy — they must be applied manually.
+
+> **CRITICAL:** `vercel env pull` may return a DIFFERENT Neon database URL than what the deployed Lambda actually uses. Always retrieve the actual `DATABASE_URL_UNPOOLED` from a running Lambda (e.g. via a debug endpoint or the Vercel dashboard) before running migrations. Never assume the env pull result is correct.
+
+The correct approach:
+1. Deploy a temporary debug endpoint that returns `os.environ.get("DATABASE_URL_UNPOOLED")` from inside the Lambda
+2. Use that URL to run the migration
+3. Remove the debug endpoint and redeploy
 
 ```bash
-# Pull env vars for the target environment
-vercel env pull .env.vercel --environment preview --yes
-
-# Convert and run migration
-DB=$(grep DATABASE_URL_UNPOOLED .env.vercel | cut -d'"' -f2 | \
-  sed 's|postgresql://|postgresql+asyncpg://|' | sed 's|sslmode=require|ssl=require|')
+# Once you have the correct unpooled URL from the Lambda:
+DB="postgresql+asyncpg://user:pass@host/db?ssl=require"
 cd backend && uv run alembic -x dburl="$DB" upgrade head
-
-# Clean up
-rm ../.env.vercel
 ```
+
+**Note:** `DATABASE_URL` env var set on the command line does NOT work with alembic — it reads `sqlalchemy.url` from `alembic.ini`. Always use `-x dburl=...`.
 
 ---
 
