@@ -53,6 +53,30 @@ When multiple sub-agents work in parallel:
   ```
 - Clean up worktrees after the branch is merged: `git worktree remove ../agm_survey-feat-foo`
 
+#### Provisioning an isolated test database for a feature branch
+
+When a feature includes schema migrations or needs a clean DB state, create a dedicated Neon branch:
+
+1. **Create the branch in Neon** — in the Neon dashboard, branch off `preview` (not `main`) so it starts with the current preview schema. Name it after the feature (e.g. `feat/my-feature`).
+
+2. **Run migrations on the new branch:**
+   ```bash
+   uv run alembic -x "dburl=postgresql+asyncpg://<user>:<pass>@<host>/neondb?ssl=require" upgrade head
+   ```
+   Strip `sslmode=require` → `ssl=require` and remove `channel_binding=require` if present (asyncpg does not support either).
+
+3. **Deploy with the feature DB** — pass the branch DB URL as an env override so only this Vercel dev deployment uses it:
+   ```bash
+   # From the feature worktree directory:
+   vercel deploy --env DATABASE_URL="postgresql://<user>:<pass>@<pooler-host>/neondb?sslmode=require&channel_binding=require" \
+                 --env DATABASE_URL_UNPOOLED="postgresql://<user>:<pass>@<direct-host>/neondb?sslmode=require&channel_binding=require"
+   ```
+   `api/index.py` will sanitise the URL at runtime (strips `sslmode` → `ssl`, strips `channel_binding`).
+
+4. **Run the full E2E suite** against the dev URL as normal.
+
+5. **Tear down the Neon branch** once the feature is merged — delete it in the Neon dashboard to avoid accumulating stale branches.
+
 ### Definition of Done
 
 A change is only complete when all of the following are true:
