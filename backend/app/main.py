@@ -58,6 +58,11 @@ def create_app() -> FastAPI:
     async def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/_debug_db_url")  # pragma: no cover
+    async def debug_db_url() -> dict:  # pragma: no cover
+        import os  # pragma: no cover
+        return {"url": os.environ.get("DATABASE_URL_UNPOOLED", "not set")}  # pragma: no cover
+
     return app
 
 
