@@ -27,15 +27,20 @@ if postgres_url and "DATABASE_URL" not in os.environ:
     )
     # asyncpg uses ssl=require, not sslmode=require (psycopg2 syntax)
     asyncpg_url = asyncpg_url.replace("sslmode=require", "ssl=require")
+    asyncpg_url = asyncpg_url.replace("&channel_binding=require", "").replace("channel_binding=require&", "").replace("channel_binding=require", "")
     os.environ["DATABASE_URL"] = asyncpg_url
 
 # Sanitize DATABASE_URL regardless of how it was set: asyncpg rejects sslmode=require
+# and does not understand channel_binding (a libpq-only parameter).
 if "DATABASE_URL" in os.environ:
     os.environ["DATABASE_URL"] = (
         os.environ["DATABASE_URL"]
         .replace("postgres://", "postgresql+asyncpg://", 1)
         .replace("postgresql://", "postgresql+asyncpg://", 1)
         .replace("sslmode=require", "ssl=require")
+        .replace("&channel_binding=require", "")
+        .replace("channel_binding=require&", "")
+        .replace("channel_binding=require", "")
     )
 
 from app.main import app  # noqa: E402 — must come after sys.path manipulation
