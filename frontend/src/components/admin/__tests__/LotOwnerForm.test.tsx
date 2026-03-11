@@ -14,6 +14,7 @@ const existingLotOwner: LotOwner = {
   lot_number: "1A",
   email: "owner1@example.com",
   unit_entitlement: 100,
+  financial_position: "normal",
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
 };
@@ -235,5 +236,59 @@ describe("LotOwnerForm - Edit mode", () => {
       </QueryClientProvider>
     );
     expect(screen.getByLabelText("Email")).toHaveValue("other@example.com");
+  });
+
+  it("renders financial position dropdown in edit mode with current value", () => {
+    renderEditForm({ ...existingLotOwner, financial_position: "in_arrear" });
+    const select = screen.getByLabelText("Financial Position");
+    expect(select).toHaveValue("in_arrear");
+  });
+
+  it("submits with changed financial position", async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    renderEditForm(existingLotOwner, onSuccess);
+    await user.selectOptions(screen.getByLabelText("Financial Position"), "in_arrear");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+});
+
+describe("LotOwnerForm - Add mode financial position", () => {
+  it("renders financial position dropdown in add mode defaulting to normal", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const { getByLabelText } = render(
+      <QueryClientProvider client={queryClient}>
+        <LotOwnerForm buildingId="b1" editTarget={null} onSuccess={vi.fn()} onCancel={vi.fn()} />
+      </QueryClientProvider>
+    );
+    const select = getByLabelText("Financial Position");
+    expect(select).toHaveValue("normal");
+  });
+
+  it("submits add form with in_arrear financial position", async () => {
+    const user = userEvent.setup();
+    const onSuccess = vi.fn();
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <LotOwnerForm buildingId="b1" editTarget={null} onSuccess={onSuccess} onCancel={vi.fn()} />
+      </QueryClientProvider>
+    );
+    await user.type(screen.getByLabelText("Lot Number"), "3C");
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.clear(screen.getByLabelText("Unit Entitlement"));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "150");
+    await user.selectOptions(screen.getByLabelText("Financial Position"), "in_arrear");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalled();
+    });
   });
 });

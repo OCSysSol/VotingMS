@@ -12,6 +12,7 @@ const lotOwners: LotOwner[] = [
     lot_number: "1A",
     email: "owner1@example.com",
     unit_entitlement: 100,
+    financial_position: "normal",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -21,6 +22,7 @@ const lotOwners: LotOwner[] = [
     lot_number: "2B",
     email: "owner2@example.com",
     unit_entitlement: 200,
+    financial_position: "in_arrear",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -49,11 +51,22 @@ describe("LotOwnerTable", () => {
     expect(onEdit).toHaveBeenCalledWith(lotOwners[0]);
   });
 
-  it("renders table headers", () => {
+  it("renders table headers including Financial Position", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("Lot Number")).toBeInTheDocument();
     expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("Unit Entitlement")).toBeInTheDocument();
+    expect(screen.getByText("Financial Position")).toBeInTheDocument();
     expect(screen.getByText("Actions")).toBeInTheDocument();
+  });
+
+  it("shows In Arrear badge for in_arrear lot owner", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    expect(screen.getByText("In Arrear")).toBeInTheDocument();
+  });
+
+  it("shows Normal text for normal lot owner", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    expect(screen.getByText("Normal")).toBeInTheDocument();
   });
 });

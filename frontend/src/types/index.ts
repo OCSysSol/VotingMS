@@ -4,6 +4,7 @@ export type AGMStatus = "open" | "closed";
 export type VoteChoice = "yes" | "no" | "abstained";
 export type VoteStatus = "draft" | "submitted";
 export type EmailDeliveryStatus = "pending" | "delivered" | "failed";
+export type FinancialPosition = "normal" | "in_arrear";
 
 export interface Building {
   id: string;
@@ -19,6 +20,7 @@ export interface LotOwner {
   lot_number: string;
   email: string;
   unit_entitlement: number;
+  financial_position: FinancialPosition;
   created_at: string;
   updated_at: string;
 }
