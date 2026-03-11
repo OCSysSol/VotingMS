@@ -25,8 +25,8 @@ test.describe("Lot owner voting flow", () => {
     await page.getByLabel("Email address").fill(E2E_LOT_EMAIL);
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // Voting page
-    await expect(page.getByRole("button", { name: "Submit ballot" })).toBeVisible();
+    // Voting page — allow extra time for Lambda cold-start and motions fetch
+    await expect(page.getByRole("button", { name: "Submit ballot" })).toBeVisible({ timeout: 15000 });
 
     // Vote Yes on all motions
     const yesButtons = page.getByRole("button", { name: "Yes" });
