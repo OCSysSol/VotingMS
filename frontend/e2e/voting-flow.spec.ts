@@ -25,17 +25,15 @@ test.describe("Lot owner voting flow", () => {
     await page.getByLabel("Email address").fill(E2E_LOT_EMAIL);
     await page.getByRole("button", { name: "Continue" }).click();
 
-    // After successful auth the frontend navigates to either:
-    //   /vote/{agmId}/voting     — first time voting on this AGM
-    //   /vote/{agmId}/confirmation — E2E-1 already submitted (can happen when
-    //                                multiple test runs share the same deployment)
-    // Wait for the URL to settle on one of these pages first.
-    await expect(page).toHaveURL(/vote\/.*\/(voting|confirmation)/, { timeout: 15000 });
+    // Wait for auth to complete and navigation away from /auth.
+    // Use a generous timeout: the Vercel Lambda may need a moment to create the
+    // session and the browser needs to receive the redirect before rendering /voting.
+    await expect(page).toHaveURL(/vote\/.*\/(voting|confirmation)/, { timeout: 20000 });
 
+    // If the ballot for E2E-1 was already submitted in a previous test run and
+    // auth redirected straight to /confirmation, skip the voting steps.
     if (page.url().includes("/voting")) {
-      // On the voting page: vote Yes on all motions and submit
-      // Allow extra time for Lambda cold-start and motions fetch
-      await expect(page.getByRole("button", { name: "Submit ballot" })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole("button", { name: "Submit ballot" })).toBeVisible({ timeout: 10000 });
 
       // Vote Yes on all motions
       const yesButtons = page.getByRole("button", { name: "Yes" });
@@ -53,7 +51,8 @@ test.describe("Lot owner voting flow", () => {
       await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });
     }
 
-    // On the confirmation page (whether just submitted or already voted)
+    // Whether we voted just now or were redirected here directly, the
+    // confirmation page must show the voter's recorded votes.
     await expect(page.getByText("Your votes", { exact: true })).toBeVisible({ timeout: 15000 });
   });
 

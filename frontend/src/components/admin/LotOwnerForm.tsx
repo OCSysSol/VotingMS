@@ -24,12 +24,16 @@ export default function LotOwnerForm({
   const [unitEntitlement, setUnitEntitlement] = useState(
     editTarget?.unit_entitlement.toString() ?? ""
   );
+  const [financialPosition, setFinancialPosition] = useState(
+    editTarget?.financial_position ?? "normal"
+  );
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     setLotNumber(editTarget?.lot_number ?? "");
     setEmail(editTarget?.email ?? "");
     setUnitEntitlement(editTarget?.unit_entitlement.toString() ?? "");
+    setFinancialPosition(editTarget?.financial_position ?? "normal");
     setFormError(null);
   }, [editTarget]);
 
@@ -69,6 +73,7 @@ export default function LotOwnerForm({
       const updateData: LotOwnerUpdateRequest = {};
       if (email !== editTarget!.email) updateData.email = email;
       if (parsed !== editTarget!.unit_entitlement) updateData.unit_entitlement = parsed;
+      if (financialPosition !== editTarget!.financial_position) updateData.financial_position = financialPosition;
       if (Object.keys(updateData).length === 0) {
         setFormError("No changes detected.");
         return;
@@ -77,7 +82,7 @@ export default function LotOwnerForm({
     } else {
       if (!lotNumber.trim()) { setFormError("Lot number is required."); return; }
       if (!email.trim()) { setFormError("Email is required."); return; }
-      addMutation.mutate({ lot_number: lotNumber, email, unit_entitlement: parsed });
+      addMutation.mutate({ lot_number: lotNumber, email, unit_entitlement: parsed, financial_position: financialPosition });
     }
   }
 
@@ -123,6 +128,19 @@ export default function LotOwnerForm({
               value={unitEntitlement}
               onChange={(e) => setUnitEntitlement(e.target.value)}
             />
+          </div>
+
+          <div className="field">
+            <label className="field__label" htmlFor="lot-financial-position">Financial Position</label>
+            <select
+              id="lot-financial-position"
+              className="field__input"
+              value={financialPosition}
+              onChange={(e) => setFinancialPosition(e.target.value)}
+            >
+              <option value="normal">Normal</option>
+              <option value="in_arrear">In Arrear</option>
+            </select>
           </div>
 
           {formError && (

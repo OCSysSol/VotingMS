@@ -29,7 +29,8 @@ test.describe.serial("Admin Lot Owners", () => {
   });
 
   test("add lot owner form submits and shows in table", async ({ page, request }) => {
-    // Ensure the dedicated E2E Building exists (same seed used by "displays lot owner table")
+    // Use "E2E Building" explicitly — never buildings[0], which can be the
+    // "E2E Test Building" that the voting-flow tests depend on.
     await request.post("/api/admin/buildings/import", {
       multipart: {
         file: {
@@ -41,12 +42,11 @@ test.describe.serial("Admin Lot Owners", () => {
     });
     const buildingsRes = await request.get("/api/admin/buildings");
     const buildings = await buildingsRes.json() as { id: string; name: string }[];
-    const building = buildings.find((b) => b.name === "E2E Building")!;
+    const building = buildings.find((b) => b.name === "E2E Building");
+    expect(building).toBeDefined();
 
     const uniqueLot = `E2E-LOT-${Date.now()}`;
-    await page.goto(`/admin/buildings/${building.id}`);
-    // Wait for the building page to finish loading before interacting
-    await expect(page.getByRole("heading", { name: /E2E Building/ })).toBeVisible({ timeout: 15000 });
+    await page.goto(`/admin/buildings/${building!.id}`);
     await page.getByRole("button", { name: "Add Lot Owner" }).click();
     await page.getByLabel("Lot Number").fill(uniqueLot);
     await page.getByLabel("Email").fill("lot1@e2e.com");
@@ -57,7 +57,10 @@ test.describe.serial("Admin Lot Owners", () => {
   });
 
   test("CSV import shows imported count", async ({ page, request }) => {
-    // Ensure the dedicated E2E Building exists before importing lot owners into it
+    // Use "E2E Building" explicitly — never buildings[0], which can be the
+    // "E2E Test Building" that the voting-flow tests depend on. The import
+    // deletes lot owners not present in the file, so targeting the wrong
+    // building would wipe out the E2E-1 lot owner needed for voting tests.
     await request.post("/api/admin/buildings/import", {
       multipart: {
         file: {
@@ -69,11 +72,10 @@ test.describe.serial("Admin Lot Owners", () => {
     });
     const buildingsRes = await request.get("/api/admin/buildings");
     const buildings = await buildingsRes.json() as { id: string; name: string }[];
-    const building = buildings.find((b) => b.name === "E2E Building")!;
+    const building = buildings.find((b) => b.name === "E2E Building");
+    expect(building).toBeDefined();
 
-    await page.goto(`/admin/buildings/${building.id}`);
-    // Wait for the building page to finish loading before interacting
-    await expect(page.getByRole("heading", { name: /E2E Building/ })).toBeVisible({ timeout: 15000 });
+    await page.goto(`/admin/buildings/${building!.id}`);
     const csvContent =
       "lot_number,email,unit_entitlement\nLOT-A,a@e2e.com,100\nLOT-B,b@e2e.com,200";
     const fileInput = page.getByLabel("Lot owners file");

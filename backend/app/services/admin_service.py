@@ -23,6 +23,7 @@ from app.models import (
     Building,
     EmailDelivery,
     EmailDeliveryStatus,
+    FinancialPosition,
     LotOwner,
     Motion,
     Vote,
@@ -302,6 +303,20 @@ def _normalise_lot_owner_fieldnames(fieldnames: list[str]) -> list[str]:
     return [_CSV_LOT_OWNER_ALIASES.get(f.strip().lower(), f.strip().lower()) for f in fieldnames]
 
 
+def _parse_financial_position(raw: str) -> FinancialPosition:
+    """Parse a financial position string from an import row.
+
+    Accepted values (case-insensitive): 'normal', 'in arrear', 'in_arrear'.
+    Blank/missing values default to 'normal'.
+    """
+    normalised = raw.strip().lower().replace(" ", "_")
+    if normalised == "" or normalised == "normal":
+        return FinancialPosition.normal
+    if normalised == "in_arrear":
+        return FinancialPosition.in_arrear
+    raise ValueError(f"Invalid financial_position value: '{raw}'")
+
+
 async def import_lot_owners_from_csv(
     building_id: uuid.UUID,
     content: bytes,
@@ -343,6 +358,7 @@ async def import_lot_owners_from_csv(
         lot_number = row.get("lot_number", "").strip()
         email = row.get("email", "").strip()
         unit_entitlement_raw = row.get("unit_entitlement", "").strip()
+        financial_position_raw = row.get("financial_position", "").strip()
 
         row_errors = []
 
@@ -374,6 +390,12 @@ async def import_lot_owners_from_csv(
                     f"Row {i}: unit_entitlement must be an integer, got '{unit_entitlement_raw}'"
                 )
 
+        financial_position = FinancialPosition.normal
+        try:
+            financial_position = _parse_financial_position(financial_position_raw)
+        except ValueError as e:
+            row_errors.append(f"Row {i}: {e}")
+
         if row_errors:
             errors.extend(row_errors)
         else:
@@ -382,6 +404,7 @@ async def import_lot_owners_from_csv(
                     "lot_number": lot_number,
                     "email": email,
                     "unit_entitlement": unit_entitlement,
+                    "financial_position": financial_position,
                 }
             )
 
@@ -405,12 +428,14 @@ async def import_lot_owners_from_csv(
             lo = existing[row_data["lot_number"]]
             lo.email = row_data["email"]
             lo.unit_entitlement = row_data["unit_entitlement"]
+            lo.financial_position = row_data["financial_position"]
         else:
             db.add(LotOwner(
                 building_id=building_id,
                 lot_number=row_data["lot_number"],
                 email=row_data["email"],
                 unit_entitlement=row_data["unit_entitlement"],
+                financial_position=row_data["financial_position"],
             ))
 
     # Delete lot owners that are no longer in the import
@@ -464,6 +489,9 @@ async def import_lot_owners_from_excel(
     lot_idx = headers.index("lot#")
     uoe2_idx = headers.index("uoe2")
     email_idx = headers.index("email")
+    fp_idx = headers.index("financial position") if "financial position" in headers else (
+        headers.index("financial_position") if "financial_position" in headers else None
+    )
 
     data_rows = list(rows_iter)
     wb.close()
@@ -487,6 +515,7 @@ async def import_lot_owners_from_excel(
         lot_number = _cell(lot_idx)
         email = _cell(email_idx)
         unit_entitlement_raw = _cell(uoe2_idx)
+        financial_position_raw = _cell(fp_idx) if fp_idx is not None else ""
 
         row_errors = []
 
@@ -518,6 +547,12 @@ async def import_lot_owners_from_excel(
                     f"Row {row_num}: unit_entitlement must be an integer, got '{unit_entitlement_raw}'"
                 )
 
+        financial_position = FinancialPosition.normal
+        try:
+            financial_position = _parse_financial_position(financial_position_raw)
+        except ValueError as e:
+            row_errors.append(f"Row {row_num}: {e}")
+
         if row_errors:
             errors.extend(row_errors)
         else:
@@ -526,6 +561,7 @@ async def import_lot_owners_from_excel(
                     "lot_number": lot_number,
                     "email": email,
                     "unit_entitlement": unit_entitlement,
+                    "financial_position": financial_position,
                 }
             )
 
@@ -549,12 +585,14 @@ async def import_lot_owners_from_excel(
             lo = existing[row_data["lot_number"]]
             lo.email = row_data["email"]
             lo.unit_entitlement = row_data["unit_entitlement"]
+            lo.financial_position = row_data["financial_position"]
         else:
             db.add(LotOwner(
                 building_id=building_id,
                 lot_number=row_data["lot_number"],
                 email=row_data["email"],
                 unit_entitlement=row_data["unit_entitlement"],
+                financial_position=row_data["financial_position"],
             ))
 
     # Delete lot owners that are no longer in the import
@@ -592,6 +630,7 @@ async def add_lot_owner(
         lot_number=data.lot_number,
         email=data.email,
         unit_entitlement=data.unit_entitlement,
+        financial_position=FinancialPosition(data.financial_position),
     )
     db.add(lot_owner)
     await db.commit()
@@ -615,6 +654,8 @@ async def update_lot_owner(
         lot_owner.email = data.email
     if data.unit_entitlement is not None:
         lot_owner.unit_entitlement = data.unit_entitlement
+    if data.financial_position is not None:
+        lot_owner.financial_position = FinancialPosition(data.financial_position)
 
     await db.commit()
     await db.refresh(lot_owner)
@@ -952,3 +993,38 @@ async def resend_report(agm_id: uuid.UUID, db: AsyncSession) -> dict:
     logger.info("Email delivery triggered for AGM %s", agm_id)
 
     return {"queued": True}
+
+
+async def reset_agm_ballots(agm_id: uuid.UUID, db: AsyncSession) -> dict:
+    """Delete all ballot submissions (and their associated submitted votes) for an AGM.
+
+    Intended for E2E test setup only — clears submitted votes so the test
+    suite can re-run the voting flow without hitting a 409 conflict.
+    Returns the number of ballot submissions deleted.
+    """
+    result = await db.execute(select(AGM).where(AGM.id == agm_id))
+    agm = result.scalar_one_or_none()
+    if agm is None:
+        raise HTTPException(status_code=404, detail="AGM not found")
+
+    # Count submissions before deleting so we can return the count.
+    count_result = await db.execute(
+        select(func.count(BallotSubmission.id)).where(BallotSubmission.agm_id == agm_id)
+    )
+    deleted_count = count_result.scalar_one()
+
+    # Delete submitted votes for this AGM (must come before ballot submissions
+    # to avoid any application-level FK issues, even though there is no DB-level
+    # FK from votes → ballot_submissions).
+    await db.execute(
+        delete(Vote).where(Vote.agm_id == agm_id, Vote.status == VoteStatus.submitted)
+    )
+
+    # Delete all ballot submissions for this AGM.
+    await db.execute(
+        delete(BallotSubmission).where(BallotSubmission.agm_id == agm_id)
+    )
+
+    await db.commit()
+
+    return {"deleted": deleted_count}

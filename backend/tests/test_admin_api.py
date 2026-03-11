@@ -1962,6 +1962,218 @@ class TestResendReport:
 
 
 # ---------------------------------------------------------------------------
+# DELETE /api/admin/agms/{agm_id}/ballots
+# ---------------------------------------------------------------------------
+
+
+class TestResetAGMBallots:
+    async def _create_agm_with_ballot(
+        self, db_session: AsyncSession, name: str
+    ) -> tuple[AGM, LotOwner, Motion]:
+        b = Building(name=name, manager_email=f"reset_{name}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(
+            building_id=b.id,
+            lot_number="RESET-1",
+            email="reset-voter@test.com",
+            unit_entitlement=10,
+        )
+        db_session.add(lo)
+        await db_session.flush()
+
+        agm = AGM(
+            building_id=b.id,
+            title=f"Reset Ballots AGM {name}",
+            status=AGMStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(agm_id=agm.id, title="Reset Motion", order_index=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        # Add a submitted vote + ballot submission
+        vote = Vote(
+            agm_id=agm.id,
+            motion_id=motion.id,
+            voter_email="reset-voter@test.com",
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(vote)
+        await db_session.flush()
+
+        submission = BallotSubmission(
+            agm_id=agm.id,
+            voter_email="reset-voter@test.com",
+        )
+        db_session.add(submission)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        return agm, lo, motion
+
+    # --- Happy path ---
+
+    async def test_reset_ballots_deletes_submissions_and_returns_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm, _lo, _motion = await self._create_agm_with_ballot(db_session, "Happy Reset")
+        response = await client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["deleted"] == 1
+
+        # Verify ballot submission is gone
+        subs = await db_session.execute(
+            select(BallotSubmission).where(BallotSubmission.agm_id == agm.id)
+        )
+        assert subs.scalars().all() == []
+
+    async def test_reset_ballots_deletes_submitted_votes(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm, _lo, _motion = await self._create_agm_with_ballot(db_session, "Vote Delete Reset")
+        response = await client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 200
+
+        # Verify submitted votes are gone
+        votes = await db_session.execute(
+            select(Vote).where(Vote.agm_id == agm.id, Vote.status == VoteStatus.submitted)
+        )
+        assert votes.scalars().all() == []
+
+    async def test_reset_ballots_on_agm_with_no_submissions_returns_zero(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="Empty Reset Building", manager_email="empty_reset@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = AGM(
+            building_id=b.id,
+            title="Empty Reset AGM",
+            status=AGMStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.commit()
+
+        response = await client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 0
+
+    async def test_reset_ballots_preserves_draft_votes(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="Draft Preserve Building", manager_email="draft_pres@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = AGM(
+            building_id=b.id,
+            title="Draft Preserve AGM",
+            status=AGMStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(agm_id=agm.id, title="Draft Motion", order_index=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        draft_vote = Vote(
+            agm_id=agm.id,
+            motion_id=motion.id,
+            voter_email="drafter@test.com",
+            choice=VoteChoice.no,
+            status=VoteStatus.draft,
+        )
+        db_session.add(draft_vote)
+        await db_session.commit()
+
+        response = await client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 0
+
+        # Draft vote should still be present
+        remaining = await db_session.execute(
+            select(Vote).where(Vote.agm_id == agm.id, Vote.status == VoteStatus.draft)
+        )
+        assert len(remaining.scalars().all()) == 1
+
+    async def test_reset_multiple_submissions_deletes_all(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="Multi Reset Building", manager_email="multi_reset@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = AGM(
+            building_id=b.id,
+            title="Multi Reset AGM",
+            status=AGMStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(agm_id=agm.id, title="Multi Motion", order_index=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        for i in range(3):
+            email = f"multi-voter-{i}@test.com"
+            db_session.add(
+                Vote(
+                    agm_id=agm.id,
+                    motion_id=motion.id,
+                    voter_email=email,
+                    choice=VoteChoice.yes,
+                    status=VoteStatus.submitted,
+                )
+            )
+            db_session.add(BallotSubmission(agm_id=agm.id, voter_email=email))
+        await db_session.commit()
+
+        response = await client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 200
+        assert response.json()["deleted"] == 3
+
+    # --- State / precondition errors ---
+
+    async def test_reset_ballots_not_found_returns_404(self, client: AsyncClient):
+        response = await client.delete(f"/api/admin/agms/{uuid.uuid4()}/ballots")
+        assert response.status_code == 404
+
+    # --- Edge cases ---
+
+    async def test_reset_ballots_unauthenticated_returns_401(
+        self, auth_client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="Unauth Reset Building", manager_email="unauth_reset@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = AGM(
+            building_id=b.id,
+            title="Unauth Reset AGM",
+            status=AGMStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.commit()
+
+        response = await auth_client.delete(f"/api/admin/agms/{agm.id}/ballots")
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Schema unit tests (for coverage of schema validators)
 # ---------------------------------------------------------------------------
 
@@ -3373,3 +3585,267 @@ class TestMotionType:
             voter_lists=voter_lists,
         )
         assert md.motion_type == MotionType.general
+
+
+# ---------------------------------------------------------------------------
+# Financial position — new field tests (US-V02 / US-V10)
+# ---------------------------------------------------------------------------
+
+
+class TestFinancialPosition:
+    """Tests for the financial_position field on lot owners."""
+
+    # --- Schema validators ---
+
+    def test_lot_owner_create_invalid_financial_position_raises(self):
+        from pydantic import ValidationError
+
+        from app.schemas.admin import LotOwnerCreate
+
+        with pytest.raises(ValidationError):
+            LotOwnerCreate(
+                lot_number="L1",
+                email="x@test.com",
+                unit_entitlement=10,
+                financial_position="INVALID",
+            )
+
+    def test_lot_owner_update_invalid_financial_position_raises(self):
+        from pydantic import ValidationError
+
+        from app.schemas.admin import LotOwnerUpdate
+
+        with pytest.raises(ValidationError):
+            LotOwnerUpdate(financial_position="INVALID")
+
+    def test_lot_owner_update_financial_position_only_valid(self):
+        from app.schemas.admin import LotOwnerUpdate
+
+        obj = LotOwnerUpdate(financial_position="in_arrear")
+        assert obj.financial_position == "in_arrear"
+
+    # --- _parse_financial_position helper ---
+
+    def test_parse_financial_position_in_arrear(self):
+        from app.services.admin_service import _parse_financial_position
+        from app.models import FinancialPosition
+
+        result = _parse_financial_position("In Arrear")
+        assert result == FinancialPosition.in_arrear
+
+    def test_parse_financial_position_in_arrear_underscore(self):
+        from app.services.admin_service import _parse_financial_position
+        from app.models import FinancialPosition
+
+        result = _parse_financial_position("in_arrear")
+        assert result == FinancialPosition.in_arrear
+
+    def test_parse_financial_position_invalid_raises(self):
+        from app.services.admin_service import _parse_financial_position
+
+        with pytest.raises(ValueError, match="Invalid financial_position"):
+            _parse_financial_position("BOGUS")
+
+    # --- Add lot owner with financial_position ---
+
+    async def test_add_lot_owner_with_in_arrear(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "FP01",
+                "email": "fp@test.com",
+                "unit_entitlement": 100,
+                "financial_position": "in_arrear",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["financial_position"] == "in_arrear"
+
+    async def test_add_lot_owner_default_financial_position_is_normal(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={"lot_number": "FP02", "email": "fp2@test.com", "unit_entitlement": 50},
+        )
+        assert response.status_code == 201
+        assert response.json()["financial_position"] == "normal"
+
+    async def test_add_lot_owner_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "FP03",
+                "email": "fp3@test.com",
+                "unit_entitlement": 10,
+                "financial_position": "INVALID",
+            },
+        )
+        assert response.status_code == 422
+
+    # --- Update lot owner financial_position ---
+
+    async def test_update_financial_position_to_in_arrear(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP10",
+            email="fp10@test.com",
+            unit_entitlement=100,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+        await db_session.refresh(lo)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}",
+            json={"financial_position": "in_arrear"},
+        )
+        assert response.status_code == 200
+        assert response.json()["financial_position"] == "in_arrear"
+
+    async def test_update_financial_position_invalid_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP11",
+            email="fp11@test.com",
+            unit_entitlement=10,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+        await db_session.refresh(lo)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}",
+            json={"financial_position": "bad"},
+        )
+        assert response.status_code == 422
+
+    # --- List lot owners returns financial_position ---
+
+    async def test_list_lot_owners_returns_financial_position(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        from app.models import FinancialPosition
+
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP20",
+            email="fp20@test.com",
+            unit_entitlement=75,
+            financial_position=FinancialPosition.in_arrear,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        assert response.status_code == 200
+        owners = response.json()
+        fp_lot = next((o for o in owners if o["lot_number"] == "FP20"), None)
+        assert fp_lot is not None
+        assert fp_lot["financial_position"] == "in_arrear"
+
+    # --- CSV import with financial_position ---
+
+    async def test_csv_import_with_financial_position_column(
+        self, client: AsyncClient, building: Building
+    ):
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement", "financial_position"],
+            [
+                ["101", "a@test.com", "100", "normal"],
+                ["102", "b@test.com", "200", "In Arrear"],
+                ["103", "c@test.com", "50", ""],
+            ],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 200
+        assert response.json()["imported"] == 3
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        by_lot = {o["lot_number"]: o for o in owners}
+        assert by_lot["101"]["financial_position"] == "normal"
+        assert by_lot["102"]["financial_position"] == "in_arrear"
+        assert by_lot["103"]["financial_position"] == "normal"
+
+    async def test_csv_import_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement", "financial_position"],
+            [["101", "a@test.com", "100", "BOGUS"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 422
+
+    # --- Excel import with financial_position ---
+
+    async def test_excel_import_with_financial_position_column(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email", "Financial Position"],
+            [
+                ["201", 100, "x@test.com", "Normal"],
+                ["202", 200, "y@test.com", "In Arrear"],
+                ["203", 50, "z@test.com", ""],
+            ],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 200
+        assert response.json()["imported"] == 3
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        by_lot = {o["lot_number"]: o for o in owners}
+        assert by_lot["201"]["financial_position"] == "normal"
+        assert by_lot["202"]["financial_position"] == "in_arrear"
+        assert by_lot["203"]["financial_position"] == "normal"
+
+    async def test_excel_import_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email", "Financial Position"],
+            [["301", 100, "a@test.com", "INVALID"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 422
+
+    async def test_excel_import_without_financial_position_column_defaults_normal(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email"],
+            [["401", 100, "a@test.com"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 200
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        assert owners[0]["financial_position"] == "normal"
