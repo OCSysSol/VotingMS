@@ -1,6 +1,6 @@
 from app.models.base import Base, TimestampMixin
 from app.models.building import Building
-from app.models.lot_owner import LotOwner
+from app.models.lot_owner import LotOwner, FinancialPosition
 from app.models.agm import AGM, AGMStatus
 from app.models.motion import Motion
 from app.models.agm_lot_weight import AGMLotWeight
@@ -14,6 +14,7 @@ __all__ = [
     "TimestampMixin",
     "Building",
     "LotOwner",
+    "FinancialPosition",
     "AGM",
     "AGMStatus",
     "Motion",

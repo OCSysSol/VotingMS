@@ -58,6 +58,7 @@ class LotOwnerOut(BaseModel):
     lot_number: str
     email: str
     unit_entitlement: int
+    financial_position: str
 
     model_config = {"from_attributes": True}
 
@@ -66,6 +67,7 @@ class LotOwnerCreate(BaseModel):
     lot_number: str
     email: str
     unit_entitlement: int
+    financial_position: str = "normal"
 
     @field_validator("unit_entitlement")
     @classmethod
@@ -88,10 +90,18 @@ class LotOwnerCreate(BaseModel):
             raise ValueError("email must not be empty")
         return v
 
+    @field_validator("financial_position")
+    @classmethod
+    def financial_position_valid(cls, v: str) -> str:
+        if v not in ("normal", "in_arrear"):
+            raise ValueError("financial_position must be 'normal' or 'in_arrear'")
+        return v
+
 
 class LotOwnerUpdate(BaseModel):
     email: str | None = None
     unit_entitlement: int | None = None
+    financial_position: str | None = None
 
     @field_validator("unit_entitlement")
     @classmethod
@@ -100,10 +110,17 @@ class LotOwnerUpdate(BaseModel):
             raise ValueError("unit_entitlement must be >= 0")
         return v
 
+    @field_validator("financial_position")
+    @classmethod
+    def financial_position_valid(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("normal", "in_arrear"):
+            raise ValueError("financial_position must be 'normal' or 'in_arrear'")
+        return v
+
     @model_validator(mode="after")
     def at_least_one_field(self) -> "LotOwnerUpdate":
-        if self.email is None and self.unit_entitlement is None:
-            raise ValueError("At least one of email or unit_entitlement must be provided")
+        if self.email is None and self.unit_entitlement is None and self.financial_position is None:
+            raise ValueError("At least one of email, unit_entitlement, or financial_position must be provided")
         return self
 
 

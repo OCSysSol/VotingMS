@@ -3343,3 +3343,267 @@ class TestAdminAuth:
     async def test_logout_without_login_returns_ok(self, auth_client: AsyncClient):
         response = await auth_client.post("/api/admin/auth/logout")
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Financial position — new field tests (US-V02 / US-V10)
+# ---------------------------------------------------------------------------
+
+
+class TestFinancialPosition:
+    """Tests for the financial_position field on lot owners."""
+
+    # --- Schema validators ---
+
+    def test_lot_owner_create_invalid_financial_position_raises(self):
+        from pydantic import ValidationError
+
+        from app.schemas.admin import LotOwnerCreate
+
+        with pytest.raises(ValidationError):
+            LotOwnerCreate(
+                lot_number="L1",
+                email="x@test.com",
+                unit_entitlement=10,
+                financial_position="INVALID",
+            )
+
+    def test_lot_owner_update_invalid_financial_position_raises(self):
+        from pydantic import ValidationError
+
+        from app.schemas.admin import LotOwnerUpdate
+
+        with pytest.raises(ValidationError):
+            LotOwnerUpdate(financial_position="INVALID")
+
+    def test_lot_owner_update_financial_position_only_valid(self):
+        from app.schemas.admin import LotOwnerUpdate
+
+        obj = LotOwnerUpdate(financial_position="in_arrear")
+        assert obj.financial_position == "in_arrear"
+
+    # --- _parse_financial_position helper ---
+
+    def test_parse_financial_position_in_arrear(self):
+        from app.services.admin_service import _parse_financial_position
+        from app.models import FinancialPosition
+
+        result = _parse_financial_position("In Arrear")
+        assert result == FinancialPosition.in_arrear
+
+    def test_parse_financial_position_in_arrear_underscore(self):
+        from app.services.admin_service import _parse_financial_position
+        from app.models import FinancialPosition
+
+        result = _parse_financial_position("in_arrear")
+        assert result == FinancialPosition.in_arrear
+
+    def test_parse_financial_position_invalid_raises(self):
+        from app.services.admin_service import _parse_financial_position
+
+        with pytest.raises(ValueError, match="Invalid financial_position"):
+            _parse_financial_position("BOGUS")
+
+    # --- Add lot owner with financial_position ---
+
+    async def test_add_lot_owner_with_in_arrear(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "FP01",
+                "email": "fp@test.com",
+                "unit_entitlement": 100,
+                "financial_position": "in_arrear",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["financial_position"] == "in_arrear"
+
+    async def test_add_lot_owner_default_financial_position_is_normal(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={"lot_number": "FP02", "email": "fp2@test.com", "unit_entitlement": 50},
+        )
+        assert response.status_code == 201
+        assert response.json()["financial_position"] == "normal"
+
+    async def test_add_lot_owner_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "FP03",
+                "email": "fp3@test.com",
+                "unit_entitlement": 10,
+                "financial_position": "INVALID",
+            },
+        )
+        assert response.status_code == 422
+
+    # --- Update lot owner financial_position ---
+
+    async def test_update_financial_position_to_in_arrear(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP10",
+            email="fp10@test.com",
+            unit_entitlement=100,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+        await db_session.refresh(lo)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}",
+            json={"financial_position": "in_arrear"},
+        )
+        assert response.status_code == 200
+        assert response.json()["financial_position"] == "in_arrear"
+
+    async def test_update_financial_position_invalid_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP11",
+            email="fp11@test.com",
+            unit_entitlement=10,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+        await db_session.refresh(lo)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}",
+            json={"financial_position": "bad"},
+        )
+        assert response.status_code == 422
+
+    # --- List lot owners returns financial_position ---
+
+    async def test_list_lot_owners_returns_financial_position(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        from app.models import FinancialPosition
+
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="FP20",
+            email="fp20@test.com",
+            unit_entitlement=75,
+            financial_position=FinancialPosition.in_arrear,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        assert response.status_code == 200
+        owners = response.json()
+        fp_lot = next((o for o in owners if o["lot_number"] == "FP20"), None)
+        assert fp_lot is not None
+        assert fp_lot["financial_position"] == "in_arrear"
+
+    # --- CSV import with financial_position ---
+
+    async def test_csv_import_with_financial_position_column(
+        self, client: AsyncClient, building: Building
+    ):
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement", "financial_position"],
+            [
+                ["101", "a@test.com", "100", "normal"],
+                ["102", "b@test.com", "200", "In Arrear"],
+                ["103", "c@test.com", "50", ""],
+            ],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 200
+        assert response.json()["imported"] == 3
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        by_lot = {o["lot_number"]: o for o in owners}
+        assert by_lot["101"]["financial_position"] == "normal"
+        assert by_lot["102"]["financial_position"] == "in_arrear"
+        assert by_lot["103"]["financial_position"] == "normal"
+
+    async def test_csv_import_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement", "financial_position"],
+            [["101", "a@test.com", "100", "BOGUS"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 422
+
+    # --- Excel import with financial_position ---
+
+    async def test_excel_import_with_financial_position_column(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email", "Financial Position"],
+            [
+                ["201", 100, "x@test.com", "Normal"],
+                ["202", 200, "y@test.com", "In Arrear"],
+                ["203", 50, "z@test.com", ""],
+            ],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 200
+        assert response.json()["imported"] == 3
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        by_lot = {o["lot_number"]: o for o in owners}
+        assert by_lot["201"]["financial_position"] == "normal"
+        assert by_lot["202"]["financial_position"] == "in_arrear"
+        assert by_lot["203"]["financial_position"] == "normal"
+
+    async def test_excel_import_invalid_financial_position_returns_422(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email", "Financial Position"],
+            [["301", 100, "a@test.com", "INVALID"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 422
+
+    async def test_excel_import_without_financial_position_column_defaults_normal(
+        self, client: AsyncClient, building: Building
+    ):
+        excel_data = make_excel(
+            ["Lot#", "UOE2", "Email"],
+            [["401", 100, "a@test.com"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.xlsx", excel_data, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 200
+
+        owners_resp = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        owners = owners_resp.json()
+        assert owners[0]["financial_position"] == "normal"

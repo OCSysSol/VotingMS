@@ -9,6 +9,27 @@ interface LotOwnerTableProps {
   onEdit: (lotOwner: LotOwner) => void;
 }
 
+function FinancialPositionBadge({ position }: { position: string }) {
+  if (position === "in_arrear") {
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          padding: "2px 8px",
+          borderRadius: "12px",
+          background: "#f59e0b",
+          color: "#fff",
+          fontSize: "0.75rem",
+          fontWeight: 600,
+        }}
+      >
+        In Arrear
+      </span>
+    );
+  }
+  return <span style={{ color: "var(--text-muted, #888)", fontSize: "0.875rem" }}>Normal</span>;
+}
+
 export default function LotOwnerTable({ lotOwners, onEdit }: LotOwnerTableProps) {
   const [page, setPage] = useState(1);
 
@@ -24,6 +45,7 @@ export default function LotOwnerTable({ lotOwners, onEdit }: LotOwnerTableProps)
             <th>Lot Number</th>
             <th>Email</th>
             <th>Unit Entitlement</th>
+            <th>Financial Position</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -38,6 +60,9 @@ export default function LotOwnerTable({ lotOwners, onEdit }: LotOwnerTableProps)
                 {lo.unit_entitlement}
               </td>
               <td>
+                <FinancialPositionBadge position={lo.financial_position} />
+              </td>
+              <td>
                 <button className="btn btn--secondary" style={{ padding: "5px 14px", fontSize: "0.8rem" }} onClick={() => onEdit(lo)}>
                   Edit
                 </button>
@@ -46,7 +71,7 @@ export default function LotOwnerTable({ lotOwners, onEdit }: LotOwnerTableProps)
           ))}
           {lotOwners.length === 0 && (
             <tr>
-              <td colSpan={4} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
+              <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
                 No lot owners found.
               </td>
             </tr>

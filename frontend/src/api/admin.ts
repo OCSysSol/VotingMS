@@ -111,11 +111,13 @@ export interface LotOwnerCreateRequest {
   lot_number: string;
   email: string;
   unit_entitlement: number;
+  financial_position?: string;
 }
 
 export interface LotOwnerUpdateRequest {
   email?: string;
   unit_entitlement?: number;
+  financial_position?: string;
 }
 
 export interface MotionCreateRequest {

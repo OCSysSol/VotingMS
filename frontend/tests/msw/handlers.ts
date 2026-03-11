@@ -37,6 +37,7 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     lot_number: "1A",
     email: "owner1@example.com",
     unit_entitlement: 100,
+    financial_position: "normal",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -46,6 +47,7 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     lot_number: "2B",
     email: "owner2@example.com",
     unit_entitlement: 200,
+    financial_position: "normal",
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
   },
@@ -200,6 +202,7 @@ export const adminHandlers = [
       lot_number: body?.lot_number ?? "NEW",
       email: "new@example.com",
       unit_entitlement: 50,
+      financial_position: "normal",
       created_at: "2024-03-01T00:00:00Z",
       updated_at: "2024-03-01T00:00:00Z",
     };
