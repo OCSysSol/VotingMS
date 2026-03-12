@@ -44,6 +44,7 @@ export default defineConfig({
         "src/utils/parseMotionsExcel.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/api/public.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/AGMSummaryPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/pages/vote/LotSelectionPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

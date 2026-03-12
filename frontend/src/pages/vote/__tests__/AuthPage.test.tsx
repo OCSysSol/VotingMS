@@ -57,12 +57,12 @@ describe("AuthPage", () => {
     });
   });
 
-  it("navigates to voting page on success (not already submitted)", async () => {
+  it("navigates to lot-selection page on success (not already submitted)", async () => {
     mockNavigate.mockClear();
     renderPage();
     await fillAndSubmit("42", "owner@example.com");
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/voting`);
+      expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/lot-selection`);
     });
   });
 
@@ -70,7 +70,7 @@ describe("AuthPage", () => {
     server.use(
       http.post(`${BASE}/api/auth/verify`, () =>
         HttpResponse.json({
-          lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: true }],
+          lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: true, is_proxy: false }],
           voter_email: "owner@example.com",
           agm_status: "open",
         })
@@ -88,7 +88,7 @@ describe("AuthPage", () => {
     server.use(
       http.post(`${BASE}/api/auth/verify`, () =>
         HttpResponse.json({
-          lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: false }],
+          lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: false, is_proxy: false }],
           voter_email: "owner@example.com",
           agm_status: "closed",
         })
@@ -123,7 +123,7 @@ describe("AuthPage", () => {
       http.post(`${BASE}/api/auth/verify`, () =>
         new Promise<Response>((res) => {
           resolve = () =>
-            res(HttpResponse.json({ lots: [{ lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false }], voter_email: "x@y.com", agm_status: "open" }) as Response);
+            res(HttpResponse.json({ lots: [{ lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false }], voter_email: "x@y.com", agm_status: "open" }) as Response);
         })
       )
     );

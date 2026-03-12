@@ -29,6 +29,7 @@ from app.models import (
     BallotSubmission,
     Building,
     LotOwner,
+    LotProxy,
     Motion,
     SessionRecord,
     Vote,
@@ -320,6 +321,8 @@ class TestAuthVerify:
         assert lot["lot_number"] == lo.lot_number
         assert "financial_position" in lot
         assert "already_submitted" in lot
+        assert "is_proxy" in lot
+        assert lot["is_proxy"] is False  # direct owner, not proxy
 
     # --- Input validation ---
 
@@ -1250,3 +1253,424 @@ class TestMyBallot:
         agm = building_with_agm["agm"]
         response = await client.get(f"/api/agm/{agm.id}/my-ballot")
         assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# US-PX04: Proxy auth tests
+# ---------------------------------------------------------------------------
+
+
+class TestProxyAuth:
+    """Tests for US-PX04: auth endpoint resolves proxy lots."""
+
+    # --- Happy path ---
+
+    async def test_proxy_voter_auth_succeeds_with_proxy_lot(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A proxy voter (no direct lot) can auth if they have a proxy nomination."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = "proxy@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": proxy_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["lots"]) == 1
+        assert data["lots"][0]["lot_owner_id"] == str(lo.id)
+        assert data["lots"][0]["is_proxy"] is True
+
+    async def test_direct_owner_has_is_proxy_false(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """A direct lot owner gets is_proxy=False."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        voter_email = building_with_agm["voter_email"]
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["lots"][0]["is_proxy"] is False
+
+    async def test_voter_sees_own_and_proxy_lots(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Voter who owns one lot and is proxy for another sees both."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        voter_email = building_with_agm["voter_email"]
+
+        # Add a second lot with voter as proxy
+        lo2 = LotOwner(building_id=building.id, lot_number="PROXY-LOT", unit_entitlement=50)
+        db_session.add(lo2)
+        await db_session.flush()
+        lo2_email = LotOwnerEmail(lot_owner_id=lo2.id, email="other@owner.com")
+        db_session.add(lo2_email)
+        lp = LotProxy(lot_owner_id=lo2.id, proxy_email=voter_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["lots"]) == 2
+        by_lot = {l["lot_owner_id"]: l for l in data["lots"]}
+        lo = building_with_agm["lot_owner"]
+        assert by_lot[str(lo.id)]["is_proxy"] is False
+        assert by_lot[str(lo2.id)]["is_proxy"] is True
+
+    async def test_voter_owns_lot_and_is_proxy_for_same_lot_deduplication(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """If voter is both owner and proxy for same lot, is_proxy=False (own lot wins)."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+
+        # Also set voter as proxy for their own lot
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=voter_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Lot appears once
+        assert len(data["lots"]) == 1
+        # Own lot takes precedence — is_proxy=False
+        assert data["lots"][0]["is_proxy"] is False
+
+    async def test_proxy_already_submitted_shows_already_submitted(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """already_submitted for proxy lot reflects BallotSubmission."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = "proxy2@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        bs = BallotSubmission(agm_id=agm.id, lot_owner_id=lo.id, voter_email=proxy_email)
+        db_session.add(bs)
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": proxy_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["lots"][0]["already_submitted"] is True
+        assert data["lots"][0]["is_proxy"] is True
+
+    # --- State / precondition errors ---
+
+    async def test_proxy_voter_no_proxy_records_returns_401(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """Email not in any owner or proxy list → 401."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": "notaproxy@test.com",
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Email address not found for this building"
+
+    async def test_proxy_in_different_building_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Proxy nomination in different building does not grant access."""
+        agm = building_with_agm["agm"]
+
+        b2 = Building(name="Other Proxy Building", manager_email="other@b2.com")
+        db_session.add(b2)
+        await db_session.flush()
+        lo2 = LotOwner(building_id=b2.id, lot_number="B2-1", unit_entitlement=10)
+        db_session.add(lo2)
+        await db_session.flush()
+        lo2_email = LotOwnerEmail(lot_owner_id=lo2.id, email="b2owner@test.com")
+        db_session.add(lo2_email)
+        proxy_email = "crossbuildingproxy@test.com"
+        lp = LotProxy(lot_owner_id=lo2.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        building = building_with_agm["building"]
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": proxy_email,
+                "building_id": str(building.id),
+                "agm_id": str(agm.id),
+            },
+        )
+        assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# US-PX06: Proxy audit trail on ballot submission tests
+# ---------------------------------------------------------------------------
+
+
+class TestProxyBallotSubmission:
+    """Tests for US-PX06: proxy audit trail on ballot submission."""
+
+    # --- Happy path ---
+
+    async def test_submit_as_proxy_stores_proxy_email_in_db(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When proxy submits, BallotSubmission.proxy_email = voter_email."""
+        from sqlalchemy import select as sa_select
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = "proxy_audit@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/agm/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Verify proxy_email stored in DB
+        result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.agm_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = result.scalar_one_or_none()
+        assert sub is not None
+        assert sub.proxy_email == proxy_email
+
+    async def test_submit_as_owner_proxy_email_is_null(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When owner submits directly, BallotSubmission.proxy_email = NULL."""
+        from sqlalchemy import select as sa_select
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/agm/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Verify proxy_email is NULL in DB
+        result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.agm_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = result.scalar_one_or_none()
+        assert sub is not None
+        assert sub.proxy_email is None
+
+    async def test_submit_multiple_lots_mixed_proxy_and_own(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Voter submitting own lot + proxy lot: proxy_email set only for proxy lot."""
+        from sqlalchemy import select as sa_select
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo_own = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+
+        # Add proxy lot
+        lo_proxy = LotOwner(building_id=building.id, lot_number="PROXY-SUBMIT", unit_entitlement=50)
+        db_session.add(lo_proxy)
+        await db_session.flush()
+        lo_proxy_email = LotOwnerEmail(lot_owner_id=lo_proxy.id, email="proxy_other@test.com")
+        db_session.add(lo_proxy_email)
+        lp = LotProxy(lot_owner_id=lo_proxy.id, proxy_email=voter_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/agm/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo_own.id), str(lo_proxy.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        subs_result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.agm_id == agm.id,
+                BallotSubmission.lot_owner_id.in_([lo_own.id, lo_proxy.id]),
+            )
+        )
+        subs = {s.lot_owner_id: s for s in subs_result.scalars().all()}
+        assert subs[lo_own.id].proxy_email is None
+        assert subs[lo_proxy.id].proxy_email == voter_email
+
+    # --- State / precondition errors ---
+
+    async def test_submit_for_unrelated_lot_returns_403(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Submitting for a lot the voter neither owns nor is proxy for → 403."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        voter_email = building_with_agm["voter_email"]
+
+        # Create unrelated lot
+        lo_other = LotOwner(building_id=building.id, lot_number="UNRELATED", unit_entitlement=10)
+        db_session.add(lo_other)
+        await db_session.flush()
+        lo_other_email = LotOwnerEmail(lot_owner_id=lo_other.id, email="unrelated@test.com")
+        db_session.add(lo_other_email)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/agm/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo_other.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 403
+
+    async def test_proxy_submit_response_does_not_expose_proxy_email(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """proxy_email is NOT exposed in the submit API response."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = "proxy_hidden@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/agm/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        # proxy_email should not appear in any part of the response
+        response_text = response.text
+        assert "proxy_email" not in response_text
+
+
+# ---------------------------------------------------------------------------
+# US-PX04 my-ballot with proxy lots
+# ---------------------------------------------------------------------------
+
+
+class TestMyBallotProxyLots:
+    """Test that get_my_ballot correctly handles proxy lots for remaining_lot_owner_ids."""
+
+    async def test_my_ballot_includes_proxy_lots_in_remaining(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Proxy lots appear in remaining_lot_owner_ids when not yet submitted."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        motions = building_with_agm["motions"]
+
+        # Create proxy lot (owned by someone else, voter is proxy)
+        lo_proxy = LotOwner(building_id=building.id, lot_number="REMAINING-PROXY", unit_entitlement=30)
+        db_session.add(lo_proxy)
+        await db_session.flush()
+        lo_proxy_owner_email = LotOwnerEmail(lot_owner_id=lo_proxy.id, email="realowner@test.com")
+        db_session.add(lo_proxy_owner_email)
+        lp = LotProxy(lot_owner_id=lo_proxy.id, proxy_email=voter_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        # Submit own lot only
+        for motion in motions:
+            vote = Vote(
+                agm_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        bs = BallotSubmission(agm_id=agm.id, lot_owner_id=lo.id, voter_email=voter_email)
+        db_session.add(bs)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/agm/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Proxy lot should appear in remaining
+        remaining = [str(lid) for lid in data["remaining_lot_owner_ids"]]
+        assert str(lo_proxy.id) in remaining
