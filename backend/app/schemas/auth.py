@@ -22,6 +22,7 @@ class LotInfo(BaseModel):
     lot_number: str
     financial_position: str
     already_submitted: bool
+    is_proxy: bool = False
 
 
 class AuthVerifyResponse(BaseModel):

@@ -75,10 +75,12 @@ export function AuthPage() {
         .map((l) => l.lot_owner_id);
       // Persist pending lot IDs in sessionStorage so VotingPage can submit on behalf of them
       sessionStorage.setItem(`agm_lots_${agmId}`, JSON.stringify(pendingLotIds));
+      // Persist full lot info (including is_proxy) for the lot selection screen
+      sessionStorage.setItem(`agm_lots_info_${agmId}`, JSON.stringify(data.lots));
       if (data.agm_status === "closed" || allSubmitted) {
         navigate(`/vote/${agmId}/confirmation`);
       } else {
-        navigate(`/vote/${agmId}/voting`);
+        navigate(`/vote/${agmId}/lot-selection`);
       }
     },
     onError: (error: Error) => {

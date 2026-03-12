@@ -13,6 +13,7 @@ from app.models.agm_lot_weight import AGMLotWeight, FinancialPositionSnapshot
 from app.models.ballot_submission import BallotSubmission
 from app.models.lot_owner import LotOwner
 from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot_proxy import LotProxy
 from app.models.motion import Motion, MotionType
 from app.models.vote import Vote, VoteChoice, VoteStatus
 from app.schemas.voting import (
@@ -171,6 +172,9 @@ async def submit_ballot(
         raise HTTPException(status_code=422, detail="At least one lot_owner_id is required")
 
     # Verify all lot_owner_ids belong to the authenticated voter_email
+    # (either as direct owner via LotOwnerEmail, or as proxy via LotProxy)
+    # Also determine proxy_email per lot for audit trail
+    proxy_email_by_lot: dict[uuid.UUID, str | None] = {}
     for lot_owner_id in lot_owner_ids:
         email_check = await db.execute(
             select(LotOwnerEmail).where(
@@ -178,11 +182,25 @@ async def submit_ballot(
                 LotOwnerEmail.email == voter_email,
             )
         )
-        if email_check.scalar_one_or_none() is None:
-            raise HTTPException(
-                status_code=403,
-                detail=f"Lot owner {lot_owner_id} does not belong to authenticated voter",
+        is_direct_owner = email_check.scalar_one_or_none() is not None
+
+        if is_direct_owner:
+            proxy_email_by_lot[lot_owner_id] = None
+        else:
+            # Check if voter is a proxy for this lot
+            proxy_check = await db.execute(
+                select(LotProxy).where(
+                    LotProxy.lot_owner_id == lot_owner_id,
+                    LotProxy.proxy_email == voter_email,
+                )
             )
+            is_proxy = proxy_check.scalar_one_or_none() is not None
+            if not is_proxy:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Lot owner {lot_owner_id} does not belong to authenticated voter",
+                )
+            proxy_email_by_lot[lot_owner_id] = voter_email
 
     # Check if any lots are already submitted
     existing_subs = await db.execute(
@@ -296,11 +314,12 @@ async def submit_ballot(
         motion_order = {m.id: m.order_index for m in motions}
         vote_items.sort(key=lambda v: motion_order.get(v.motion_id, 0))
 
-        # Insert BallotSubmission
+        # Insert BallotSubmission (set proxy_email for audit trail)
         submission = BallotSubmission(
             agm_id=agm_id,
             lot_owner_id=lot_owner_id,
             voter_email=voter_email,
+            proxy_email=proxy_email_by_lot.get(lot_owner_id),
             submitted_at=datetime.now(UTC),
         )
         db.add(submission)
@@ -340,6 +359,7 @@ async def get_my_ballot(
     building = building_result.scalar_one_or_none()
 
     # Find all lot owners for this voter email in this building
+    # (direct ownership via LotOwnerEmail, plus proxy lots via LotProxy)
     all_email_lots_result = await db.execute(
         select(LotOwnerEmail)
         .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
@@ -348,7 +368,21 @@ async def get_my_ballot(
             LotOwner.building_id == agm.building_id,
         )
     )
-    all_lot_owner_ids = [r.lot_owner_id for r in all_email_lots_result.scalars().all()]
+    direct_lot_owner_ids = [r.lot_owner_id for r in all_email_lots_result.scalars().all()]
+
+    all_proxy_lots_result = await db.execute(
+        select(LotProxy)
+        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
+        .where(
+            LotProxy.proxy_email == voter_email,
+            LotOwner.building_id == agm.building_id,
+        )
+    )
+    proxy_lot_owner_ids = [r.lot_owner_id for r in all_proxy_lots_result.scalars().all()]
+
+    # Merge without duplicates
+    all_lot_owner_ids_set = set(direct_lot_owner_ids) | set(proxy_lot_owner_ids)
+    all_lot_owner_ids = list(all_lot_owner_ids_set)
 
     # Get all submissions for this AGM and voter
     all_subs_result = await db.execute(

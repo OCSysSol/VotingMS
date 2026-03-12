@@ -25,6 +25,7 @@ export interface LotInfo {
   lot_number: string;
   financial_position: string;
   already_submitted: boolean;
+  is_proxy: boolean;
 }
 
 export interface AuthVerifyResponse {

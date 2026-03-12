@@ -13,6 +13,7 @@ from app.models.agm import AGM, AGMStatus
 from app.models.ballot_submission import BallotSubmission
 from app.models.lot_owner import LotOwner
 from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot_proxy import LotProxy
 from app.schemas.auth import AuthVerifyRequest, AuthVerifyResponse, LotInfo
 from app.services.auth_service import create_session
 
@@ -27,10 +28,11 @@ async def verify_auth(
 ) -> AuthVerifyResponse:
     """
     Authenticate a voter by email + building_id.
-    Looks up all lot owners for this building that have the given email.
-    Returns the list of lots associated with that email along with their submission status.
+    Looks up all lot owners for this building that have the given email (direct ownership)
+    AND lots where this email is a nominated proxy.
+    Returns the merged list of lots along with their submission status.
     """
-    # 1. Find all LotOwnerEmail records matching email for this building
+    # 1. Find all LotOwnerEmail records matching email for this building (direct owners)
     emails_result = await db.execute(
         select(LotOwnerEmail)
         .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
@@ -40,14 +42,30 @@ async def verify_auth(
         )
     )
     email_records = list(emails_result.scalars().all())
+    direct_lot_owner_ids: set[uuid.UUID] = {er.lot_owner_id for er in email_records}
 
-    if not email_records:
+    # 2. Find all LotProxy records where proxy_email matches and lot is in this building
+    proxy_result = await db.execute(
+        select(LotProxy)
+        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
+        .where(
+            LotProxy.proxy_email == request.email,
+            LotOwner.building_id == request.building_id,
+        )
+    )
+    proxy_records = list(proxy_result.scalars().all())
+    proxy_lot_owner_ids: set[uuid.UUID] = {pr.lot_owner_id for pr in proxy_records}
+
+    # 3. Merge: union of direct and proxy lots
+    all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
+
+    if not all_lot_owner_ids:
         raise HTTPException(
             status_code=401,
             detail="Email address not found for this building",
         )
 
-    # 2. Verify AGM belongs to building_id
+    # 4. Verify AGM belongs to building_id
     agm_result = await db.execute(
         select(AGM).where(
             AGM.id == request.agm_id,
@@ -58,40 +76,41 @@ async def verify_auth(
     if agm is None:
         raise HTTPException(status_code=404, detail="AGM not found for this building")
 
-    # 3. Build lot info for each lot owner linked to this email
-    lot_owner_ids = [er.lot_owner_id for er in email_records]
-
+    # 5. Fetch all relevant LotOwner records
     lots_result = await db.execute(
-        select(LotOwner).where(LotOwner.id.in_(lot_owner_ids))
+        select(LotOwner).where(LotOwner.id.in_(all_lot_owner_ids))
     )
     lot_owners = {lo.id: lo for lo in lots_result.scalars().all()}
 
-    # 4. Check submissions per lot owner
+    # 6. Check submissions per lot owner
     submissions_result = await db.execute(
         select(BallotSubmission).where(
             BallotSubmission.agm_id == request.agm_id,
-            BallotSubmission.lot_owner_id.in_(lot_owner_ids),
+            BallotSubmission.lot_owner_id.in_(all_lot_owner_ids),
         )
     )
     submitted_lot_ids: set[uuid.UUID] = {s.lot_owner_id for s in submissions_result.scalars().all()}
 
     lots = []
-    for lot_owner_id in lot_owner_ids:
+    for lot_owner_id in all_lot_owner_ids:
         lo = lot_owners.get(lot_owner_id)
         if lo is None:  # pragma: no cover  # FK constraint guarantees lot_owner always exists
             continue
+        # Direct owner takes precedence: is_proxy=False if voter is a direct owner of this lot
+        is_proxy = lot_owner_id not in direct_lot_owner_ids
         fp = lo.financial_position
         lots.append(LotInfo(
             lot_owner_id=lo.id,
             lot_number=lo.lot_number,
             financial_position=fp.value if hasattr(fp, "value") else fp,
             already_submitted=lo.id in submitted_lot_ids,
+            is_proxy=is_proxy,
         ))
 
     # Sort by lot_number for consistent ordering
     lots.sort(key=lambda l: l.lot_number)
 
-    # 5. Create session
+    # 7. Create session
     token = await create_session(
         db=db,
         voter_email=request.email,
