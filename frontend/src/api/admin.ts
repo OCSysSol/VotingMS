@@ -15,6 +15,17 @@ export interface LotOwnerImportResult {
   emails: number;
 }
 
+export interface ProxyImportResult {
+  upserted: number;
+  removed: number;
+  skipped: number;
+}
+
+export interface FinancialPositionImportResult {
+  updated: number;
+  skipped: number;
+}
+
 export interface MotionOut {
   id: string;
   title: string;
@@ -291,6 +302,48 @@ export async function importLotOwners(
     throw new Error(`HTTP ${response.status}: ${text}`);
   }
   return response.json() as Promise<LotOwnerImportResult>;
+}
+
+export async function importProxyNominations(
+  buildingId: string,
+  file: File
+): Promise<ProxyImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/admin/buildings/${buildingId}/lot-owners/import-proxies`,
+    {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ProxyImportResult>;
+}
+
+export async function importFinancialPositions(
+  buildingId: string,
+  file: File
+): Promise<FinancialPositionImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/admin/buildings/${buildingId}/lot-owners/import-financial-positions`,
+    {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<FinancialPositionImportResult>;
 }
 
 // ---------------------------------------------------------------------------

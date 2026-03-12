@@ -294,6 +294,27 @@ class BuildingArchiveOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Proxy nomination import schemas
+# ---------------------------------------------------------------------------
+
+
+class ProxyImportResult(BaseModel):
+    upserted: int
+    removed: int
+    skipped: int
+
+
+# ---------------------------------------------------------------------------
+# Financial position import schemas
+# ---------------------------------------------------------------------------
+
+
+class FinancialPositionImportResult(BaseModel):
+    updated: int
+    skipped: int
+
+
+# ---------------------------------------------------------------------------
 # Admin auth schemas
 # ---------------------------------------------------------------------------
 
