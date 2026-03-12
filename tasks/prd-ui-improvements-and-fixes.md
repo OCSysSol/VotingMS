@@ -92,16 +92,16 @@ A set of UI improvements and correctness fixes for the voting application:
 **Description:** As a developer, I need to rename the AGM entity throughout the database and backend so the codebase reflects the canonical "General Meeting" terminology.
 
 **Acceptance Criteria:**
-- [ ] Alembic migration renames the `agms` table to `general_meetings`
-- [ ] All FK columns named `agm_id` are renamed to `general_meeting_id` (on `motions`, `agm_lot_weights`, `ballot_submissions`, `votes`, `session_records`)
-- [ ] The `AGMStatus` enum type in PostgreSQL is renamed to `generalmeeting_status` (or equivalent)
-- [ ] All SQLAlchemy model classes are renamed: `AGM` → `GeneralMeeting`, `AGMLotWeight` → `GeneralMeetingLotWeight`
-- [ ] All Pydantic schema classes are updated accordingly (e.g. `AGMCreate` → `GeneralMeetingCreate`)
-- [ ] All FastAPI route paths are updated: `/api/admin/agms` → `/api/admin/general-meetings`, `/api/agm/{id}/...` → `/api/general-meeting/{id}/...`
-- [ ] All service and helper functions are renamed (e.g. `create_agm` → `create_general_meeting`)
-- [ ] All test files updated to use new names and route paths
-- [ ] Migration runs cleanly against dev and test DBs; existing data is preserved
-- [ ] Typecheck/lint passes
+- [x] Alembic migration renames the `agms` table to `general_meetings`
+- [x] All FK columns named `agm_id` are renamed to `general_meeting_id` (on `motions`, `agm_lot_weights`, `ballot_submissions`, `votes`, `session_records`)
+- [x] The `AGMStatus` enum type in PostgreSQL is renamed to `generalmeeting_status` (or equivalent)
+- [x] All SQLAlchemy model classes are renamed: `AGM` → `GeneralMeeting`, `AGMLotWeight` → `GeneralMeetingLotWeight`
+- [x] All Pydantic schema classes are updated accordingly (e.g. `AGMCreate` → `GeneralMeetingCreate`)
+- [x] All FastAPI route paths are updated: `/api/admin/agms` → `/api/admin/general-meetings`, `/api/agm/{id}/...` → `/api/general-meeting/{id}/...`
+- [x] All service and helper functions are renamed (e.g. `create_agm` → `create_general_meeting`)
+- [x] All test files updated to use new names and route paths
+- [x] Migration runs cleanly against dev and test DBs; existing data is preserved
+- [x] Typecheck/lint passes
 
 ---
 
