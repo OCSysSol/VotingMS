@@ -86,6 +86,7 @@ export const ADMIN_AGM_DETAIL: AGMDetail = {
   closed_at: null,
   total_eligible_voters: 5,
   total_submitted: 3,
+  total_entitlement: 450,
   motions: [
     {
       id: "m1",

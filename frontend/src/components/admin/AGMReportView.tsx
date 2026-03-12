@@ -3,6 +3,13 @@ import type { MotionDetail } from "../../api/admin";
 interface AGMReportViewProps {
   motions: MotionDetail[];
   agmTitle?: string;
+  totalEntitlement?: number;
+}
+
+function formatEntitlementPct(sum: number, total: number): string {
+  if (total === 0) return "—";
+  const pct = (sum / total) * 100;
+  return `${sum} (${pct.toFixed(1)}%)`;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -21,7 +28,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   not_eligible: "var(--text-muted)",
 };
 
-export default function AGMReportView({ motions, agmTitle }: AGMReportViewProps) {
+export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 }: AGMReportViewProps) {
   function handleExportCSV() {
     const rows: string[] = ["Motion,Category,Lot Number,Entitlement (UOE)"];
     for (const motion of motions) {
@@ -99,7 +106,7 @@ export default function AGMReportView({ motions, agmTitle }: AGMReportViewProps)
                     {motion.tally[cat].voter_count}
                   </td>
                   <td style={{ fontFamily: "'Overpass Mono', monospace" }}>
-                    {motion.tally[cat].entitlement_sum}
+                    {formatEntitlementPct(motion.tally[cat].entitlement_sum, totalEntitlement)}
                   </td>
                 </tr>
               ))}

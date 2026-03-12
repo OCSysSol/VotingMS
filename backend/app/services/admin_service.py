@@ -1093,6 +1093,8 @@ async def get_agm_detail(agm_id: uuid.UUID, db: AsyncSession) -> dict:
             }
         )
 
+    total_entitlement = sum(lot_entitlement.values())
+
     return {
         "id": agm.id,
         "building_name": building_name,
@@ -1103,6 +1105,7 @@ async def get_agm_detail(agm_id: uuid.UUID, db: AsyncSession) -> dict:
         "closed_at": agm.closed_at,
         "total_eligible_voters": total_eligible_voters,
         "total_submitted": total_submitted,
+        "total_entitlement": total_entitlement,
         "motions": motion_details,
     }
 

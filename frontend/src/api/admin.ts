@@ -101,6 +101,7 @@ export interface AGMDetail {
   closed_at: string | null;
   total_eligible_voters: number;
   total_submitted: number;
+  total_entitlement: number;
   motions: MotionDetail[];
 }
 

@@ -72,13 +72,36 @@ describe("AGMReportView", () => {
     expect(againstCells.length).toBeGreaterThan(0);
   });
 
-  it("renders voter counts and entitlement sums", () => {
-    render(<AGMReportView motions={motions} />);
-    // Yes tally: voter_count=2, entitlement_sum=200
+  it("renders voter counts", () => {
+    render(<AGMReportView motions={motions} totalEntitlement={1000} />);
+    // Yes tally for motion 1: voter_count=2
     const cells = screen.getAllByText("2");
     expect(cells.length).toBeGreaterThan(0);
-    const entitlementCells = screen.getAllByText("200");
-    expect(entitlementCells.length).toBeGreaterThan(0);
+  });
+
+  it("shows entitlement sum with percentage when totalEntitlement > 0", () => {
+    // Motion 1 yes: entitlement_sum=200, total=1000 → 20.0%
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={1000} />);
+    expect(screen.getByText("200 (20.0%)")).toBeInTheDocument();
+  });
+
+  it("shows entitlement sum with percentage rounded to 1 decimal", () => {
+    // Motion 1 no: entitlement_sum=100, total=300 → 33.3%
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={300} />);
+    expect(screen.getByText("100 (33.3%)")).toBeInTheDocument();
+  });
+
+  it("shows — for entitlement when totalEntitlement is 0", () => {
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={0} />);
+    // All categories should show — for entitlement
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThan(0);
+  });
+
+  it("shows — when totalEntitlement prop is omitted (defaults to 0)", () => {
+    render(<AGMReportView motions={[motions[0]]} />);
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThan(0);
   });
 
   it("renders motion description when present", () => {
