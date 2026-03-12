@@ -6,6 +6,8 @@ import type { Building, LotOwner } from "../../types";
 import LotOwnerTable from "../../components/admin/LotOwnerTable";
 import LotOwnerForm from "../../components/admin/LotOwnerForm";
 import LotOwnerCSVUpload from "../../components/admin/LotOwnerCSVUpload";
+import ProxyNominationsUpload from "../../components/admin/ProxyNominationsUpload";
+import FinancialPositionUpload from "../../components/admin/FinancialPositionUpload";
 
 export default function BuildingDetailPage() {
   const { buildingId } = useParams<{ buildingId: string }>();
@@ -140,6 +142,16 @@ export default function BuildingDetailPage() {
       </div>
 
       <LotOwnerCSVUpload
+        buildingId={buildingId!}
+        onSuccess={handleCSVSuccess}
+      />
+
+      <ProxyNominationsUpload
+        buildingId={buildingId!}
+        onSuccess={handleCSVSuccess}
+      />
+
+      <FinancialPositionUpload
         buildingId={buildingId!}
         onSuccess={handleCSVSuccess}
       />

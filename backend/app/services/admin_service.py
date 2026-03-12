@@ -27,6 +27,7 @@ from app.models import (
     FinancialPositionSnapshot,
     LotOwner,
     LotOwnerEmail,
+    LotProxy,
     Motion,
     Vote,
     VoteStatus,
@@ -1160,3 +1161,357 @@ async def reset_agm_ballots(agm_id: uuid.UUID, db: AsyncSession) -> dict:
     await db.commit()
 
     return {"deleted": deleted_count}
+
+
+# ---------------------------------------------------------------------------
+# Proxy nomination import (US-PX02)
+# ---------------------------------------------------------------------------
+
+
+def _parse_proxy_csv_rows(content: bytes) -> list[dict]:
+    """Parse CSV bytes into list of {lot_number, proxy_email} dicts.
+
+    Raises HTTPException 422 on missing headers.
+    """
+    text = content.decode("utf-8-sig")
+    raw_reader = csv.DictReader(io.StringIO(text))
+
+    if raw_reader.fieldnames is None:
+        raise HTTPException(status_code=422, detail="CSV has no headers")
+
+    normalised = {f.strip().lower() for f in raw_reader.fieldnames}
+    required = {"lot#", "proxy email"}
+    missing = required - normalised
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required CSV headers: {sorted(missing)}",
+        )
+
+    rows = []
+    for row in raw_reader:
+        lot_number = row.get("Lot#") or row.get("lot#") or ""
+        # Build a case-insensitive lookup
+        row_lower = {k.strip().lower(): v for k, v in row.items()}
+        lot_number = row_lower.get("lot#", "").strip()
+        proxy_email = row_lower.get("proxy email", "").strip()
+        rows.append({"lot_number": lot_number, "proxy_email": proxy_email})
+    return rows
+
+
+def _parse_proxy_excel_rows(content: bytes) -> list[dict]:
+    """Parse Excel bytes into list of {lot_number, proxy_email} dicts.
+
+    Raises HTTPException 422 on invalid file or missing headers.
+    """
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
+
+    ws = wb.worksheets[0]
+    rows_iter = ws.iter_rows(values_only=True)
+
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        raise HTTPException(status_code=422, detail="Excel file has no headers")
+
+    if header_row is None or all(v is None for v in header_row):  # pragma: no cover
+        raise HTTPException(status_code=422, detail="Excel file has no headers")
+
+    headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
+
+    required = {"lot#", "proxy email"}
+    missing = required - set(headers)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required Excel headers: {sorted(missing)}",
+        )
+
+    lot_idx = headers.index("lot#")
+    proxy_idx = headers.index("proxy email")
+
+    data_rows = list(rows_iter)
+    wb.close()
+
+    rows = []
+    for raw_row in data_rows:
+        if all(v is None or str(v).strip() == "" for v in raw_row):
+            continue
+
+        def _cell(idx: int) -> str:
+            if idx < len(raw_row) and raw_row[idx] is not None:
+                return str(raw_row[idx]).strip()
+            return ""
+
+        rows.append({
+            "lot_number": _cell(lot_idx),
+            "proxy_email": _cell(proxy_idx),
+        })
+    return rows
+
+
+async def import_proxies(
+    building_id: uuid.UUID,
+    rows: list[dict],
+    db: AsyncSession,
+) -> dict[str, int]:
+    """Upsert proxy nominations from parsed rows.
+
+    Each row: {lot_number: str, proxy_email: str}.
+    Blank proxy_email removes the nomination.
+    Unknown lot_number is skipped with a warning.
+    Returns {"upserted": N, "removed": N, "skipped": N}.
+    """
+    await get_building_or_404(building_id, db)
+
+    # Load all lot owners for this building keyed by lot_number
+    existing_result = await db.execute(
+        select(LotOwner).where(LotOwner.building_id == building_id)
+    )
+    lot_owner_map: dict[str, LotOwner] = {
+        lo.lot_number: lo for lo in existing_result.scalars().all()
+    }
+
+    upserted = 0
+    removed = 0
+    skipped = 0
+
+    for row in rows:
+        lot_number = row["lot_number"]
+        proxy_email = row["proxy_email"]
+
+        lot_owner = lot_owner_map.get(lot_number)
+        if lot_owner is None:
+            logger.warning(
+                "Proxy import: lot_number %r not found in building %s — skipping",
+                lot_number,
+                building_id,
+            )
+            skipped += 1
+            continue
+
+        # Load existing proxy for this lot owner
+        proxy_result = await db.execute(
+            select(LotProxy).where(LotProxy.lot_owner_id == lot_owner.id)
+        )
+        existing_proxy = proxy_result.scalar_one_or_none()
+
+        if proxy_email == "":
+            # Remove nomination
+            if existing_proxy is not None:
+                await db.delete(existing_proxy)
+                removed += 1
+        else:
+            # Upsert nomination
+            if existing_proxy is not None:
+                existing_proxy.proxy_email = proxy_email
+            else:
+                db.add(LotProxy(lot_owner_id=lot_owner.id, proxy_email=proxy_email))
+            upserted += 1
+
+    await db.commit()
+    return {"upserted": upserted, "removed": removed, "skipped": skipped}
+
+
+async def import_proxies_from_csv(
+    building_id: uuid.UUID,
+    content: bytes,
+    db: AsyncSession,
+) -> dict[str, int]:
+    rows = _parse_proxy_csv_rows(content)
+    return await import_proxies(building_id, rows, db)
+
+
+async def import_proxies_from_excel(
+    building_id: uuid.UUID,
+    content: bytes,
+    db: AsyncSession,
+) -> dict[str, int]:
+    rows = _parse_proxy_excel_rows(content)
+    return await import_proxies(building_id, rows, db)
+
+
+# ---------------------------------------------------------------------------
+# Financial position import (US-PX03)
+# ---------------------------------------------------------------------------
+
+
+def _parse_financial_position_import(raw: str) -> FinancialPosition | None:
+    """Parse a financial position string from an import row.
+
+    Accepted values (case-insensitive): 'Normal' -> normal, 'In Arrear' -> in_arrear.
+    Returns None if empty (should be skipped or flagged).
+    Raises ValueError on invalid value.
+    """
+    normalised = raw.strip().lower()
+    if normalised == "normal":
+        return FinancialPosition.normal
+    if normalised in ("in arrear", "in_arrear"):
+        return FinancialPosition.in_arrear
+    raise ValueError(f"Invalid Financial Position value: '{raw}'")
+
+
+def _parse_financial_position_csv_rows(content: bytes) -> list[dict]:
+    """Parse CSV bytes into list of {lot_number, financial_position_raw} dicts.
+
+    Raises HTTPException 422 on missing headers.
+    """
+    text = content.decode("utf-8-sig")
+    raw_reader = csv.DictReader(io.StringIO(text))
+
+    if raw_reader.fieldnames is None:
+        raise HTTPException(status_code=422, detail="CSV has no headers")
+
+    normalised = {f.strip().lower() for f in raw_reader.fieldnames}
+    required = {"lot#", "financial position"}
+    missing = required - normalised
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required CSV headers: {sorted(missing)}",
+        )
+
+    rows = []
+    for row in raw_reader:
+        row_lower = {k.strip().lower(): v for k, v in row.items()}
+        lot_number = row_lower.get("lot#", "").strip()
+        fp_raw = row_lower.get("financial position", "").strip()
+        rows.append({"lot_number": lot_number, "financial_position_raw": fp_raw})
+    return rows
+
+
+def _parse_financial_position_excel_rows(content: bytes) -> list[dict]:
+    """Parse Excel bytes into list of {lot_number, financial_position_raw} dicts.
+
+    Raises HTTPException 422 on invalid file or missing headers.
+    """
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
+
+    ws = wb.worksheets[0]
+    rows_iter = ws.iter_rows(values_only=True)
+
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        raise HTTPException(status_code=422, detail="Excel file has no headers")
+
+    if header_row is None or all(v is None for v in header_row):  # pragma: no cover
+        raise HTTPException(status_code=422, detail="Excel file has no headers")
+
+    headers = [str(h).strip().lower() if h is not None else "" for h in header_row]
+
+    required = {"lot#", "financial position"}
+    missing = required - set(headers)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Missing required Excel headers: {sorted(missing)}",
+        )
+
+    lot_idx = headers.index("lot#")
+    fp_idx = headers.index("financial position")
+
+    data_rows = list(rows_iter)
+    wb.close()
+
+    rows = []
+    for raw_row in data_rows:
+        if all(v is None or str(v).strip() == "" for v in raw_row):
+            continue
+
+        def _cell(idx: int) -> str:
+            if idx < len(raw_row) and raw_row[idx] is not None:
+                return str(raw_row[idx]).strip()
+            return ""
+
+        rows.append({
+            "lot_number": _cell(lot_idx),
+            "financial_position_raw": _cell(fp_idx),
+        })
+    return rows
+
+
+async def import_financial_positions(
+    building_id: uuid.UUID,
+    rows: list[dict],
+    db: AsyncSession,
+) -> dict[str, int]:
+    """Update financial positions from parsed rows.
+
+    Each row: {lot_number: str, financial_position_raw: str}.
+    Unknown lot_number is skipped.
+    Invalid financial_position_raw raises 422 with all offending rows listed.
+    Returns {"updated": N, "skipped": N}.
+    """
+    await get_building_or_404(building_id, db)
+
+    # Validate all rows first to collect errors
+    errors: list[str] = []
+    for i, row in enumerate(rows, start=2):
+        raw = row["financial_position_raw"]
+        if raw == "":
+            errors.append(f"Row {i}: Financial Position is empty")
+            continue
+        try:
+            _parse_financial_position_import(raw)
+        except ValueError as exc:
+            errors.append(f"Row {i}: {exc}")
+
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+
+    # Load all lot owners for this building keyed by lot_number
+    existing_result = await db.execute(
+        select(LotOwner).where(LotOwner.building_id == building_id)
+    )
+    lot_owner_map: dict[str, LotOwner] = {
+        lo.lot_number: lo for lo in existing_result.scalars().all()
+    }
+
+    updated = 0
+    skipped = 0
+
+    for row in rows:
+        lot_number = row["lot_number"]
+        fp_raw = row["financial_position_raw"]
+
+        lot_owner = lot_owner_map.get(lot_number)
+        if lot_owner is None:
+            logger.warning(
+                "Financial position import: lot_number %r not found in building %s — skipping",
+                lot_number,
+                building_id,
+            )
+            skipped += 1
+            continue
+
+        fp = _parse_financial_position_import(fp_raw)
+        lot_owner.financial_position = fp  # type: ignore[assignment]
+        updated += 1
+
+    await db.commit()
+    return {"updated": updated, "skipped": skipped}
+
+
+async def import_financial_positions_from_csv(
+    building_id: uuid.UUID,
+    content: bytes,
+    db: AsyncSession,
+) -> dict[str, int]:
+    rows = _parse_financial_position_csv_rows(content)
+    return await import_financial_positions(building_id, rows, db)
+
+
+async def import_financial_positions_from_excel(
+    building_id: uuid.UUID,
+    content: bytes,
+    db: AsyncSession,
+) -> dict[str, int]:
+    rows = _parse_financial_position_excel_rows(content)
+    return await import_financial_positions(building_id, rows, db)

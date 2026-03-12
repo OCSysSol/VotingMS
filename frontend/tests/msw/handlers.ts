@@ -3,6 +3,8 @@ import type { Building, LotOwner } from "../../src/types";
 import type {
   BuildingImportResult,
   LotOwnerImportResult,
+  ProxyImportResult,
+  FinancialPositionImportResult,
   AGMListItem,
   AGMDetail,
   AGMOut,
@@ -241,6 +243,14 @@ export const adminHandlers = [
 
   http.post(`${BASE}/api/admin/buildings/:buildingId/lot-owners/import`, () => {
     return HttpResponse.json<LotOwnerImportResult>({ imported: 5 });
+  }),
+
+  http.post(`${BASE}/api/admin/buildings/:buildingId/lot-owners/import-proxies`, () => {
+    return HttpResponse.json<ProxyImportResult>({ upserted: 3, removed: 1, skipped: 0 });
+  }),
+
+  http.post(`${BASE}/api/admin/buildings/:buildingId/lot-owners/import-financial-positions`, () => {
+    return HttpResponse.json<FinancialPositionImportResult>({ updated: 4, skipped: 0 });
   }),
 
   http.get(`${BASE}/api/admin/agms`, () => {

@@ -27,10 +27,12 @@ from app.schemas.admin import (
     BuildingCreate,
     BuildingImportResult,
     BuildingOut,
+    FinancialPositionImportResult,
     LotOwnerCreate,
     LotOwnerImportResult,
     LotOwnerOut,
     LotOwnerUpdate,
+    ProxyImportResult,
     ResendReportOut,
 )
 from app.services import admin_service
@@ -168,6 +170,44 @@ async def import_lot_owners(
     else:
         result = await admin_service.import_lot_owners_from_excel(building_id, content, db)
     return LotOwnerImportResult(**result)
+
+
+@router.post(
+    "/buildings/{building_id}/lot-owners/import-proxies",
+    response_model=ProxyImportResult,
+    status_code=status.HTTP_200_OK,
+)
+async def import_proxy_nominations(
+    building_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> ProxyImportResult:
+    fmt = _detect_file_format(file)
+    content = await file.read()
+    if fmt == "csv":
+        result = await admin_service.import_proxies_from_csv(building_id, content, db)
+    else:
+        result = await admin_service.import_proxies_from_excel(building_id, content, db)
+    return ProxyImportResult(**result)
+
+
+@router.post(
+    "/buildings/{building_id}/lot-owners/import-financial-positions",
+    response_model=FinancialPositionImportResult,
+    status_code=status.HTTP_200_OK,
+)
+async def import_financial_positions(
+    building_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> FinancialPositionImportResult:
+    fmt = _detect_file_format(file)
+    content = await file.read()
+    if fmt == "csv":
+        result = await admin_service.import_financial_positions_from_csv(building_id, content, db)
+    else:
+        result = await admin_service.import_financial_positions_from_excel(building_id, content, db)
+    return FinancialPositionImportResult(**result)
 
 
 @router.post(
