@@ -260,6 +260,7 @@ class AGMDetail(BaseModel):
     closed_at: datetime | None
     total_eligible_voters: int
     total_submitted: int
+    total_entitlement: int
     motions: list[MotionDetail]
 
 

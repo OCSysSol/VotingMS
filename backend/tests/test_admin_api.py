@@ -1632,8 +1632,19 @@ class TestGetAGMDetail:
         assert data["building_name"] == "Detail Building"
         assert "total_eligible_voters" in data
         assert "total_submitted" in data
+        assert "total_entitlement" in data
         assert "motions" in data
         assert "closed_at" in data
+
+    async def test_total_entitlement_is_sum_of_snapshots(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm, _, _ = await self._setup_agm_with_votes(db_session)
+        response = await client.get(f"/api/admin/agms/{agm.id}")
+        assert response.status_code == 200
+        data = response.json()
+        # lo1=100, lo2=80, lo3=30, lo4=200
+        assert data["total_entitlement"] == 410
 
     async def test_tally_yes_no_abstained_absent(
         self, client: AsyncClient, db_session: AsyncSession
