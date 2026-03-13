@@ -81,17 +81,28 @@ export default async function globalSetup(_config: FullConfig) {
   // still need to bypass Vercel Deployment Protection on preview URLs.
   await context.storageState({ path: path.join(authDir, "public.json") });
 
-  await page.goto("/admin/login", { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
-  await page.getByLabel("Password").fill(ADMIN_PASSWORD);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  try {
-    await page.waitForURL(/\/admin\/buildings/, { timeout: 30000 });
-  } catch {
+  // Retry the admin login: the first page load after Lambda cold start can
+  // take >30s and the login API response may timeout if the function is still
+  // initialising. Retry up to 3 times with a 10s pause between attempts.
+  let loginOk = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.goto("/admin/login", { waitUntil: "domcontentloaded" });
+    await page.getByLabel("Username").fill(ADMIN_USERNAME);
+    await page.getByLabel("Password").fill(ADMIN_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    try {
+      await page.waitForURL(/\/admin\/buildings/, { timeout: 60000 });
+      loginOk = true;
+      break;
+    } catch {
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 10000));
+    }
+  }
+  if (!loginOk) {
     const url = page.url();
     const content = await page.content();
     throw new Error(
-      `Admin login failed — stuck at ${url}\nPage content (first 500 chars):\n${content.slice(0, 500)}`
+      `Admin login failed after 3 attempts — stuck at ${url}\nPage content (first 500 chars):\n${content.slice(0, 500)}`
     );
   }
   await context.storageState({ path: path.join(authDir, "admin.json") });
