@@ -310,7 +310,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "voter@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -336,7 +335,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "cookie@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -362,7 +360,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "submitted@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -386,7 +383,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "lotinfo@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -413,7 +409,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "wrong@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -430,18 +425,16 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "  ",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
         assert response.status_code == 422
 
-    async def test_invalid_building_uuid_returns_422(self, transport):
+    async def test_invalid_general_meeting_uuid_returns_422(self, transport):
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "x@y.com",
-                "building_id": "not-a-uuid",
-                "general_meeting_id": str(uuid.uuid4()),
+                "general_meeting_id": "not-a-uuid",
             })
         assert response.status_code == 422
 
@@ -454,7 +447,9 @@ class TestAuthVerify:
 
     # --- State / precondition errors ---
 
-    async def test_agm_belongs_to_different_building_returns_404(self, transport, db_session: AsyncSession):
+    async def test_email_not_in_meeting_building_returns_401(self, transport, db_session: AsyncSession):
+        """Voter email exists in b1 but the meeting belongs to b2 — backend derives
+        building_id from the meeting (b2) and can't find the email there, so 401."""
         b1 = make_building("Building One Auth")
         b2 = make_building("Building Two Auth")
         db_session.add_all([b1, b2])
@@ -471,11 +466,11 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "e5@auth.com",
-                "building_id": str(b1.id),  # Authenticate against b1
-                "general_meeting_id": str(agm_b2.id),   # But GeneralMeeting is in b2
+                "general_meeting_id": str(agm_b2.id),   # GeneralMeeting is in b2
             })
 
-        assert response.status_code == 404
+        # Email exists only in b1; meeting is in b2 → email not found in b2 → 401
+        assert response.status_code == 401
 
     async def test_closed_agm_returns_200_with_closed_status(self, transport, db_session: AsyncSession):
         """Closed AGMs allow auth so lot owners can view their submission."""
@@ -494,7 +489,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "f6@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -528,7 +522,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "f7@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -553,8 +546,7 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "g7@auth.com",
-                "building_id": str(b2.id),  # Claim to be in b2
-                "general_meeting_id": str(agm.id),
+                "general_meeting_id": str(agm.id),  # GeneralMeeting is in b2; email only in b1
             })
 
         assert response.status_code == 401
@@ -580,7 +572,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             r = await client.post("/api/auth/verify", json={
                 "email": "multi@auth.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
         assert r.status_code == 200
@@ -605,7 +596,6 @@ class TestAuthVerify:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             response = await client.post("/api/auth/verify", json={
                 "email": "user+tag@domain.co",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
 
@@ -1522,7 +1512,6 @@ class TestFullJourney:
             # 1. Authenticate
             auth_resp = await client.post("/api/auth/verify", json={
                 "email": "journey@full.com",
-                "building_id": str(b.id),
                 "general_meeting_id": str(agm.id),
             })
             assert auth_resp.status_code == 200
