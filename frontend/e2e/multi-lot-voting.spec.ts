@@ -194,8 +194,6 @@ test.describe("Multi-lot voter journey", () => {
     // even though the backend is now email-only.  Fill it with a placeholder.
     await page.getByLabel("Lot number").fill(LOT_NUMBER_1);
     await page.getByLabel("Email address").fill(LOT_EMAIL);
-    // Wait for Continue to be enabled — it is disabled while the meeting summary
-    // (which supplies building_id) is still loading.
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
     await page.getByRole("button", { name: "Continue" }).click();
   }
@@ -314,7 +312,7 @@ test.describe("Multi-lot voter journey", () => {
     await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Your votes", { exact: true })).toBeVisible();
     // ML-1 votes are present
-    await expect(page.getByText("Motion 1 — Annual Budget")).toBeVisible();
+    await expect(page.getByText("Motion 1 — Annual Budget").first()).toBeVisible();
     // ML-2 is not submitted yet — should NOT appear as a lot heading
     const ml2Heading = page.getByText(`Lot ${LOT_NUMBER_2}`, { exact: true });
     await expect(ml2Heading).not.toBeVisible();

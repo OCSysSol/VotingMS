@@ -76,6 +76,7 @@ test.describe("Lot owner voting flow", () => {
     await expect(page.getByLabel("Lot number")).toBeVisible();
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled();
 
+
     // Wrong credentials
     await page.getByLabel("Lot number").fill("NONEXISTENT-9999");
     await page.getByLabel("Email address").fill("wrong@example.com");

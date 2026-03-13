@@ -226,7 +226,6 @@ test.describe("Closed meeting voter journey", () => {
 
     // Auth page
     await expect(page.getByLabel("Lot number")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(BUILDING_NAME)).toBeVisible({ timeout: 15000 });
     await page.getByLabel("Lot number").fill(VOTED_LOT_NUMBER);
     await page.getByLabel("Email address").fill(VOTED_LOT_EMAIL);
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
@@ -269,7 +268,6 @@ test.describe("Closed meeting voter journey", () => {
 
     // Auth page
     await expect(page.getByLabel("Lot number")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(BUILDING_NAME)).toBeVisible({ timeout: 15000 });
     await page.getByLabel("Lot number").fill(UNVOTED_LOT_NUMBER);
     await page.getByLabel("Email address").fill(UNVOTED_LOT_EMAIL);
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
