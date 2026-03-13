@@ -45,6 +45,10 @@ test.describe("Pending AGM voter-facing behaviour", () => {
       const res = await api.post("/api/admin/buildings", {
         data: { name: BUILDING_NAME, manager_email: "pending-mgr@test.com" },
       });
+      if (!res.ok()) {
+        const body = await res.text();
+        throw new Error(`Failed to create building (${res.status()}): ${body}`);
+      }
       building = (await res.json()) as { id: string; name: string };
     }
     const buildingId = building.id;
@@ -108,6 +112,10 @@ test.describe("Pending AGM voter-facing behaviour", () => {
         ],
       },
     });
+    if (!createRes.ok()) {
+      const body = await createRes.text();
+      throw new Error(`Failed to create pending AGM (${createRes.status()}): ${body}`);
+    }
     const newAgm = (await createRes.json()) as { id: string };
     seededAgmId = newAgm.id;
 
@@ -125,12 +133,11 @@ test.describe("Pending AGM voter-facing behaviour", () => {
     await expect(select).toBeVisible();
     await select.selectOption({ label: BUILDING_NAME });
 
-    // Wait for the meeting list to load
-    await expect(page.getByText(AGM_TITLE)).toBeVisible({ timeout: 15000 });
-
-    // The pending meeting should show the status badge "Pending"
-    const agmItem = page.locator("[data-testid^='agm-item-']").filter({ hasText: AGM_TITLE });
-    await expect(agmItem).toBeVisible();
+    // Wait for the meeting list to load — use the seeded AGM's data-testid to
+    // avoid strict-mode violations when previous test runs left stale records
+    // with the same title on the shared deployment.
+    const agmItem = page.getByTestId(`agm-item-${seededAgmId}`);
+    await expect(agmItem).toBeVisible({ timeout: 15000 });
     await expect(agmItem.getByTestId("status-badge")).toContainText("Pending");
 
     // The disabled "Voting Not Yet Open" button must be present

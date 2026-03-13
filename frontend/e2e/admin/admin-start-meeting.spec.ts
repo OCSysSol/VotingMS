@@ -45,6 +45,10 @@ test.describe("Admin Start Meeting button", () => {
       const res = await api.post("/api/admin/buildings", {
         data: { name: BUILDING_NAME, manager_email: "start-meeting-mgr@test.com" },
       });
+      if (!res.ok()) {
+        const body = await res.text();
+        throw new Error(`Failed to create building (${res.status()}): ${body}`);
+      }
       building = (await res.json()) as { id: string; name: string };
     }
     const buildingId = building.id;
@@ -97,6 +101,10 @@ test.describe("Admin Start Meeting button", () => {
           ],
         },
       });
+      if (!res.ok()) {
+        const body = await res.text();
+        throw new Error(`Failed to create AGM "${title}" (${res.status()}): ${body}`);
+      }
       const agm = (await res.json()) as { id: string };
       return agm.id;
     }
@@ -126,8 +134,10 @@ test.describe("Admin Start Meeting button", () => {
     await page.goto(`/admin/general-meetings/${pendingAgmId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-    // Status badge should read "Pending"
-    await expect(page.getByText("Pending")).toBeVisible({ timeout: 10000 });
+    // Status badge should read "Pending" — use exact match to avoid strict-mode
+    // violations from the meeting title (which also contains "Pending") and
+    // the share URL displayed on the page.
+    await expect(page.getByText("Pending", { exact: true })).toBeVisible({ timeout: 10000 });
 
     // "Start Meeting" button must be visible
     await expect(page.getByRole("button", { name: "Start Meeting" })).toBeVisible();
@@ -156,7 +166,7 @@ test.describe("Admin Start Meeting button", () => {
 
     // Dialog should close and the status badge should now read "Open"
     await expect(dialog).not.toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("Open")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Open", { exact: true })).toBeVisible({ timeout: 15000 });
 
     // "Start Meeting" button must no longer be visible
     await expect(page.getByRole("button", { name: "Start Meeting" })).not.toBeVisible();
@@ -170,7 +180,7 @@ test.describe("Admin Start Meeting button", () => {
 
     await page.goto(`/admin/general-meetings/${openAgmId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Open")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Open", { exact: true })).toBeVisible({ timeout: 10000 });
 
     await expect(page.getByRole("button", { name: "Start Meeting" })).not.toBeVisible();
   });
@@ -180,7 +190,7 @@ test.describe("Admin Start Meeting button", () => {
 
     await page.goto(`/admin/general-meetings/${closedAgmId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Closed")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Closed", { exact: true })).toBeVisible({ timeout: 10000 });
 
     await expect(page.getByRole("button", { name: "Start Meeting" })).not.toBeVisible();
   });
