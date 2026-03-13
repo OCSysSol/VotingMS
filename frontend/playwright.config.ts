@@ -8,7 +8,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  // Use 3 parallel workers when testing against a deployed URL in CI.
+  // The Lambda is warm after global-setup so concurrent workers are safe.
+  // Fall back to 1 worker for local CI runs without a deployed URL (rare),
+  // and use the Playwright default (# CPUs) for local dev.
+  workers: process.env.CI ? (isDeployed ? 3 : 1) : undefined,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
