@@ -45,7 +45,8 @@ test.describe("Admin Start Meeting button", () => {
       storageState: path.join(__dirname, "../.auth/admin.json"),
     });
 
-    // Create or find the building
+    // Create or find the building — re-fetch after a 409 in case the initial
+    // list call failed (Lambda cold start) and the building already exists.
     const buildingsRes = await api.get("/api/admin/buildings");
     const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
     let building = buildings.find((b) => b.name === BUILDING_NAME);
@@ -53,11 +54,20 @@ test.describe("Admin Start Meeting button", () => {
       const res = await api.post("/api/admin/buildings", {
         data: { name: BUILDING_NAME, manager_email: "start-meeting-mgr@test.com" },
       });
-      if (!res.ok()) {
+      if (res.status() === 409) {
+        // Building already exists — re-fetch the list to get its ID
+        const refetchRes = await api.get("/api/admin/buildings");
+        const refetchBuildings = (await refetchRes.json()) as { id: string; name: string }[];
+        building = refetchBuildings.find((b) => b.name === BUILDING_NAME);
+        if (!building) {
+          throw new Error("Building already exists (409) but could not be found in re-fetched list");
+        }
+      } else if (!res.ok()) {
         const body = await res.text();
         throw new Error(`Failed to create building (${res.status()}): ${body}`);
+      } else {
+        building = (await res.json()) as { id: string; name: string };
       }
-      building = (await res.json()) as { id: string; name: string };
     }
     const buildingId = building.id;
 
