@@ -28,6 +28,10 @@ let openAgmId = "";
 let closedAgmId = "";
 
 test.describe("Admin Start Meeting button", () => {
+  // Increase hook timeout: seeding requires multiple API calls against the
+  // shared Vercel Lambda which can be slow under concurrent load.
+  test.describe.configure({ timeout: 120000 });
+
   test.beforeAll(async () => {
     const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
 
