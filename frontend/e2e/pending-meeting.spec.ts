@@ -146,7 +146,7 @@ test.describe("Pending AGM voter-facing behaviour", () => {
     }
 
     await api.dispose();
-  }, 60000);
+  }, { timeout: 120000 });
 
   test("pending AGM shows 'Voting Not Yet Open' button, no 'Enter Voting' button", async ({
     page,

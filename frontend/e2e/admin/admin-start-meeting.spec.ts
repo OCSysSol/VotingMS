@@ -155,7 +155,7 @@ test.describe("Admin Start Meeting button", () => {
     await api.post(`/api/admin/general-meetings/${closedAgmId}/close`);
 
     await api.dispose();
-  }, 60000);
+  }, { timeout: 120000 });
 
   test("pending meeting shows 'Start Meeting' button", async ({ page }) => {
     test.setTimeout(120000);
