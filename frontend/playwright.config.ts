@@ -29,7 +29,7 @@ export default defineConfig({
     // Public / voting tests — use bypass cookie only (no admin session)
     {
       name: "public",
-      testMatch: /e2e\/(smoke|voting-flow)\.spec\.ts/,
+      testMatch: /e2e\/(?!admin\/).*\.spec\.ts/,
       use: {
         ...devices["Desktop Chrome"],
         storageState: "e2e/.auth/public.json",
