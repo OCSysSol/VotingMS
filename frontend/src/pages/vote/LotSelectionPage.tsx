@@ -32,6 +32,10 @@ export function LotSelectionPage() {
     }
   }, [meetingId]);
 
+  // Load building name and meeting title stored by AuthPage after successful auth
+  const buildingName = sessionStorage.getItem(`meeting_building_name_${meetingId}`) ?? "";
+  const meetingTitle = sessionStorage.getItem(`meeting_title_${meetingId}`) ?? "";
+
   const isMultiLot = lots.length > 1;
 
   // Initialise selectedIds to all pending lot IDs
@@ -88,6 +92,8 @@ export function LotSelectionPage() {
         ← Back
       </button>
       <div className="lot-selection">
+        {meetingTitle && <h2 className="lot-selection__meeting-title">{meetingTitle}</h2>}
+        {buildingName && <p className="lot-selection__building-name">{buildingName}</p>}
         <h1 className="lot-selection__title">Your Lots</h1>
         <p className="lot-selection__subtitle">
           {allSubmitted
