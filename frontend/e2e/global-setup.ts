@@ -95,6 +95,24 @@ export default async function globalSetup(_config: FullConfig) {
     timeout: 90000,
   });
 
+  // Warm up the Lambda: retry GET /api/admin/buildings until it returns 200.
+  // Vercel Serverless functions can crash immediately after a cold start and
+  // return 5xx for the first few requests; retrying here prevents global-setup
+  // from failing before any test runs.
+  {
+    let warmedUp = false;
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        const r = await api.get("/api/admin/buildings", { timeout: 15000 });
+        if (r.ok()) { warmedUp = true; break; }
+      } catch {
+        // timeout or network error — retry
+      }
+      await new Promise((r) => setTimeout(r, 5000));
+    }
+    if (!warmedUp) throw new Error("Lambda warmup failed — /api/admin/buildings did not return 200 after 12 attempts");
+  }
+
   // Ensure E2E building exists
   const buildingsRes = await api.get("/api/admin/buildings");
   const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
