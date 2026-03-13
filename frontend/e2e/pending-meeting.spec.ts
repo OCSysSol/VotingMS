@@ -159,7 +159,7 @@ test.describe("Pending AGM voter-facing behaviour", () => {
   test("pending AGM shows 'Voting Not Yet Open' button, no 'Enter Voting' button", async ({
     page,
   }) => {
-    test.setTimeout(120000);
+    test.setTimeout(60000);
     await page.goto("/");
 
     // Select the building
@@ -186,7 +186,7 @@ test.describe("Pending AGM voter-facing behaviour", () => {
   test("authenticating against a pending AGM redirects to home with informational message", async ({
     page,
   }) => {
-    test.setTimeout(120000);
+    test.setTimeout(60000);
 
     // Navigate directly to the auth page for the pending AGM
     await page.goto(`/vote/${seededAgmId}/auth`);

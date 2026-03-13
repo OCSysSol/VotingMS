@@ -9,10 +9,15 @@ on:
 
 jobs:
   e2e:
-    name: Playwright E2E tests
+    name: Playwright E2E tests (${{ matrix.shard }}/${{ matrix.total-shards }})
     # Only run when the deployment finished successfully
     if: github.event.deployment_status.state == 'success'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+        total-shards: [3]
 
     steps:
       - uses: actions/checkout@v4
@@ -27,23 +32,35 @@ jobs:
         working-directory: frontend
         run: npm ci
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        id: playwright-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install Playwright browsers
         working-directory: frontend
-        run: npx playwright install chromium --with-deps
+        run: |
+          if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install chromium --with-deps
+          fi
 
-      - name: Run full E2E suite
+      - name: Run E2E shard ${{ matrix.shard }}/${{ matrix.total-shards }}
         working-directory: frontend
         env:
           PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.target_url }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
           ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
           VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
-        run: npm run e2e
+        run: npx playwright test --shard=${{ matrix.shard }}/${{ matrix.total-shards }}
 
-      - name: Upload Playwright report
+      - name: Upload shard report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-${{ github.sha }}
+          name: playwright-report-shard-${{ matrix.shard }}-${{ github.sha }}
           path: frontend/playwright-report/
           retention-days: 14
