@@ -1,5 +1,5 @@
 {
-  "buildCommand": "cd frontend && npm install && npx vite build && cp -r dist ../api/static",
+  "buildCommand": "cd frontend && npm install && npx vite build && cp -r dist ../api/static && bash scripts/migrate.sh",
   "rewrites": [
     { "source": "/(.*)", "destination": "/api/index" }
   ]
