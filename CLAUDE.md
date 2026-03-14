@@ -135,6 +135,7 @@ Use this when a feature touches both `backend/` and `frontend/` with independent
 One slot governs all actions that trigger a Vercel deployment. **Both pushes and PR merges require the slot.**
 
 - Grant FIFO; reprioritise by urgency or risk if needed
+- **Never push a new branch while another E2E run is in progress** — pushing triggers a Vercel deployment which can interfere with the running E2E suite and cause spurious failures.
 - **Branch push**: hold from `git push` until E2E run completes (pass or fail)
 - **PR merge**: hold from merge until Vercel post-merge deployment completes (no E2E needed)
 - Agent with fixes rejoins the **back** of the queue
