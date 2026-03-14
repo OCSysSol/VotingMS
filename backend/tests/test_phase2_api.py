@@ -243,7 +243,6 @@ class TestAuthVerify:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -253,6 +252,8 @@ class TestAuthVerify:
         assert "lots" in data
         assert len(data["lots"]) == 1
         assert data["lots"][0]["already_submitted"] is False
+        assert data["building_name"] == building.name
+        assert data["meeting_title"] == agm.title
 
     async def test_valid_auth_already_submitted(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -260,7 +261,6 @@ class TestAuthVerify:
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
-        building = building_with_agm["building"]
 
         # Create a ballot submission for this lot owner
         bs = BallotSubmission(
@@ -275,7 +275,6 @@ class TestAuthVerify:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -288,13 +287,11 @@ class TestAuthVerify:
     ):
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
-        building = building_with_agm["building"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -307,13 +304,11 @@ class TestAuthVerify:
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
-        building = building_with_agm["building"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -333,13 +328,11 @@ class TestAuthVerify:
         self, client: AsyncClient, building_with_agm: dict
     ):
         agm = building_with_agm["agm"]
-        building = building_with_agm["building"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": "",
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -351,33 +344,49 @@ class TestAuthVerify:
         self, client: AsyncClient, building_with_agm: dict
     ):
         agm = building_with_agm["agm"]
-        building = building_with_agm["building"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": "wrong@email.com",
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
         assert response.status_code == 401
 
-    async def test_agm_not_found_for_building_returns_404(
-        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    async def test_agm_not_found_returns_404(
+        self, client: AsyncClient, building_with_agm: dict
     ):
         voter_email = building_with_agm["voter_email"]
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "general_meeting_id": str(uuid.uuid4()),
+            },
+        )
+        assert response.status_code == 404
+
+    async def test_building_id_derived_from_meeting(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """Backend derives building_id from GeneralMeeting; response includes building_name and meeting_title."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
         building = building_with_agm["building"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
-                "general_meeting_id": str(uuid.uuid4()),
+                "general_meeting_id": str(agm.id),
             },
         )
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.json()
+        assert data["building_name"] == building.name
+        assert data["meeting_title"] == agm.title
 
     async def test_closed_agm_returns_200_with_closed_status(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -402,7 +411,6 @@ class TestAuthVerify:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(closed_agm.id),
             },
         )
@@ -413,8 +421,6 @@ class TestAuthVerify:
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
         """An email that belongs to a different building returns 401."""
-        agm = building_with_agm["agm"]
-
         # Create a second building with no matching email
         b2 = Building(name="Other Building", manager_email="other@test.com")
         db_session.add(b2)
@@ -433,7 +439,6 @@ class TestAuthVerify:
             "/api/auth/verify",
             json={
                 "email": "voter@p2test.com",
-                "building_id": str(b2.id),
                 "general_meeting_id": str(agm2.id),
             },
         )
@@ -1430,7 +1435,6 @@ class TestProxyAuth:
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
         """A proxy voter (no direct lot) can auth if they have a proxy nomination."""
-        building = building_with_agm["building"]
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
 
@@ -1443,7 +1447,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": proxy_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1457,7 +1460,6 @@ class TestProxyAuth:
         self, client: AsyncClient, building_with_agm: dict
     ):
         """A direct lot owner gets is_proxy=False."""
-        building = building_with_agm["building"]
         agm = building_with_agm["agm"]
         voter_email = building_with_agm["voter_email"]
 
@@ -1465,7 +1467,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1495,7 +1496,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1511,7 +1511,6 @@ class TestProxyAuth:
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
         """If voter is both owner and proxy for same lot, is_proxy=False (own lot wins)."""
-        building = building_with_agm["building"]
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
@@ -1525,7 +1524,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": voter_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1540,7 +1538,6 @@ class TestProxyAuth:
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
         """already_submitted for proxy lot reflects BallotSubmission."""
-        building = building_with_agm["building"]
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
 
@@ -1555,7 +1552,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": proxy_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1570,14 +1566,12 @@ class TestProxyAuth:
         self, client: AsyncClient, building_with_agm: dict
     ):
         """Email not in any owner or proxy list → 401."""
-        building = building_with_agm["building"]
         agm = building_with_agm["agm"]
 
         response = await client.post(
             "/api/auth/verify",
             json={
                 "email": "notaproxy@test.com",
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1608,7 +1602,6 @@ class TestProxyAuth:
             "/api/auth/verify",
             json={
                 "email": proxy_email,
-                "building_id": str(building.id),
                 "general_meeting_id": str(agm.id),
             },
         )
@@ -1874,7 +1867,6 @@ class TestAuthVerifyEffectiveStatus:
             "/api/auth/verify",
             json={
                 "email": "effauth@voter.test",
-                "building_id": str(b.id),
                 "general_meeting_id": str(past_agm.id),
             },
         )
@@ -1908,7 +1900,6 @@ class TestAuthVerifyEffectiveStatus:
             "/api/auth/verify",
             json={
                 "email": "futauth@voter.test",
-                "building_id": str(b.id),
                 "general_meeting_id": str(future_agm.id),
             },
         )
@@ -1942,7 +1933,6 @@ class TestAuthVerifyEffectiveStatus:
             "/api/auth/verify",
             json={
                 "email": "openauth@voter.test",
-                "building_id": str(b.id),
                 "general_meeting_id": str(open_agm.id),
             },
         )

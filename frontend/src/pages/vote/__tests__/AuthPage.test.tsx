@@ -20,11 +20,11 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderPage(meetingId = AGM_ID, search = "") {
+function renderPage(meetingId = AGM_ID) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[`/vote/${meetingId}/auth${search}`]}>
+      <MemoryRouter initialEntries={[`/vote/${meetingId}/auth`]}>
         <Routes>
           <Route path="/vote/:meetingId/auth" element={<AuthPage />} />
         </Routes>
@@ -38,27 +38,19 @@ async function fillAndSubmit(lotNumber: string, email: string) {
   await waitFor(() => screen.getByLabelText("Lot number"));
   await user.type(screen.getByLabelText("Lot number"), lotNumber);
   await user.type(screen.getByLabelText("Email address"), email);
-  // Wait for Continue to be enabled — it is disabled while the meeting summary is loading
-  await waitFor(() => {
-    const btn = screen.getByRole("button", { name: "Continue" });
-    expect(btn).toBeEnabled();
-  });
+  // Continue is always enabled immediately — no loading gate
   await user.click(screen.getByRole("button", { name: "Continue" }));
 }
 
 describe("AuthPage", () => {
-  it("renders auth form with AGM title after loading", async () => {
+  it("renders 'Verify your identity' heading immediately", () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
+    expect(screen.getByRole("heading", { name: "Verify your identity" })).toBeInTheDocument();
   });
 
-  it("renders building name after loading", async () => {
+  it("Continue button is enabled immediately on render", () => {
     renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("Sunset Towers")).toBeInTheDocument();
-    });
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
   });
 
   it("navigates to lot-selection page on success (not already submitted)", async () => {
@@ -70,6 +62,16 @@ describe("AuthPage", () => {
     });
   });
 
+  it("stores building_name and meeting_title in sessionStorage on success", async () => {
+    mockNavigate.mockClear();
+    renderPage();
+    await fillAndSubmit("42", "owner@example.com");
+    await waitFor(() => {
+      expect(sessionStorage.getItem(`meeting_building_name_${AGM_ID}`)).toBe("Sunset Towers");
+      expect(sessionStorage.getItem(`meeting_title_${AGM_ID}`)).toBe("2024 AGM");
+    });
+  });
+
   it("navigates to confirmation when all lots already_submitted=true", async () => {
     server.use(
       http.post(`${BASE}/api/auth/verify`, () =>
@@ -77,6 +79,8 @@ describe("AuthPage", () => {
           lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: true, is_proxy: false }],
           voter_email: "owner@example.com",
           agm_status: "open",
+          building_name: "Sunset Towers",
+          meeting_title: "2024 AGM",
         })
       )
     );
@@ -95,11 +99,13 @@ describe("AuthPage", () => {
           lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: false, is_proxy: false }],
           voter_email: "owner@example.com",
           agm_status: "closed",
+          building_name: "Sunset Towers",
+          meeting_title: "2024 AGM",
         })
       )
     );
     mockNavigate.mockClear();
-    renderPage(AGM_ID, "?view=submission");
+    renderPage(AGM_ID);
 
     await fillAndSubmit("42", "owner@example.com");
     await waitFor(() => {
@@ -128,7 +134,7 @@ describe("AuthPage", () => {
       http.post(`${BASE}/api/auth/verify`, () =>
         new Promise<Response>((res) => {
           resolve = () =>
-            res(HttpResponse.json({ lots: [{ lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false }], voter_email: "x@y.com", agm_status: "open" }) as Response);
+            res(HttpResponse.json({ lots: [{ lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false }], voter_email: "x@y.com", agm_status: "open", building_name: "B", meeting_title: "T" }) as Response);
         })
       )
     );
@@ -137,8 +143,6 @@ describe("AuthPage", () => {
     await waitFor(() => screen.getByLabelText("Lot number"));
     await user.type(screen.getByLabelText("Lot number"), "1");
     await user.type(screen.getByLabelText("Email address"), "a@b.com");
-    // Wait for Continue to be enabled (summary query must finish first)
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Verifying..." })).toBeDisabled();
@@ -151,8 +155,6 @@ describe("AuthPage", () => {
     renderPage();
     await waitFor(() => screen.getByLabelText("Email address"));
     await user.type(screen.getByLabelText("Email address"), "a@b.com");
-    // Wait for Continue to be enabled (summary query must finish first)
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByText("Lot number is required")).toBeInTheDocument();
   });
@@ -162,8 +164,6 @@ describe("AuthPage", () => {
     renderPage();
     await waitFor(() => screen.getByLabelText("Lot number"));
     await user.type(screen.getByLabelText("Lot number"), "42");
-    // Wait for Continue to be enabled (summary query must finish first)
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(screen.getByText("Email address is required")).toBeInTheDocument();
   });
@@ -175,6 +175,8 @@ describe("AuthPage", () => {
           lots: [{ lot_owner_id: "lo1", lot_number: "42", financial_position: "normal", already_submitted: false, is_proxy: false }],
           voter_email: "owner@example.com",
           agm_status: "pending",
+          building_name: "Sunset Towers",
+          meeting_title: "2024 AGM",
         })
       )
     );
@@ -199,39 +201,8 @@ describe("AuthPage", () => {
     });
   });
 
-  it("disables Continue button while meeting summary is still loading", async () => {
-    let resolveSummary!: () => void;
-    server.use(
-      http.get(`${BASE}/api/general-meeting/${AGM_ID}/summary`, () =>
-        new Promise<Response>((res) => {
-          resolveSummary = () =>
-            res(HttpResponse.json({
-              general_meeting_id: AGM_ID,
-              building_id: "b1",
-              title: "Test AGM",
-              status: "open",
-              meeting_at: "2024-01-01T00:00:00Z",
-              voting_closes_at: "2024-01-01T02:00:00Z",
-              building_name: "Test Building",
-              motions: [],
-            }) as Response);
-        })
-      )
-    );
+  it("renders back button", () => {
     renderPage();
-    // Form renders but Continue is disabled while summary is in-flight
-    await waitFor(() => screen.getByLabelText("Lot number"));
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
-    resolveSummary();
-    // After summary resolves, Continue becomes enabled
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
-    });
-  });
-
-  it("renders back button", async () => {
-    renderPage();
-    await waitFor(() => screen.getByLabelText("Lot number"));
     expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
   });
 
@@ -242,36 +213,5 @@ describe("AuthPage", () => {
     await waitFor(() => screen.getByLabelText("Lot number"));
     await user.click(screen.getByRole("button", { name: "← Back" }));
     expect(mockNavigate).toHaveBeenCalledWith("/");
-  });
-
-  it("handles meeting summary fetch error gracefully (shows Loading...)", async () => {
-    // Meeting summary fetch fails — building not found, form shows "Loading..."
-    server.use(
-      http.get(`${BASE}/api/general-meeting/${AGM_ID}/summary`, () => HttpResponse.error())
-    );
-    renderPage();
-    await waitFor(() => {
-      // After summary fetch fails, title stays "Loading..."
-      expect(screen.getByText("Loading...")).toBeInTheDocument();
-    });
-  });
-
-  it("shows error when submitted before building is found (missing context)", async () => {
-    // Meeting summary fetch fails so foundBuildingId stays null
-    server.use(
-      http.get(`${BASE}/api/general-meeting/${AGM_ID}/summary`, () => HttpResponse.error())
-    );
-    renderPage();
-    // Wait for form to render
-    await waitFor(() => screen.getByLabelText("Lot number"));
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText("Lot number"), "1");
-    await user.type(screen.getByLabelText("Email address"), "a@b.com");
-    // Wait for Continue to be enabled — summary fetch errored so isSummaryLoading is false
-    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    await waitFor(() => {
-      expect(screen.getByText("An error occurred. Please try again.")).toBeInTheDocument();
-    });
   });
 });

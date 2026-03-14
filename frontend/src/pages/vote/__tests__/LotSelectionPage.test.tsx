@@ -23,6 +23,13 @@ function setLotsInStorage(lots: LotInfo[]) {
 function clearStorage() {
   sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+  sessionStorage.removeItem(`meeting_building_name_${AGM_ID}`);
+  sessionStorage.removeItem(`meeting_title_${AGM_ID}`);
+}
+
+function setContextInStorage(buildingName: string, meetingTitle: string) {
+  sessionStorage.setItem(`meeting_building_name_${AGM_ID}`, buildingName);
+  sessionStorage.setItem(`meeting_title_${AGM_ID}`, meetingTitle);
 }
 
 function renderPage(meetingId = AGM_ID) {
@@ -54,6 +61,26 @@ describe("LotSelectionPage", () => {
     ]);
     renderPage();
     expect(screen.getByRole("heading", { name: "Your Lots" })).toBeInTheDocument();
+  });
+
+  it("renders meeting title and building name from sessionStorage", () => {
+    setLotsInStorage([
+      { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+    ]);
+    setContextInStorage("Sunset Towers", "2024 AGM");
+    renderPage();
+    expect(screen.getByRole("heading", { name: "2024 AGM" })).toBeInTheDocument();
+    expect(screen.getByText("Sunset Towers")).toBeInTheDocument();
+  });
+
+  it("does not render meeting title or building name when sessionStorage keys are absent", () => {
+    setLotsInStorage([
+      { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+    ]);
+    // Do not call setContextInStorage — keys are absent
+    renderPage();
+    expect(screen.queryByRole("heading", { name: /AGM/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Sunset Towers")).not.toBeInTheDocument();
   });
 
   it("renders own lot with lot number and no proxy badge", () => {

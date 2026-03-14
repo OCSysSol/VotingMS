@@ -363,9 +363,6 @@ test.describe("Proxy voter journey", () => {
 
       // Auth as proxy voter (no direct lot — use LOT-B number which is what the UI asks for)
       await expect(page.getByLabel("Lot number")).toBeVisible();
-      await expect(page.getByText(PROXY_BUILDING_NAME)).toBeVisible({
-        timeout: 15000,
-      });
       // The auth page asks for lot number + email. Proxy voters enter the proxied lot's number.
       await page.getByLabel("Lot number").fill(LOT_B_NUMBER);
       await page.getByLabel("Email address").fill(PROXY_VOTER_EMAIL);
@@ -466,9 +463,6 @@ test.describe("Proxy voter journey", () => {
 
       // Auth as mixed-voter (owns MX-A, also proxied for MX-C)
       await expect(page.getByLabel("Lot number")).toBeVisible();
-      await expect(page.getByText(MIXED_BUILDING_NAME)).toBeVisible({
-        timeout: 15000,
-      });
       await page.getByLabel("Lot number").fill(MIXED_LOT_A_NUMBER);
       await page.getByLabel("Email address").fill(MIXED_LOT_A_OWNER_EMAIL);
       await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });

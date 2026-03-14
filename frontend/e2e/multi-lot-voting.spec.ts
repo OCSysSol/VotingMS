@@ -194,8 +194,6 @@ test.describe("Multi-lot voter journey", () => {
     // even though the backend is now email-only.  Fill it with a placeholder.
     await page.getByLabel("Lot number").fill(LOT_NUMBER_1);
     await page.getByLabel("Email address").fill(LOT_EMAIL);
-    // Wait for Continue to be enabled — it is disabled while the meeting summary
-    // (which supplies building_id) is still loading.
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
     await page.getByRole("button", { name: "Continue" }).click();
   }
@@ -282,15 +280,11 @@ test.describe("Multi-lot voter journey", () => {
     // Both lots should be pending
     await expect(page.getByText("You are voting for 2 lots.")).toBeVisible();
 
-    // ── Step 3: Restrict sessionStorage to only ML-1 before voting ──────────
-    // The lot-selection page votes for all IDs stored in meeting_lots_<id>.
-    // We override that key to only include lot ML-1 so only ML-1 is submitted.
-    await page.evaluate(
-      ({ mId, id1 }) => {
-        sessionStorage.setItem(`meeting_lots_${mId}`, JSON.stringify([id1]));
-      },
-      { mId: meetingId, id1: lotOwnerId1 }
-    );
+    // ── Step 3: Deselect ML-2 so only ML-1 is voted in this session ─────────
+    // Uncheck ML-2 via the UI; LotSelectionPage writes only selected IDs to
+    // sessionStorage when "Start Voting" is clicked.
+    await page.getByRole("checkbox", { name: `Select Lot ${LOT_NUMBER_2}` }).uncheck();
+    await expect(page.getByText("You are voting for 1 lot.")).toBeVisible();
 
     await page.getByRole("button", { name: "Start Voting" }).click();
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 10000 });
@@ -314,7 +308,7 @@ test.describe("Multi-lot voter journey", () => {
     await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Your votes", { exact: true })).toBeVisible();
     // ML-1 votes are present
-    await expect(page.getByText("Motion 1 — Annual Budget")).toBeVisible();
+    await expect(page.getByText("Motion 1 — Annual Budget").first()).toBeVisible();
     // ML-2 is not submitted yet — should NOT appear as a lot heading
     const ml2Heading = page.getByText(`Lot ${LOT_NUMBER_2}`, { exact: true });
     await expect(ml2Heading).not.toBeVisible();

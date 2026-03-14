@@ -191,13 +191,8 @@ test.describe("Pending AGM voter-facing behaviour", () => {
     // Navigate directly to the auth page for the pending AGM
     await page.goto(`/vote/${seededAgmId}/auth`);
 
-    // Wait for the form to load AND for the building context to be resolved.
-    // AuthPage fetches all buildings and their meetings asynchronously to
-    // identify which building owns this meeting — we must wait until the
-    // building name is shown before submitting, otherwise foundBuildingId is
-    // still null and the mutation rejects with "Missing building or meeting context".
+    // Wait for the form to load.
     await expect(page.getByLabel("Lot number")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(BUILDING_NAME)).toBeVisible({ timeout: 15000 });
 
     // Submit valid credentials
     await page.getByLabel("Lot number").fill(LOT_NUMBER);
