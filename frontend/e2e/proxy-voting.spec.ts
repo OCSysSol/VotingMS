@@ -1,13 +1,17 @@
 /**
- * Functional test: proxy voter journey.
+ * Functional test: proxy voter journey — badge verification and auth isolation.
  *
- * Verifies:
- * 1. A proxy-only voter (no direct lots) can authenticate, see their proxied
- *    lots with a "Proxy" badge, vote, and reach the confirmation page.
+ * Test 1 (proxy-only voter flow) has been retired — it is superseded by WF6
+ * in e2e/workflows/voting-scenarios.spec.ts, which additionally verifies exact
+ * tally numbers using the lot owner's entitlement (not the proxy voter's).
+ *
+ * Remaining tests:
+ *
  * 2. A mixed voter (own lots + proxied lots) sees all lots, with correct
  *    badges, and can vote for all of them.
+ *
  * 3. A proxy-only voter's auth response only returns the proxied lots
- *    (backend does not include non-proxied lots).
+ *    (backend does not include non-proxied lots) — verified via UI.
  *
  * Self-contained — seeds its own building, lot owners, proxy nominations, and
  * AGM via the admin API so it does not interfere with other E2E tests.
@@ -20,15 +24,6 @@ import { fileURLToPath } from "url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ── Scenario 1: proxy-only voter ─────────────────────────────────────────────
-const PROXY_BUILDING_NAME = `E2E Proxy Test Building-${RUN_SUFFIX}`;
-const LOT_A_NUMBER = "PX-A";
-const LOT_A_OWNER_EMAIL = "lotA-owner@test.com";
-const LOT_B_NUMBER = "PX-B";
-const LOT_B_OWNER_EMAIL = "lotB-owner@test.com";
-const PROXY_VOTER_EMAIL = "proxy-voter@test.com";
-const PROXY_AGM_TITLE = `E2E Proxy Test AGM-${RUN_SUFFIX}`;
-
 // ── Scenario 2: mixed voter (own lot + proxy lot) ─────────────────────────────
 const MIXED_BUILDING_NAME = `E2E Mixed Proxy Test Building-${RUN_SUFFIX}`;
 const MIXED_LOT_A_NUMBER = "MX-A";
@@ -36,6 +31,15 @@ const MIXED_LOT_A_OWNER_EMAIL = "mixed-voter@test.com"; // owns MX-A directly
 const MIXED_LOT_C_NUMBER = "MX-C";
 const MIXED_LOT_C_OWNER_EMAIL = "lotC-owner@test.com"; // MX-C proxied to mixed-voter
 const MIXED_AGM_TITLE = `E2E Mixed Proxy Test AGM-${RUN_SUFFIX}`;
+
+// ── Scenario 3: auth isolation (proxy-only voter sees only proxied lots) ───────
+const PROXY_BUILDING_NAME = `E2E Proxy Test Building-${RUN_SUFFIX}`;
+const LOT_A_NUMBER = "PX-A";
+const LOT_A_OWNER_EMAIL = "lotA-owner@test.com";
+const LOT_B_NUMBER = "PX-B";
+const LOT_B_OWNER_EMAIL = "lotB-owner@test.com";
+const PROXY_VOTER_EMAIL = "proxy-voter@test.com";
+const PROXY_AGM_TITLE = `E2E Proxy Test AGM-${RUN_SUFFIX}`;
 
 /** Upload a CSV as multipart/form-data to the import-proxies endpoint. */
 async function uploadProxyCsv(
@@ -82,9 +86,8 @@ test.describe("Proxy voter journey", () => {
       storageState: path.join(__dirname, ".auth", "admin.json"),
     });
 
-    // ── Seed Scenario 1: proxy-only voter ────────────────────────────────────
+    // ── Seed Scenario 3 data: proxy-only voter building ───────────────────────
     {
-      // Create or find building
       const buildingsRes = await api.get("/api/admin/buildings");
       const buildings = (await buildingsRes.json()) as {
         id: string;
@@ -102,7 +105,6 @@ test.describe("Proxy voter journey", () => {
       }
       proxyBuildingId = building.id;
 
-      // Create or find LOT-A (owned by lotA-owner@test.com)
       const lotOwnersRes = await api.get(
         `/api/admin/buildings/${proxyBuildingId}/lot-owners`
       );
@@ -135,7 +137,6 @@ test.describe("Proxy voter journey", () => {
         });
       }
 
-      // Create or find LOT-B (owned by lotB-owner@test.com, proxied to proxy-voter)
       let lotB = lotOwners.find((l) => l.lot_number === LOT_B_NUMBER);
       if (!lotB) {
         const res = await api.post(
@@ -159,11 +160,9 @@ test.describe("Proxy voter journey", () => {
         });
       }
 
-      // Upload proxy nomination: LOT-B proxied to proxy-voter@test.com
       const proxyCsv = `Lot#,Proxy Email\n${LOT_B_NUMBER},${PROXY_VOTER_EMAIL}\n`;
       await uploadProxyCsv(api, proxyBuildingId, proxyCsv);
 
-      // Close any open AGMs for this building, then create a fresh one
       const agmsRes = await api.get("/api/admin/general-meetings");
       const agms = (await agmsRes.json()) as {
         id: string;
@@ -205,7 +204,7 @@ test.describe("Proxy voter journey", () => {
       await api.delete(`/api/admin/general-meetings/${newAgm.id}/ballots`);
     }
 
-    // ── Seed Scenario 2: mixed voter ─────────────────────────────────────────
+    // ── Seed Scenario 2 data: mixed voter building ────────────────────────────
     {
       const buildingsRes = await api.get("/api/admin/buildings");
       const buildings = (await buildingsRes.json()) as {
@@ -281,11 +280,9 @@ test.describe("Proxy voter journey", () => {
         });
       }
 
-      // Upload proxy nomination: MX-C proxied to mixed-voter@test.com
       const proxyCsv = `Lot#,Proxy Email\n${MIXED_LOT_C_NUMBER},${MIXED_LOT_A_OWNER_EMAIL}\n`;
       await uploadProxyCsv(api, mixedBuildingId, proxyCsv);
 
-      // Close existing AGMs and create a fresh one
       const agmsRes = await api.get("/api/admin/general-meetings");
       const agms = (await agmsRes.json()) as {
         id: string;
@@ -329,108 +326,6 @@ test.describe("Proxy voter journey", () => {
 
     await api.dispose();
   }, { timeout: 60000 }); // 60s timeout for API setup
-
-  // ── Test 1: proxy-only voter journey ───────────────────────────────────────
-  test(
-    "proxy-only voter: sees proxy lot with badge, votes, reaches confirmation",
-    async ({ page }) => {
-      test.setTimeout(120000);
-
-      // Clear any stale ballots from previous runs so auth always lands on lot-selection
-      if (proxyAgmId) {
-        const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
-        const api = await playwrightRequest.newContext({
-          baseURL,
-          ignoreHTTPSErrors: true,
-          storageState: path.join(__dirname, ".auth", "admin.json"),
-        });
-        await api.delete(`/api/admin/general-meetings/${proxyAgmId}/ballots`);
-        await api.dispose();
-      }
-
-      await page.goto("/");
-
-      // Select the proxy test building
-      const select = page.getByLabel("Select your building");
-      await expect(select).toBeVisible();
-      await select.selectOption({ label: PROXY_BUILDING_NAME });
-
-      // Enter the AGM voting flow
-      await expect(
-        page.getByRole("button", { name: "Enter Voting" }).first()
-      ).toBeVisible({ timeout: 15000 });
-      await page.getByRole("button", { name: "Enter Voting" }).first().click();
-
-      // Auth as proxy voter (no direct lot — use LOT-B number which is what the UI asks for)
-      await expect(page.getByLabel("Lot number")).toBeVisible();
-      // The auth page asks for lot number + email. Proxy voters enter the proxied lot's number.
-      await page.getByLabel("Lot number").fill(LOT_B_NUMBER);
-      await page.getByLabel("Email address").fill(PROXY_VOTER_EMAIL);
-      await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
-      await page.getByRole("button", { name: "Continue" }).click();
-
-      // Should land on voting page (lot panel shown for proxy voters) or confirmation
-      await expect(page).toHaveURL(/vote\/.*\/(voting|confirmation)/, {
-        timeout: 20000,
-      });
-
-      if (page.url().includes("/voting") && !page.url().includes("/confirmation")) {
-        // ── Lot panel assertions (top of VotingPage for proxy/multi-lot voters) ──
-
-        // Only LOT-B should be listed (proxy voter has no direct lots)
-        const lotItems = page.locator(".lot-selection__item");
-        await expect(lotItems).toHaveCount(1);
-
-        // The single lot shows Lot PX-B
-        await expect(lotItems.first()).toContainText(LOT_B_NUMBER);
-
-        // LOT-B must have the proxy badge saying "VIA PROXY" (not "LOT PX-B VIA PROXY")
-        const proxyBadge = lotItems
-          .first()
-          .locator(".lot-selection__badge--proxy");
-        await expect(proxyBadge).toBeVisible();
-        await expect(proxyBadge).toContainText("via Proxy");
-        // Badge must NOT repeat the lot number
-        await expect(proxyBadge).not.toContainText(LOT_B_NUMBER);
-
-        // LOT-A must NOT be listed (proxy voter does not own it and is not proxied for it)
-        await expect(page.getByText(`Lot ${LOT_A_NUMBER}`)).not.toBeVisible();
-
-        // No "Start Voting" button — motions are immediately visible (sidebar layout)
-        await expect(page.getByRole("button", { name: "Start Voting" })).not.toBeVisible();
-      }
-
-      if (page.url().includes("/voting") && !page.url().includes("/confirmation")) {
-        // Vote "For" on the motion
-        const motionCards = page.locator(".motion-card");
-        await expect(motionCards).toHaveCount(1);
-
-        await motionCards
-          .first()
-          .getByRole("button", { name: "For" })
-          .click();
-
-        // Submit ballot
-        await expect(
-          page.getByRole("button", { name: "Submit ballot" })
-        ).toBeVisible();
-        await page.getByRole("button", { name: "Submit ballot" }).click();
-        // Confirm in the dialog
-        await expect(page.getByRole("dialog")).toBeVisible();
-        await page.getByRole("button", { name: "Submit ballot" }).last().click();
-
-        await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });
-      }
-
-      // ── Confirmation page ─────────────────────────────────────────────────
-      await expect(
-        page.getByText("Your votes", { exact: true })
-      ).toBeVisible({ timeout: 15000 });
-
-      // The motion vote should show "For"
-      await expect(page.getByText("For").first()).toBeVisible();
-    }
-  );
 
   // ── Test 2: mixed voter (own lot + proxy lot) ──────────────────────────────
   test(

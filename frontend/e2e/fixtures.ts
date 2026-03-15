@@ -64,11 +64,14 @@ export const test = base.extend<{ consoleErrors: string[] }>({
       // Capture failed network requests to our API — catches wrong base URL,
       // connection refused (e.g. VITE_API_BASE_URL pointing to localhost),
       // and other network-level failures.
+      // ERR_ABORTED is excluded: it fires when page.goto() navigates away while
+      // requests are still in-flight, which is expected behaviour, not an error.
       page.on("requestfailed", (req) => {
         const url = req.url();
-        if (url.includes("/api/")) {
+        const errorText = req.failure()?.errorText ?? "unknown";
+        if (url.includes("/api/") && !errorText.includes("ERR_ABORTED")) {
           errors.push(
-            `[network] ${req.method()} ${url} failed: ${req.failure()?.errorText ?? "unknown"}`
+            `[network] ${req.method()} ${url} failed: ${errorText}`
           );
         }
       });
