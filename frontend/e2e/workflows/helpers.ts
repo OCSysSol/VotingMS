@@ -57,11 +57,11 @@ export interface MotionDetail {
   motion_type: string;
   tally: MotionTally;
   voter_lists: {
-    yes: { lot_number: string; unit_entitlement: number }[];
-    no: { lot_number: string; unit_entitlement: number }[];
-    abstained: { lot_number: string; unit_entitlement: number }[];
-    absent: { lot_number: string; unit_entitlement: number }[];
-    not_eligible: { lot_number: string; unit_entitlement: number }[];
+    yes: { lot_number: string; entitlement: number }[];
+    no: { lot_number: string; entitlement: number }[];
+    abstained: { lot_number: string; entitlement: number }[];
+    absent: { lot_number: string; entitlement: number }[];
+    not_eligible: { lot_number: string; entitlement: number }[];
   };
 }
 

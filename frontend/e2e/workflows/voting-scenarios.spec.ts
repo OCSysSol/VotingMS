@@ -183,9 +183,9 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
     });
 
     // Voter lists — Motion 1
-    expect(motion1!.voter_lists.yes.some((v) => v.lot_number === VOTER1_LOT && v.unit_entitlement === 100)).toBe(true);
-    expect(motion1!.voter_lists.no.some((v) => v.lot_number === VOTER2_LOT && v.unit_entitlement === 50)).toBe(true);
-    expect(motion1!.voter_lists.absent.some((v) => v.lot_number === VOTER3_LOT && v.unit_entitlement === 75)).toBe(true);
+    expect(motion1!.voter_lists.yes.some((v) => v.lot_number === VOTER1_LOT && v.entitlement === 100)).toBe(true);
+    expect(motion1!.voter_lists.no.some((v) => v.lot_number === VOTER2_LOT && v.entitlement === 50)).toBe(true);
+    expect(motion1!.voter_lists.absent.some((v) => v.lot_number === VOTER3_LOT && v.entitlement === 75)).toBe(true);
   });
 
   // WF3.7: Assert tallies via admin UI
@@ -622,7 +622,7 @@ test.describe("WF6: Proxy voting with tally verification", () => {
 
     // Voter list confirms WF6-X's entitlement (not proxy voter's)
     expect(
-      motion1!.voter_lists.yes.some((v) => v.lot_number === LOT_X && v.unit_entitlement === 60)
+      motion1!.voter_lists.yes.some((v) => v.lot_number === LOT_X && v.entitlement === 60)
     ).toBe(true);
   });
 });

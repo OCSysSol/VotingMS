@@ -204,18 +204,14 @@ test.describe("Multi-lot voter journey", () => {
       storageState: path.join(__dirname, ".auth", "admin.json"),
     });
 
-    // Check current ballot state
-    const ballotsRes = await api.get(`/api/admin/general-meetings/${meetingId}/ballots`);
-    const ballotsBody = (await ballotsRes.json()) as { lot_owner_ids?: string[]; count?: number } | unknown[];
-    const hasSubmissions = Array.isArray(ballotsBody)
-      ? (ballotsBody as unknown[]).length >= 2
-      : false;
+    // Check current ballot state via the meeting detail endpoint (no GET /ballots exists)
+    const meetingRes = await api.get(`/api/admin/general-meetings/${meetingId}`);
+    const meetingBody = (await meetingRes.json()) as { total_submitted?: number };
+    const hasSubmissions = (meetingBody.total_submitted ?? 0) >= 2;
 
     if (!hasSubmissions) {
-      // No ballots present — clear and re-submit both lots via the UI would be
-      // too complex here; instead clear ballots and submit them programmatically
-      // is not available, so just ensure both are clear and let the test skip
-      // the "already submitted" assertion if needed.
+      // No ballots present — clear any partial submissions so the fallback
+      // voting path starts from a clean slate.
       await api.delete(`/api/admin/general-meetings/${meetingId}/ballots`);
     }
     await api.dispose();
