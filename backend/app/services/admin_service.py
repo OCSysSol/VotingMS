@@ -1264,64 +1264,6 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
         )
     )
 
-    # Generate absent BallotSubmissions + absent Votes for lots that never voted.
-    # 1. Find all GeneralMeetingLotWeight records (the snapshot of eligible lots at meeting creation time).
-    weights_result = await db.execute(
-        select(GeneralMeetingLotWeight).where(GeneralMeetingLotWeight.general_meeting_id == general_meeting_id)
-    )
-    weight_lot_ids: list[uuid.UUID] = [w.lot_owner_id for w in weights_result.scalars().all()]
-
-    # 2. Find lot_owner_ids that already have a BallotSubmission.
-    if weight_lot_ids:
-        subs_result = await db.execute(
-            select(BallotSubmission.lot_owner_id).where(
-                BallotSubmission.general_meeting_id == general_meeting_id,
-                BallotSubmission.lot_owner_id.in_(weight_lot_ids),
-            )
-        )
-        already_submitted_ids: set[uuid.UUID] = {row[0] for row in subs_result.all()}
-
-        # 3. Get motions for this General Meeting (to create absent Vote rows per motion).
-        motions_result = await db.execute(
-            select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.order_index)
-        )
-        motions = list(motions_result.scalars().all())
-
-        absent_lot_ids = [lid for lid in weight_lot_ids if lid not in already_submitted_ids]
-        for lot_owner_id in absent_lot_ids:
-            # Fetch the first email for this lot owner (for voter_email audit field).
-            email_result = await db.execute(
-                select(LotOwnerEmail.email)
-                .where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-                .limit(1)
-            )
-            row = email_result.first()
-            voter_email: str = row[0] if row and row[0] else ""
-
-            # Create a BallotSubmission to mark the lot as absent.
-            absent_submission = BallotSubmission(
-                general_meeting_id=general_meeting_id,
-                lot_owner_id=lot_owner_id,
-                voter_email=voter_email,
-                proxy_email=None,
-                submitted_at=datetime.now(UTC),
-            )
-            db.add(absent_submission)
-
-            # Create absent Vote rows for every motion.
-            for motion in motions:
-                absent_vote = Vote(
-                    general_meeting_id=general_meeting_id,
-                    motion_id=motion.id,
-                    voter_email=voter_email,
-                    lot_owner_id=lot_owner_id,
-                    choice=VoteChoice.abstained,
-                    status=VoteStatus.submitted,
-                )
-                db.add(absent_vote)
-
-        await db.flush()
-
     # Create EmailDelivery record
     email_delivery = EmailDelivery(
         general_meeting_id=general_meeting_id,

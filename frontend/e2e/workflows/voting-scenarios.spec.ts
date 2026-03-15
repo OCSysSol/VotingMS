@@ -189,16 +189,21 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
   });
 
   // WF3.7: Assert tallies via admin UI
-  test("WF3.7: admin UI shows correct tally for Motion 1", async ({ page }) => {
+  test("WF3.7: admin UI shows correct tally for Motion 1", async ({ browser }) => {
     test.setTimeout(60000);
+    const adminCtx = await browser.newContext({ storageState: ADMIN_AUTH_PATH });
+    const adminPage = await adminCtx.newPage();
+    try {
+      await adminPage.goto(`/admin/general-meetings/${meetingId}`);
+      await expect(adminPage.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-    await page.goto(`/admin/general-meetings/${meetingId}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-
-    // Motion 1 results — "For" row: count=1, entitlement=100
-    // Spot-check: the results section renders voter_count and entitlement_sum
-    await expect(page.getByText("100")).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText("150")).toBeVisible();
+      // Motion 1 results — "For" row: count=1, entitlement=100
+      // Spot-check: the results section renders voter_count and entitlement_sum
+      await expect(adminPage.getByText("100").first()).toBeVisible({ timeout: 10000 });
+      await expect(adminPage.getByText("150").first()).toBeVisible({ timeout: 10000 });
+    } finally {
+      await adminCtx.close();
+    }
   });
 });
 
@@ -322,12 +327,18 @@ test.describe("WF4: Multi-lot voter — both lots submitted in one session", () 
   });
 
   // WF4.4: Admin UI spot-check
-  test("WF4.4: admin UI shows For: 2 lots, entitlement 120 for Motion 1", async ({ page }) => {
+  test("WF4.4: admin UI shows For: 2 lots, entitlement 120 for Motion 1", async ({ browser }) => {
     test.setTimeout(60000);
 
-    await page.goto(`/admin/general-meetings/${meetingId}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("120")).toBeVisible({ timeout: 10000 });
+    const adminCtx = await browser.newContext({ storageState: ADMIN_AUTH_PATH });
+    const adminPage = await adminCtx.newPage();
+    try {
+      await adminPage.goto(`/admin/general-meetings/${meetingId}`);
+      await expect(adminPage.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+      await expect(adminPage.getByText("120").first()).toBeVisible({ timeout: 10000 });
+    } finally {
+      await adminCtx.close();
+    }
   });
 });
 
@@ -796,17 +807,23 @@ test.describe("WF7: In-arrear mixed lots — not_eligible on General, normal on 
 
   // WF7.5: Admin UI shows not_eligible category
   test("WF7.5: admin UI shows Not Eligible row for Motion 1 (count=1), zero for Motion 2", async ({
-    page,
+    browser,
   }) => {
     test.setTimeout(60000);
 
-    await page.goto(`/admin/general-meetings/${meetingId}`);
-    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+    const adminCtx = await browser.newContext({ storageState: ADMIN_AUTH_PATH });
+    const adminPage = await adminCtx.newPage();
+    try {
+      await adminPage.goto(`/admin/general-meetings/${meetingId}`);
+      await expect(adminPage.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-    // Not eligible entitlement sum (45) should appear in the results
-    await expect(page.getByText("45")).toBeVisible({ timeout: 10000 });
+      // Not eligible entitlement sum (45) should appear in the results
+      await expect(adminPage.getByText("45").first()).toBeVisible({ timeout: 10000 });
 
-    // Total special motion yes entitlement (135) should appear
-    await expect(page.getByText("135")).toBeVisible();
+      // Total special motion yes entitlement (135) should appear
+      await expect(adminPage.getByText("135").first()).toBeVisible();
+    } finally {
+      await adminCtx.close();
+    }
   });
 });
