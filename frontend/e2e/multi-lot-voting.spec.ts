@@ -1,30 +1,21 @@
 /**
- * Functional test: multi-lot voter journey.
+ * Functional test: multi-lot voter journey — re-entry and View Submission path.
  *
- * Verifies:
- * 1. Two lots owned by the same email — voting for both in a single submission
- *    shows both lots on the confirmation screen.
- * 2. Partial submission — voting for only one lot, then re-authenticating and
- *    voting for the remaining lot in a second submission.
+ * Scenarios 1 and 2 (vote both lots in one submission; partial submission) have
+ * been retired — they are superseded by WF4 and WF5 in
+ * e2e/workflows/voting-scenarios.spec.ts, which additionally verify exact tally
+ * numbers after close.
+ *
+ * Remaining scenarios:
+ *
  * 3. Re-entry after full submission — all lots show "Already submitted" on the
- *    lot selection screen and the "View Submission" button is shown; clicking it
- *    navigates directly to the confirmation page.
+ *    lot selection screen and auth redirects directly to confirmation.
+ *
+ * 4. Lot-selection "View Submission" button when all lots are already submitted
+ *    (navigate via /voting URL directly).
  *
  * Self-contained — seeds its own building, lot owners, and AGM via the admin
  * API so it does not interfere with other E2E tests.
- *
- * UI notes (derived from reading VotingPage.tsx and ConfirmationPage.tsx):
- * - VotingPage shows a sidebar with lot checkboxes and motions immediately
- *   visible alongside — there is no "Start Voting" gate.
- * - To simulate a partial submission the test unchecks one lot in the sidebar
- *   before clicking "Submit ballot".
- * - ConfirmationPage renders lots grouped by lot number when isMultiLot=true,
- *   with a heading "Lot <number>" above each lot's vote rows.
- * - When all lots are already submitted, the sidebar shows a "View Submission"
- *   button. Auth also redirects directly to confirmation when all lots are done.
- * - remaining_lot_owner_ids is returned by the my-ballot API but is NOT
- *   rendered as a CTA on the current ConfirmationPage; re-entry is done by
- *   navigating back to the auth page and re-authenticating.
  */
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
@@ -44,8 +35,6 @@ const AGM_TITLE = `E2E Multi-Lot Test AGM-${RUN_SUFFIX}`;
 
 // Seeded data shared across scenarios — populated in beforeAll
 let meetingId = "";
-let lotOwnerId1 = "";
-let lotOwnerId2 = "";
 
 test.describe("Multi-lot voter journey", () => {
   // Serial mode prevents parallel workers from each running their own beforeAll,
@@ -101,7 +90,6 @@ test.describe("Multi-lot voter journey", () => {
         });
       }
     }
-    lotOwnerId1 = lo1.id;
 
     // Lot ML-2
     let lo2 = lotOwners.find((l) => l.lot_number === LOT_NUMBER_2);
@@ -122,7 +110,6 @@ test.describe("Multi-lot voter journey", () => {
         });
       }
     }
-    lotOwnerId2 = lo2.id;
 
     // ── Close any existing open/pending AGMs for this building ───────────────
     const agmsRes = await api.get("/api/admin/general-meetings");
@@ -197,157 +184,6 @@ test.describe("Multi-lot voter journey", () => {
     await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
     await page.getByRole("button", { name: "Continue" }).click();
   }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Scenario 1: Two lots, vote both in a single submission
-  // ────────────────────────────────────────────────────────────────────────────
-  test("two lots — vote both in one submission, confirmation shows both lots", async ({ page }) => {
-    test.setTimeout(120000);
-
-    await goToAuthPage(page);
-    await authenticate(page);
-
-    // Should land on voting page (lot panel shown at top for multi-lot voters)
-    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
-
-    // Both lots visible in sidebar
-    await expect(page.getByText(`Lot ${LOT_NUMBER_1}`)).toBeVisible();
-    await expect(page.getByText(`Lot ${LOT_NUMBER_2}`)).toBeVisible();
-
-    // Subtitle confirms two lots pending
-    await expect(page.getByText("You are voting for 2 lots.")).toBeVisible();
-
-    // No "Start Voting" button — motions are immediately visible in the main column
-    await expect(page.getByRole("button", { name: "Start Voting" })).not.toBeVisible();
-
-    // Vote on both motions
-    const motionCards = page.locator(".motion-card");
-    await expect(motionCards).toHaveCount(2);
-
-    const motion1Card = motionCards.filter({ hasText: "Motion 1 — Annual Budget" });
-    const motion2Card = motionCards.filter({ hasText: "Motion 2 — Special Resolution" });
-
-    await motion1Card.getByRole("button", { name: "For" }).click();
-    await motion2Card.getByRole("button", { name: "Against" }).click();
-
-    // Submit ballot
-    await page.getByRole("button", { name: "Submit ballot" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: "Submit ballot" }).last().click();
-
-    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
-
-    // Confirmation shows both lots grouped by lot number
-    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Your votes", { exact: true })).toBeVisible();
-
-    // Multi-lot display: heading "Lot ML-1" and "Lot ML-2"
-    await expect(page.getByText(`Lot ${LOT_NUMBER_1}`, { exact: true })).toBeVisible();
-    await expect(page.getByText(`Lot ${LOT_NUMBER_2}`, { exact: true })).toBeVisible();
-
-    // Votes recorded for both lots: Motion 1 → "For", Motion 2 → "Against"
-    const forLabels = page.getByText("For");
-    await expect(forLabels.first()).toBeVisible();
-    const againstLabels = page.getByText("Against");
-    await expect(againstLabels.first()).toBeVisible();
-  });
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // Scenario 2: Partial submission — vote only ML-1 first, then ML-2 in a
-  //             second session
-  // ────────────────────────────────────────────────────────────────────────────
-  test("partial submission — vote one lot, then return to vote remaining lot", async ({ page }) => {
-    test.setTimeout(120000);
-
-    // ── Step 1: Clear ballots so both lots are fresh ─────────────────────────
-    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
-    const api = await playwrightRequest.newContext({
-      baseURL,
-      ignoreHTTPSErrors: true,
-      storageState: path.join(__dirname, ".auth", "admin.json"),
-    });
-    await api.delete(`/api/admin/general-meetings/${meetingId}/ballots`);
-    await api.dispose();
-
-    // ── Step 2: Authenticate; land on voting page (lot panel shown at top) ─────
-    await goToAuthPage(page);
-    await authenticate(page);
-    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
-
-    // Both lots should be pending — lot panel shown as sidebar
-    await expect(page.getByText("You are voting for 2 lots.")).toBeVisible();
-
-    // ── Step 3: Deselect ML-2 so only ML-1 is voted in this session ─────────
-    // Uncheck ML-2 via the UI; VotingPage writes only selected IDs to
-    // sessionStorage when "Submit ballot" is clicked.
-    await page.getByRole("checkbox", { name: `Select Lot ${LOT_NUMBER_2}` }).uncheck();
-    await expect(page.getByText("You are voting for 1 lot.")).toBeVisible();
-
-    // Motions are already visible alongside the sidebar (no navigation needed)
-
-    // Vote on both motions
-    const motionCards = page.locator(".motion-card");
-    await expect(motionCards).toHaveCount(2);
-
-    const motion1 = motionCards.filter({ hasText: "Motion 1 — Annual Budget" });
-    const motion2 = motionCards.filter({ hasText: "Motion 2 — Special Resolution" });
-    await motion1.getByRole("button", { name: "For" }).click();
-    await motion2.getByRole("button", { name: "For" }).click();
-
-    await page.getByRole("button", { name: "Submit ballot" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: "Submit ballot" }).last().click();
-
-    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
-
-    // Confirmation shows only ML-1 (single lot — non-grouped display)
-    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Your votes", { exact: true })).toBeVisible();
-    // ML-1 votes are present
-    await expect(page.getByText("Motion 1 — Annual Budget").first()).toBeVisible();
-    // ML-2 is not submitted yet — should NOT appear as a lot heading
-    const ml2Heading = page.getByText(`Lot ${LOT_NUMBER_2}`, { exact: true });
-    await expect(ml2Heading).not.toBeVisible();
-
-    // ── Step 4: Return to home and re-authenticate to vote ML-2 ─────────────
-    await page.getByRole("button", { name: "← Back to home" }).click();
-    await expect(page).toHaveURL("/", { timeout: 10000 });
-
-    await goToAuthPage(page);
-    await authenticate(page);
-
-    // Lot panel: ML-1 shows "Already submitted", ML-2 is still pending
-    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
-
-    const ml1Item = page.locator(".lot-selection__item").filter({ hasText: `Lot ${LOT_NUMBER_1}` });
-    await expect(ml1Item.getByText("Already submitted")).toBeVisible();
-    await expect(ml1Item).toHaveAttribute("aria-disabled", "true");
-
-    const ml2Item = page.locator(".lot-selection__item").filter({ hasText: `Lot ${LOT_NUMBER_2}` });
-    await expect(ml2Item.getByText("Already submitted")).not.toBeVisible();
-
-    // Subtitle shows 1 pending lot
-    await expect(page.getByText("You are voting for 1 lot.")).toBeVisible();
-
-    // No "Start Voting" button — motions are already visible alongside the sidebar
-
-    // Vote for ML-2
-    const cards = page.locator(".motion-card");
-    await expect(cards).toHaveCount(2);
-    await cards.filter({ hasText: "Motion 1 — Annual Budget" }).getByRole("button", { name: "Against" }).click();
-    await cards.filter({ hasText: "Motion 2 — Special Resolution" }).getByRole("button", { name: "Abstain" }).click();
-
-    await page.getByRole("button", { name: "Submit ballot" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: "Submit ballot" }).last().click();
-
-    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
-
-    // Final confirmation: both lots now submitted → multi-lot grouped display
-    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(`Lot ${LOT_NUMBER_1}`, { exact: true })).toBeVisible();
-    await expect(page.getByText(`Lot ${LOT_NUMBER_2}`, { exact: true })).toBeVisible();
-  });
 
   // ────────────────────────────────────────────────────────────────────────────
   // Scenario 3: Re-entry after full submission — lot selection shows all lots

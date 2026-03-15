@@ -1,18 +1,14 @@
 /**
  * Functional test: closed meeting voter journey.
  *
- * Tests the complete voter experience when a meeting is closed — not just
- * button visibility, but the full auth → confirmation flow for two cases:
+ * Test 2 (voter who never submitted accessing a closed AGM) has been retired
+ * — it is superseded by WF8.3 in e2e/workflows/edge-cases.spec.ts.
+ *
+ * Remaining test:
  *
  * 1. Voter who submitted a ballot before the meeting was closed:
  *    auth → agm_status:"closed" → redirected directly to confirmation →
  *    their votes are shown, no submit button is present.
- *
- * 2. Voter who never submitted, accessing a closed AGM:
- *    auth → agm_status:"closed" → redirected to confirmation →
- *    confirmation shows "Ballot submitted" with "Abstained" votes.
- *    (The backend creates an absent BallotSubmission at close time for
- *    every lot that never voted, recording all choices as Abstained.)
  *
  * Self-contained — seeds its own building, lot owners, AGM, and ballots via
  * the admin/voter API so it does not interfere with other E2E tests.
@@ -43,7 +39,7 @@ const BUILDING_NAME = `E2E Closed Meeting Test Building-${RUN_SUFFIX}`;
 const VOTED_LOT_NUMBER = "CLO-1";
 const VOTED_LOT_EMAIL = "closed-voter@test.com";
 const VOTED_LOT_ENTITLEMENT = 10;
-// Voter who will never submit a ballot (accesses only after close)
+// Voter who will never submit a ballot (kept for building validity)
 const UNVOTED_LOT_NUMBER = "CLO-2";
 const UNVOTED_LOT_EMAIL = "closed-novote@test.com";
 const UNVOTED_LOT_ENTITLEMENT = 10;
@@ -106,7 +102,7 @@ test.describe("Closed meeting voter journey", () => {
     }
     seededVotedLotOwnerId = votedLo.id;
 
-    // Voter 2 — will never vote
+    // Voter 2 — kept for building validity (never votes in this spec)
     const unvotedLo = lotOwners.find((l) => l.lot_number === UNVOTED_LOT_NUMBER);
     if (!unvotedLo) {
       await api.post(`/api/admin/buildings/${seededBuildingId}/lot-owners`, {
@@ -248,46 +244,6 @@ test.describe("Closed meeting voter journey", () => {
     await expect(page.getByRole("button", { name: "Submit ballot" })).not.toBeVisible();
 
     // No voting buttons (For / Against / Abstain) — we are on confirmation, not voting
-    await expect(page.getByRole("button", { name: "For" })).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "Against" })).not.toBeVisible();
-  });
-
-  test("voter who never submitted, closed AGM: confirmation shows absent ballot", async ({
-    page,
-  }) => {
-    test.setTimeout(120000);
-
-    await page.goto("/");
-
-    const select = page.getByLabel("Select your building");
-    await expect(select).toBeVisible();
-    await select.selectOption({ label: BUILDING_NAME });
-
-    // Closed AGM shows "View My Submission" button
-    await expect(
-      page.getByRole("button", { name: "View My Submission" }).first()
-    ).toBeVisible({ timeout: 20000 });
-    await page.getByRole("button", { name: "View My Submission" }).first().click();
-
-    // Auth page
-    await expect(page.getByLabel("Lot number")).toBeVisible({ timeout: 15000 });
-    await page.getByLabel("Lot number").fill(UNVOTED_LOT_NUMBER);
-    await page.getByLabel("Email address").fill(UNVOTED_LOT_EMAIL);
-    await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
-    await page.getByRole("button", { name: "Continue" }).click();
-
-    // Auth returns agm_status:"closed" → navigates to confirmation
-    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
-
-    // ConfirmationPage calls GET /api/general-meeting/{id}/my-ballot.
-    // When a meeting is closed, the backend creates an absent BallotSubmission
-    // (with Abstained votes) for all lots that never voted. So CLO-2 will have
-    // an absent ballot showing "Abstained" — not a 404.
-    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText("Abstained")).toBeVisible({ timeout: 10000 });
-
-    // No voting buttons — the meeting is closed and there is nothing to vote on
-    await expect(page.getByRole("button", { name: "Submit ballot" })).not.toBeVisible();
     await expect(page.getByRole("button", { name: "For" })).not.toBeVisible();
     await expect(page.getByRole("button", { name: "Against" })).not.toBeVisible();
   });

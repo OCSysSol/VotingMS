@@ -1,0 +1,402 @@
+/**
+ * Shared helper functions for workflow E2E specs.
+ *
+ * These helpers handle the repetitive API seeding and assertion patterns used
+ * across all workflow specs. They are plain async functions (not Playwright
+ * fixtures) so they can be called from `beforeAll` blocks.
+ *
+ * NOTE: The auth form currently shows a "Lot number" field for frontend
+ * validation even though the backend is now email-only. All workflow tests fill
+ * it with a valid lot number for the email being used. If the auth form is later
+ * changed to email-only, all callers of `authenticateVoter` will need updating.
+ */
+
+import { expect } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Path to the admin auth storage state (relative to this file in e2e/workflows/)
+export const ADMIN_AUTH_PATH = path.join(__dirname, "../.auth/admin.json");
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface LotOwnerSeed {
+  lotNumber: string;
+  emails: string[];
+  unitEntitlement: number;
+  financialPosition?: "normal" | "in_arrear";
+}
+
+export interface MotionSeed {
+  title: string;
+  description: string;
+  orderIndex: number;
+  motionType: "general" | "special";
+}
+
+export interface TallyCount {
+  voter_count: number;
+  entitlement_sum: number;
+}
+
+export interface MotionTally {
+  yes: TallyCount;
+  no: TallyCount;
+  abstained: TallyCount;
+  absent: TallyCount;
+  not_eligible: TallyCount;
+}
+
+export interface MotionDetail {
+  motion_id: string;
+  title: string;
+  order_index: number;
+  motion_type: string;
+  tally: MotionTally;
+  voter_lists: {
+    yes: { lot_number: string; unit_entitlement: number }[];
+    no: { lot_number: string; unit_entitlement: number }[];
+    abstained: { lot_number: string; unit_entitlement: number }[];
+    absent: { lot_number: string; unit_entitlement: number }[];
+    not_eligible: { lot_number: string; unit_entitlement: number }[];
+  };
+}
+
+// ── Building helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Create or find a building by name. Returns the building ID.
+ */
+export async function seedBuilding(
+  api: APIRequestContext,
+  name: string,
+  managerEmail: string
+): Promise<string> {
+  const buildingsRes = await api.get("/api/admin/buildings");
+  const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+  let building = buildings.find((b) => b.name === name);
+  if (!building) {
+    const res = await api.post("/api/admin/buildings", {
+      data: { name, manager_email: managerEmail },
+    });
+    if (!res.ok()) {
+      throw new Error(`Failed to create building "${name}" (${res.status()}): ${await res.text()}`);
+    }
+    building = (await res.json()) as { id: string; name: string };
+  }
+  return building.id;
+}
+
+// ── Lot owner helpers ─────────────────────────────────────────────────────────
+
+/**
+ * Create or find a lot owner, ensuring it has the required emails and
+ * financial position. Returns the lot owner ID.
+ */
+export async function seedLotOwner(
+  api: APIRequestContext,
+  buildingId: string,
+  seed: LotOwnerSeed
+): Promise<string> {
+  const lotOwnersRes = await api.get(`/api/admin/buildings/${buildingId}/lot-owners`);
+  const lotOwners = (await lotOwnersRes.json()) as {
+    id: string;
+    lot_number: string;
+    emails: string[];
+    financial_position: string;
+  }[];
+
+  let lo = lotOwners.find((l) => l.lot_number === seed.lotNumber);
+  if (!lo) {
+    const res = await api.post(`/api/admin/buildings/${buildingId}/lot-owners`, {
+      data: {
+        lot_number: seed.lotNumber,
+        emails: seed.emails,
+        unit_entitlement: seed.unitEntitlement,
+        financial_position: seed.financialPosition ?? "normal",
+      },
+    });
+    if (!res.ok()) {
+      throw new Error(
+        `Failed to create lot owner "${seed.lotNumber}" (${res.status()}): ${await res.text()}`
+      );
+    }
+    lo = (await res.json()) as {
+      id: string;
+      lot_number: string;
+      emails: string[];
+      financial_position: string;
+    };
+  } else {
+    // Ensure all required emails are present
+    for (const email of seed.emails) {
+      if (!lo.emails?.includes(email)) {
+        await api.post(`/api/admin/lot-owners/${lo.id}/emails`, {
+          data: { email },
+        });
+      }
+    }
+    // Ensure correct financial position
+    if (seed.financialPosition && lo.financial_position !== seed.financialPosition) {
+      await api.patch(`/api/admin/lot-owners/${lo.id}`, {
+        data: { financial_position: seed.financialPosition },
+      });
+    }
+  }
+  return lo.id;
+}
+
+// ── Proxy nomination helper ───────────────────────────────────────────────────
+
+/**
+ * Upload a proxy nominations CSV for a building.
+ * CSV format: `Lot#,Proxy Email\nLOT_NUMBER,PROXY_EMAIL\n`
+ */
+export async function uploadProxyCsv(
+  api: APIRequestContext,
+  buildingId: string,
+  csvContent: string
+): Promise<void> {
+  const res = await api.post(
+    `/api/admin/buildings/${buildingId}/lot-owners/import-proxies`,
+    {
+      multipart: {
+        file: {
+          name: "proxies.csv",
+          mimeType: "text/csv",
+          buffer: Buffer.from(csvContent),
+        },
+      },
+    }
+  );
+  if (!res.ok()) {
+    throw new Error(`Proxy import failed (${res.status()}): ${await res.text()}`);
+  }
+}
+
+// ── Meeting helpers ───────────────────────────────────────────────────────────
+
+/**
+ * Close any open or pending meetings for a building, then create a fresh open
+ * meeting with the given motions. Returns the meeting ID.
+ *
+ * Uses `meeting_at` 1 hour in the past so the effective status is "open".
+ */
+export async function createOpenMeeting(
+  api: APIRequestContext,
+  buildingId: string,
+  title: string,
+  motions: MotionSeed[]
+): Promise<string> {
+  // Close any existing open/pending meetings for this building
+  const agmsRes = await api.get("/api/admin/general-meetings");
+  const agms = (await agmsRes.json()) as {
+    id: string;
+    status: string;
+    building_id: string;
+  }[];
+  const openAgms = agms.filter(
+    (a) => a.building_id === buildingId && (a.status === "open" || a.status === "pending")
+  );
+  for (const agm of openAgms) {
+    await api.post(`/api/admin/general-meetings/${agm.id}/close`);
+  }
+
+  const meetingStarted = new Date();
+  meetingStarted.setHours(meetingStarted.getHours() - 1);
+  const closesAt = new Date();
+  closesAt.setFullYear(closesAt.getFullYear() + 1);
+
+  const createRes = await api.post("/api/admin/general-meetings", {
+    data: {
+      building_id: buildingId,
+      title,
+      meeting_at: meetingStarted.toISOString(),
+      voting_closes_at: closesAt.toISOString(),
+      motions: motions.map((m) => ({
+        title: m.title,
+        description: m.description,
+        order_index: m.orderIndex,
+        motion_type: m.motionType,
+      })),
+    },
+  });
+  if (!createRes.ok()) {
+    throw new Error(
+      `Failed to create meeting "${title}" (${createRes.status()}): ${await createRes.text()}`
+    );
+  }
+  const newAgm = (await createRes.json()) as { id: string };
+  return newAgm.id;
+}
+
+/**
+ * Create a pending meeting (meeting_at in the future) for a building.
+ * Returns the meeting ID.
+ */
+export async function createPendingMeeting(
+  api: APIRequestContext,
+  buildingId: string,
+  title: string,
+  motions: MotionSeed[]
+): Promise<string> {
+  const meetingAt = new Date();
+  meetingAt.setHours(meetingAt.getHours() + 2); // 2 hours in the future
+  const closesAt = new Date();
+  closesAt.setFullYear(closesAt.getFullYear() + 1);
+
+  const createRes = await api.post("/api/admin/general-meetings", {
+    data: {
+      building_id: buildingId,
+      title,
+      meeting_at: meetingAt.toISOString(),
+      voting_closes_at: closesAt.toISOString(),
+      motions: motions.map((m) => ({
+        title: m.title,
+        description: m.description,
+        order_index: m.orderIndex,
+        motion_type: m.motionType,
+      })),
+    },
+  });
+  if (!createRes.ok()) {
+    throw new Error(
+      `Failed to create pending meeting "${title}" (${createRes.status()}): ${await createRes.text()}`
+    );
+  }
+  const newAgm = (await createRes.json()) as { id: string };
+  return newAgm.id;
+}
+
+/**
+ * Close a meeting via the admin API. Asserts 200 OK.
+ */
+export async function closeMeeting(api: APIRequestContext, meetingId: string): Promise<void> {
+  const res = await api.post(`/api/admin/general-meetings/${meetingId}/close`);
+  if (!res.ok()) {
+    throw new Error(
+      `Failed to close meeting ${meetingId} (${res.status()}): ${await res.text()}`
+    );
+  }
+}
+
+/**
+ * Clear all ballots for a meeting (idempotent re-run safety).
+ */
+export async function clearBallots(api: APIRequestContext, meetingId: string): Promise<void> {
+  await api.delete(`/api/admin/general-meetings/${meetingId}/ballots`);
+}
+
+// ── Tally helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetch the meeting detail from the admin API and return the motion_details array.
+ */
+export async function getMeetingDetails(
+  api: APIRequestContext,
+  meetingId: string
+): Promise<MotionDetail[]> {
+  const res = await api.get(`/api/admin/general-meetings/${meetingId}`);
+  if (!res.ok()) {
+    throw new Error(
+      `Failed to get meeting details for ${meetingId} (${res.status()}): ${await res.text()}`
+    );
+  }
+  const data = (await res.json()) as { motion_details?: MotionDetail[] };
+  return data.motion_details ?? [];
+}
+
+/**
+ * Assert that a motion tally matches expected values.
+ *
+ * Pass partial expected values — only keys provided will be checked.
+ * Missing keys default to { voter_count: 0, entitlement_sum: 0 }.
+ */
+export function assertTally(
+  tally: MotionTally,
+  expected: Partial<Record<keyof MotionTally, Partial<TallyCount>>>
+): void {
+  const categories: (keyof MotionTally)[] = ["yes", "no", "abstained", "absent", "not_eligible"];
+  for (const cat of categories) {
+    const exp = expected[cat] ?? { voter_count: 0, entitlement_sum: 0 };
+    const actual = tally[cat];
+    if (exp.voter_count !== undefined) {
+      expect(
+        actual.voter_count,
+        `Tally[${cat}].voter_count`
+      ).toBe(exp.voter_count);
+    }
+    if (exp.entitlement_sum !== undefined) {
+      expect(
+        actual.entitlement_sum,
+        `Tally[${cat}].entitlement_sum`
+      ).toBe(exp.entitlement_sum);
+    }
+  }
+}
+
+// ── Admin API context factory ─────────────────────────────────────────────────
+
+/**
+ * Create a new Playwright API request context authenticated as admin.
+ * Remember to call `api.dispose()` when done.
+ */
+export async function makeAdminApi(
+  baseURL: string
+): Promise<APIRequestContext> {
+  const { request: playwrightRequest } = await import("@playwright/test");
+  return playwrightRequest.newContext({
+    baseURL,
+    ignoreHTTPSErrors: true,
+    storageState: ADMIN_AUTH_PATH,
+  });
+}
+
+// ── Voter UI helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Navigate to the home page, select a building, and click "Enter Voting"
+ * to reach the auth form for that building.
+ */
+export async function goToAuthPage(page: Page, buildingName: string): Promise<void> {
+  await page.goto("/");
+  const select = page.getByLabel("Select your building");
+  await expect(select).toBeVisible();
+  await select.selectOption({ label: buildingName });
+  await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible({
+    timeout: 15000,
+  });
+  await page.getByRole("button", { name: "Enter Voting" }).first().click();
+  await expect(page.getByLabel("Email address")).toBeVisible({ timeout: 15000 });
+}
+
+/**
+ * Fill and submit the auth form with the given lot number and email.
+ *
+ * NOTE: The auth form still shows a "Lot number" field even though the backend
+ * is now email-only. This function fills it with `lotNumber` for frontend
+ * validation. If the auth form is later changed to email-only, remove the
+ * lot number fill.
+ */
+export async function authenticateVoter(
+  page: Page,
+  lotNumber: string,
+  email: string
+): Promise<void> {
+  await page.getByLabel("Lot number").fill(lotNumber);
+  await page.getByLabel("Email address").fill(email);
+  await expect(page.getByRole("button", { name: "Continue" })).toBeEnabled({ timeout: 10000 });
+  await page.getByRole("button", { name: "Continue" }).click();
+}
+
+/**
+ * Submit the ballot via the confirm dialog.
+ */
+export async function submitBallot(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Submit ballot" }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.getByRole("button", { name: "Submit ballot" }).last().click();
+}
