@@ -216,8 +216,7 @@ test.describe("WF8: Edge cases", () => {
     ).toBeVisible({ timeout: 10000 });
 
     // URL remains on the auth page
-    await expect(page).toHaveURL(/auth/, { timeout: 5000 });
-    await expect(page).not.toHaveURL(/voting|confirmation/);
+    await expect(page).toHaveURL(/\/auth$/, { timeout: 5000 });
   });
 
   // ── WF8.5: Building dropdown requires selection ────────────────────────────

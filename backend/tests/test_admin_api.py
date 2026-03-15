@@ -4606,13 +4606,14 @@ class TestGetGeneralMeetingDetailEffectiveStatus:
 
 
 # ---------------------------------------------------------------------------
-# close_agm generates absent BallotSubmissions (US-CD02)
+# close_agm tally shows absent lots correctly (US-CD02)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 class TestCloseAGMAbsentRecords:
-    """Closing an GeneralMeeting generates absent BallotSubmission + Vote rows for non-voters."""
+    """Closing a GeneralMeeting does NOT create BallotSubmission records for absent lots.
+    Absent lots are computed by the tally as eligible - submitted."""
 
     async def _make_agm_with_lots(
         self, db_session: AsyncSession, name: str, n_lots: int = 2
@@ -4662,10 +4663,11 @@ class TestCloseAGMAbsentRecords:
 
     # --- Happy path ---
 
-    async def test_close_creates_absent_submissions_for_non_voters(
+    async def test_close_does_not_create_absent_submissions_for_non_voters(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Lots with no BallotSubmission get an absent record on GeneralMeeting close."""
+        """Lots with no BallotSubmission must NOT get an absent BallotSubmission on close.
+        The tally computes absent = eligible - submitted without needing phantom records."""
         _, agm, lots, _ = await self._make_agm_with_lots(
             db_session, "AbsentHappy1", n_lots=2
         )
@@ -4682,7 +4684,7 @@ class TestCloseAGMAbsentRecords:
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert response.status_code == 200
 
-        # lots[1] should now have an absent BallotSubmission
+        # lots[1] did not vote — must have NO BallotSubmission after close
         subs_result = await db_session.execute(
             select(BallotSubmission).where(
                 BallotSubmission.general_meeting_id == agm.id,
@@ -4690,29 +4692,47 @@ class TestCloseAGMAbsentRecords:
             )
         )
         absent_sub = subs_result.scalar_one_or_none()
-        assert absent_sub is not None
+        assert absent_sub is None
 
-    async def test_close_creates_absent_votes_for_each_motion(
+    async def test_close_tally_shows_absent_lot_in_absent_not_abstained(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Absent lots get one Vote row per motion when GeneralMeeting is closed."""
-        _, agm, lots, motions = await self._make_agm_with_lots(
-            db_session, "AbsentVotes1", n_lots=1
+        """After close, a lot that never voted appears in absent tally (not abstained)."""
+        _, agm, lots, _ = await self._make_agm_with_lots(
+            db_session, "AbsentVotes1", n_lots=2
         )
+        # lots[0] votes, lots[1] does not
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lots[0].id,
+            voter_email="voter1@AbsentVotes1.test",
+        )
+        db_session.add(bs)
+        motion_result = await db_session.execute(
+            select(Motion).where(Motion.general_meeting_id == agm.id)
+        )
+        motion = motion_result.scalar_one()
+        v = Vote(
+            general_meeting_id=agm.id,
+            motion_id=motion.id,
+            voter_email="voter1@AbsentVotes1.test",
+            lot_owner_id=lots[0].id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(v)
         await db_session.commit()
 
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert response.status_code == 200
 
-        votes_result = await db_session.execute(
-            select(Vote).where(
-                Vote.general_meeting_id == agm.id,
-                Vote.lot_owner_id == lots[0].id,
-                Vote.status == VoteStatus.submitted,
-            )
-        )
-        absent_votes = list(votes_result.scalars().all())
-        assert len(absent_votes) == len(motions)
+        tally_response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert tally_response.status_code == 200
+        data = tally_response.json()
+        m = data["motions"][0]
+        # lots[1] never voted → absent voter_count=1, abstained voter_count=0
+        assert m["tally"]["absent"]["voter_count"] == 1
+        assert m["tally"]["abstained"]["voter_count"] == 0
 
     async def test_close_does_not_duplicate_existing_submissions(
         self, client: AsyncClient, db_session: AsyncSession
@@ -4743,7 +4763,7 @@ class TestCloseAGMAbsentRecords:
     async def test_close_agm_with_no_lot_weights_no_absent_records(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Closing an GeneralMeeting with no GeneralMeetingLotWeight snapshot creates no absent records."""
+        """Closing a GeneralMeeting with no GeneralMeetingLotWeight snapshot creates no absent records."""
         b = Building(name="NoWeights Building", manager_email="nw@test.com")
         db_session.add(b)
         await db_session.flush()
@@ -4765,31 +4785,33 @@ class TestCloseAGMAbsentRecords:
         )
         assert list(subs_result.scalars().all()) == []
 
-    async def test_close_agm_absent_voter_email_populated_from_lot_owner_email(
+    async def test_close_agm_total_submitted_excludes_absent_lots(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Absent BallotSubmission.voter_email is taken from LotOwnerEmail."""
+        """total_submitted in the summary reflects only actual voters, not absent lots."""
         _, agm, lots, _ = await self._make_agm_with_lots(
-            db_session, "AbsentEmail1", n_lots=1
+            db_session, "AbsentEmail1", n_lots=2
         )
+        # Only lots[0] votes
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lots[0].id,
+            voter_email="voter1@AbsentEmail1.test",
+        )
+        db_session.add(bs)
         await db_session.commit()
 
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert response.status_code == 200
 
-        subs_result = await db_session.execute(
-            select(BallotSubmission).where(
-                BallotSubmission.general_meeting_id == agm.id,
-                BallotSubmission.lot_owner_id == lots[0].id,
-            )
-        )
-        sub = subs_result.scalar_one()
-        assert sub.voter_email == "voter1@AbsentEmail1.test"
+        summary = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert summary.status_code == 200
+        assert summary.json()["total_submitted"] == 1
 
-    async def test_close_agm_lot_with_no_email_uses_empty_string(
+    async def test_close_agm_lot_with_no_ballot_stays_absent_in_tally(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """A lot with no LotOwnerEmail still gets an absent BallotSubmission with empty email."""
+        """A lot with no BallotSubmission after close appears as absent in the tally."""
         b = Building(name="NoEmail Building", manager_email="ne@test.com")
         db_session.add(b)
         await db_session.flush()
@@ -4816,11 +4838,12 @@ class TestCloseAGMAbsentRecords:
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert response.status_code == 200
 
+        # No BallotSubmission created for the absent lot
         subs_result = await db_session.execute(
             select(BallotSubmission).where(
                 BallotSubmission.general_meeting_id == agm.id,
                 BallotSubmission.lot_owner_id == lo.id,
             )
         )
-        sub = subs_result.scalar_one()
-        assert sub.voter_email == ""
+        sub = subs_result.scalar_one_or_none()
+        assert sub is None

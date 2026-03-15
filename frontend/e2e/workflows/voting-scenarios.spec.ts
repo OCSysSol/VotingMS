@@ -330,7 +330,7 @@ test.describe("WF4: Multi-lot voter — both lots submitted in one session", () 
     try {
       await adminPage.goto(`/admin/general-meetings/${meetingId}`);
       await expect(adminPage.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-      await expect(adminPage.getByText("120")).toBeVisible({ timeout: 10000 });
+      await expect(adminPage.getByText("120").first()).toBeVisible({ timeout: 10000 });
     } finally {
       await adminCtx.close();
     }
