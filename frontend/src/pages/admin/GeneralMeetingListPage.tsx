@@ -59,35 +59,37 @@ export default function GeneralMeetingListPage() {
       </div>
       <div className="admin-card">
         <div className="admin-card__header">
-          <div style={{ maxWidth: 280 }}>
-            <label className="field__label" htmlFor="building-filter">Building</label>
-            <select
-              id="building-filter"
-              className="field__select"
-              value={selectedBuildingId}
-              onChange={handleBuildingChange}
-            >
-              <option value="">All buildings</option>
-              {buildings.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div style={{ maxWidth: 280 }}>
-            <label className="field__label" htmlFor="status-filter">Status</label>
-            <select
-              id="status-filter"
-              className="field__select"
-              value={selectedStatus}
-              onChange={handleStatusChange}
-            >
-              <option value="">All statuses</option>
-              <option value="open">Open</option>
-              <option value="pending">Pending</option>
-              <option value="closed">Closed</option>
-            </select>
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
+            <div style={{ maxWidth: 280 }}>
+              <label className="field__label" htmlFor="building-filter">Building</label>
+              <select
+                id="building-filter"
+                className="field__select"
+                value={selectedBuildingId}
+                onChange={handleBuildingChange}
+              >
+                <option value="">All buildings</option>
+                {buildings.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div style={{ maxWidth: 180 }}>
+              <label className="field__label" htmlFor="status-filter">Status</label>
+              <select
+                id="status-filter"
+                className="field__select"
+                value={selectedStatus}
+                onChange={handleStatusChange}
+              >
+                <option value="">All statuses</option>
+                <option value="open">Open</option>
+                <option value="pending">Pending</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
           </div>
         </div>
         <GeneralMeetingTable meetings={filteredMeetings} isLoading={isLoading} />
