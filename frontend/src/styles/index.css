@@ -1775,49 +1775,79 @@ button, input, select, textarea {
   min-width: 0;
 }
 
-/* === SIDEBAR TOGGLE (mobile collapsible) === */
-.voting-layout__sidebar-toggle {
+/* === MOBILE DRAWER === */
+.sidebar-drawer {
+  display: none;
+}
+.sidebar-drawer-open-btn {
   display: none;
 }
 
 @media (max-width: 640px) {
-  .voting-layout {
-    flex-direction: column;
-  }
+  /* Hide the sidebar column in the voting layout on mobile */
   .voting-layout__sidebar {
-    width: 100%;
-  }
-  .voting-layout__sidebar-toggle {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    cursor: pointer;
-    padding: 10px 0;
-    font-weight: 600;
-    font-size: 0.9375rem;
-    border-bottom: 1px solid var(--border-subtle);
-    background: none;
-    border-top: none;
-    border-left: none;
-    border-right: none;
-    width: 100%;
-    text-align: left;
-    color: var(--text-primary);
-  }
-  .voting-layout__sidebar-toggle:hover {
-    color: var(--navy);
-  }
-  .voting-layout__sidebar-list--collapsed {
     display: none;
+  }
+  /* Show the open button above motions */
+  .sidebar-drawer-open-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding: 8px 14px;
+    background: var(--navy);
+    color: white;
+    border: none;
+    border-radius: var(--r-md);
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  /* Backdrop */
+  .sidebar-drawer__backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    z-index: 200;
+  }
+  /* Drawer panel */
+  .sidebar-drawer {
+    display: block;
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100%;
+    width: 85vw;
+    max-width: 320px;
+    background: var(--white);
+    z-index: 201;
+    overflow-y: auto;
+    padding: 20px 20px 40px;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+  }
+  .sidebar-drawer--open {
+    transform: translateX(0);
+  }
+  .sidebar-drawer__close {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    cursor: pointer;
+    color: var(--text-secondary);
+    line-height: 1;
+    padding: 4px;
   }
 }
 
 @media (min-width: 641px) {
-  .voting-layout__sidebar-toggle {
-    display: none;
-  }
-  .voting-layout__sidebar-list--collapsed {
-    display: block !important;
+  .sidebar-drawer,
+  .sidebar-drawer__backdrop,
+  .sidebar-drawer-open-btn {
+    display: none !important;
   }
 }
 
