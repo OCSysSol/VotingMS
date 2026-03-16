@@ -229,7 +229,8 @@ test.describe("Multi-lot voter journey", () => {
     } else {
       // Ballots were cleared — land on voting page (lot panel shown at top) and verify both lots are fresh
       await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
-      await expect(page.getByText("You are voting for 2 lots.")).toBeVisible();
+      // Scoped to sidebar to avoid strict-mode violation with mobile drawer duplicate
+      await expect(page.locator(".voting-layout__sidebar").getByText("You are voting for 2 lots.")).toBeVisible();
 
       // Complete the submission so the "View Submission" CTA path can be exercised
       // No "Start Voting" button — motions are immediately visible
@@ -313,11 +314,12 @@ test.describe("Multi-lot voter journey", () => {
     await page.goto(`/vote/${meetingId}/voting`);
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 10000 });
 
-    // Both items show "Already submitted" badge (lot panel rendered from sessionStorage)
-    await expect(page.locator(".lot-selection__item--submitted")).toHaveCount(2);
+    // Both items show "Already submitted" badge in the sidebar (scoped to avoid mobile drawer duplicate)
+    const sidebar = page.locator(".voting-layout__sidebar");
+    await expect(sidebar.locator(".lot-selection__item--submitted")).toHaveCount(2);
 
-    // The subtitle says "All lots have been submitted."
-    await expect(page.getByText("All lots have been submitted.")).toBeVisible();
+    // The subtitle says "All lots have been submitted." (scoped to sidebar)
+    await expect(sidebar.getByText("All lots have been submitted.")).toBeVisible();
 
     // "View Submission" button is shown (not "Start Voting")
     await expect(page.getByRole("button", { name: "View Submission" })).toBeVisible();
