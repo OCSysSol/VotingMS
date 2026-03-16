@@ -369,7 +369,7 @@ describe("VotingPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Your Lots" })).toBeInTheDocument();
     });
-    expect(screen.getByText("via Proxy")).toBeInTheDocument();
+    expect(screen.getAllByText("via Proxy")[0]).toBeInTheDocument();
     // Old badge text must be gone
     expect(screen.queryByText("Lot 99 via Proxy")).not.toBeInTheDocument();
     // No "Start Voting" button — motions are immediately visible
@@ -403,7 +403,7 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Already submitted")).toBeInTheDocument();
+      expect(screen.getAllByText("Already submitted")[0]).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "View Submission" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "View Submission" }));
@@ -423,7 +423,7 @@ describe("VotingPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "Your Lots" })).toBeInTheDocument();
     });
-    expect(screen.getByText("You are voting for 2 lots.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 2 lots.")[0]).toBeInTheDocument();
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes).toHaveLength(2);
     // Motions are immediately visible — no Start Voting gate
@@ -446,7 +446,7 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getAllByRole("checkbox"));
     const checkboxes = screen.getAllByRole("checkbox");
     await user.click(checkboxes[1]);
-    expect(screen.getByText("You are voting for 1 lot.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -503,7 +503,7 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
-    expect(screen.getByText("via Proxy")).toBeInTheDocument();
+    expect(screen.getAllByText("via Proxy")[0]).toBeInTheDocument();
     // Must NOT contain "Lot 2 via Proxy" — badge text is just "via Proxy"
     expect(screen.queryByText("Lot 2 via Proxy")).not.toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
@@ -519,7 +519,7 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
-    expect(screen.getByText("In Arrear")).toBeInTheDocument();
+    expect(screen.getAllByText("In Arrear")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -535,7 +535,7 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes[1]).toBeDisabled();
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
+    expect(screen.getAllByText("Already submitted")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -551,7 +551,7 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
     expect(screen.getByRole("button", { name: "View Submission" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start Voting" })).not.toBeInTheDocument();
-    expect(screen.getByText("All lots have been submitted.")).toBeInTheDocument();
+    expect(screen.getAllByText("All lots have been submitted.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -883,10 +883,10 @@ describe("VotingPage", () => {
     const checkboxes = screen.getAllByRole("checkbox");
     await user.click(checkboxes[0]);
     await user.click(checkboxes[1]);
-    expect(screen.getByText("You are voting for 0 lots.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 0 lots.")[0]).toBeInTheDocument();
     // Click Select All
     await user.click(screen.getByRole("button", { name: "Select all lots" }));
-    expect(screen.getByText("You are voting for 2 lots.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 2 lots.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -924,10 +924,10 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getAllByRole("checkbox"));
-    expect(screen.getByText("You are voting for 2 lots.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 2 lots.")[0]).toBeInTheDocument();
     // Click Deselect All
     await user.click(screen.getByRole("button", { name: "Deselect all lots" }));
-    expect(screen.getByText("You are voting for 0 lots.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 0 lots.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -947,7 +947,7 @@ describe("VotingPage", () => {
     expect(proxyBtn).toBeInTheDocument();
     // Click it — only lo2 (proxy) should be selected
     await user.click(proxyBtn);
-    expect(screen.getByText("You are voting for 1 lot.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes[0]).not.toBeChecked(); // lo1 (not proxy) unchecked
     expect(checkboxes[1]).toBeChecked(); // lo2 (proxy) checked
@@ -993,7 +993,7 @@ describe("VotingPage", () => {
     expect(ownedBtn).toBeInTheDocument();
     // Click it — only lo1 (owned) should be selected
     await user.click(ownedBtn);
-    expect(screen.getByText("You are voting for 1 lot.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes[0]).toBeChecked(); // lo1 (owned) checked
     expect(checkboxes[1]).not.toBeChecked(); // lo2 (proxy) unchecked
@@ -1052,7 +1052,7 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getAllByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Select proxy lots only" }));
     // lo3 is proxy and pending → should be selected; lo2 is proxy but submitted → cannot be toggled
-    expect(screen.getByText("You are voting for 1 lot.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -1070,13 +1070,13 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getAllByRole("checkbox"));
     await user.click(screen.getByRole("button", { name: "Select owned lots only" }));
     // lo2 is owned and pending → selected; lo1 is owned but submitted → not selectable
-    expect(screen.getByText("You are voting for 1 lot.")).toBeInTheDocument();
+    expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  // --- Sidebar toggle (mobile collapsible) ---
+  // --- Mobile drawer (replaces inline sidebar toggle) ---
 
-  it("sidebar toggle button renders in multi-lot view", async () => {
+  it("drawer open button renders in multi-lot view", async () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
@@ -1086,14 +1086,25 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getAllByRole("checkbox"));
-    // Toggle button with aria-expanded should be present
-    const toggleBtn = screen.getByRole("button", { name: /Your Lots/ });
-    expect(toggleBtn).toBeInTheDocument();
-    expect(toggleBtn).toHaveAttribute("aria-expanded", "false");
+    // "☰ Your Lots" open button should be present
+    expect(screen.getByRole("button", { name: "Open lot selector" })).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  it("sidebar toggle expands and collapses the list", async () => {
+  it("drawer open button is NOT shown in single-lot non-proxy view", async () => {
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    expect(screen.queryByRole("button", { name: "Open lot selector" })).not.toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("clicking drawer open button renders the close button (drawer opens)", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
@@ -1104,18 +1115,14 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getAllByRole("checkbox"));
-    const toggleBtn = screen.getByRole("button", { name: /Your Lots/ });
-    expect(toggleBtn).toHaveAttribute("aria-expanded", "false");
-    // Click to expand
-    await user.click(toggleBtn);
-    expect(toggleBtn).toHaveAttribute("aria-expanded", "true");
-    // Click again to collapse
-    await user.click(toggleBtn);
-    expect(toggleBtn).toHaveAttribute("aria-expanded", "false");
+    const openBtn = screen.getByRole("button", { name: "Open lot selector" });
+    await user.click(openBtn);
+    // Close button should be visible inside the drawer
+    expect(screen.getByRole("button", { name: "Close lot selector" })).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  it("sidebar toggle summary shows selected count", async () => {
+  it("clicking the close button inside the drawer closes it", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
@@ -1126,26 +1133,53 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => screen.getAllByRole("checkbox"));
-    // Initially 2 lots selected
-    expect(screen.getByText("Your Lots (2 selected)")).toBeInTheDocument();
-    // Deselect one
-    const checkboxes = screen.getAllByRole("checkbox");
-    await user.click(checkboxes[0]);
-    expect(screen.getByText("Your Lots (1 selected)")).toBeInTheDocument();
+    // Open
+    await user.click(screen.getByRole("button", { name: "Open lot selector" }));
+    expect(screen.getByRole("button", { name: "Close lot selector" })).toBeInTheDocument();
+    // Close
+    await user.click(screen.getByRole("button", { name: "Close lot selector" }));
+    // Drawer is closed: backdrop should no longer be present
+    expect(document.querySelector(".sidebar-drawer__backdrop")).not.toBeInTheDocument();
+    // The drawer element is still in the DOM but now aria-hidden (close button hidden from role query)
+    expect(document.querySelector(".sidebar-drawer")).toBeInTheDocument();
+    expect(document.querySelector(".sidebar-drawer--open")).not.toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  it("sidebar toggle summary says 'all submitted' when all lots are submitted", async () => {
+  it("clicking the backdrop closes the drawer", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false },
       ])
     );
     renderPage();
-    await waitFor(() => screen.getByText("All lots have been submitted."));
-    expect(screen.getByText("Your Lots — all submitted")).toBeInTheDocument();
+    await waitFor(() => screen.getAllByRole("checkbox"));
+    // Open drawer
+    await user.click(screen.getByRole("button", { name: "Open lot selector" }));
+    // Backdrop should be present
+    const backdrop = document.querySelector(".sidebar-drawer__backdrop");
+    expect(backdrop).toBeInTheDocument();
+    // Click backdrop to close
+    await user.click(backdrop!);
+    // Backdrop should be gone after closing
+    expect(document.querySelector(".sidebar-drawer__backdrop")).not.toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("drawer is not shown in single-lot non-proxy view (no showSidebar)", async () => {
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    // No drawer elements should be present
+    expect(document.querySelector(".sidebar-drawer")).not.toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 });
