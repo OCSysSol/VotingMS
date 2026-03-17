@@ -25,7 +25,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Path to the TOCS xlsx file in the examples directory
 const TOCS_XLSX_PATH = path.resolve(
   __dirname,
-  "../../../../examples/Consolidated Lot Positions Report 20-10-2025 to 17-03-2026.xlsx"
+  "../../../examples/Consolidated Lot Positions Report 20-10-2025 to 17-03-2026.xlsx"
 );
 
 const BUILDING_NAME = `AGM Financial Position Test Building-${Date.now()}`;
