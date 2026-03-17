@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { BuildingSelectPage } from "./pages/vote/BuildingSelectPage";
 import { AuthPage } from "./pages/vote/AuthPage";
 import { VotingPage } from "./pages/vote/VotingPage";
@@ -27,6 +28,7 @@ export default function App() {
         <Route path="/admin/*" element={<AdminRoutes />} />
       </Routes>
       <Analytics />
+      <SpeedInsights />
     </>
   );
 }
