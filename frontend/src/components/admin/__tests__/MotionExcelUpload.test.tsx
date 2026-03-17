@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,19 +22,19 @@ describe("MotionExcelUpload", () => {
     renderComponent();
     const link = screen.getByRole("link", { name: "Download template" });
     expect(link).toBeInTheDocument();
-    expect(link).toHaveAttribute("href", "/agm_motions_template.xlsx");
+    expect(link).toHaveAttribute("href", "/agm_motions_template.csv");
     expect(link).toHaveAttribute("download");
   });
 
   it("renders file input with correct label and accept attribute", () => {
     renderComponent();
-    const input = screen.getByLabelText("Upload motions (Excel)");
+    const input = screen.getByLabelText("Upload motions (CSV or Excel)");
     expect(input).toBeInTheDocument();
-    expect(input).toHaveAttribute("accept", ".xlsx,.xls");
+    expect(input).toHaveAttribute("accept", ".csv,text/csv,.xlsx,.xls");
   });
 
   it("shows loading state while parsing", async () => {
-    let resolvePromise!: (value: { motions: { title: string; description: string }[] }) => void;
+    let resolvePromise!: (value: { motions: { title: string; description: string; motion_type: "general" | "special" }[] }) => void;
     mockParse.mockReturnValue(
       new Promise((resolve) => {
         resolvePromise = resolve;
@@ -46,7 +45,7 @@ describe("MotionExcelUpload", () => {
     renderComponent();
 
     const file = new File([""], "motions.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    await user.upload(screen.getByLabelText("Upload motions (Excel)"), file);
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), file);
 
     expect(screen.getByText("Parsing...")).toBeInTheDocument();
 
@@ -59,8 +58,8 @@ describe("MotionExcelUpload", () => {
 
   it("calls onMotionsLoaded with parsed motions on success and shows no error", async () => {
     const motions = [
-      { title: "Motion A", description: "" },
-      { title: "Motion B", description: "" },
+      { title: "Motion A", description: "", motion_type: "general" as const },
+      { title: "Motion B", description: "", motion_type: "general" as const },
     ];
     mockParse.mockResolvedValue({ motions });
 
@@ -69,7 +68,7 @@ describe("MotionExcelUpload", () => {
     renderComponent(onMotionsLoaded);
 
     const file = new File([""], "motions.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    await user.upload(screen.getByLabelText("Upload motions (Excel)"), file);
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), file);
 
     await waitFor(() => {
       expect(onMotionsLoaded).toHaveBeenCalledWith(motions);
@@ -84,7 +83,7 @@ describe("MotionExcelUpload", () => {
     renderComponent();
 
     const file = new File([""], "bad.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    await user.upload(screen.getByLabelText("Upload motions (Excel)"), file);
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), file);
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -104,7 +103,7 @@ describe("MotionExcelUpload", () => {
     renderComponent();
 
     const file = new File([""], "bad.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    await user.upload(screen.getByLabelText("Upload motions (Excel)"), file);
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), file);
 
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -114,11 +113,35 @@ describe("MotionExcelUpload", () => {
     });
   });
 
+  it("renders button with 'Import motions from CSV or Excel' label", () => {
+    renderComponent();
+    expect(screen.getByRole("button", { name: "Import motions from CSV or Excel" })).toBeInTheDocument();
+  });
+
+  it("accepts a CSV file and calls onMotionsLoaded with parsed motions", async () => {
+    const motions = [
+      { title: "CSV Motion", description: "", motion_type: "general" as const },
+    ];
+    mockParse.mockResolvedValue({ motions });
+
+    const onMotionsLoaded = vi.fn();
+    const user = userEvent.setup();
+    renderComponent(onMotionsLoaded);
+
+    const csvFile = new File(["Motion,Description\n1,CSV Motion"], "motions.csv", { type: "text/csv" });
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), csvFile);
+
+    await waitFor(() => {
+      expect(onMotionsLoaded).toHaveBeenCalledWith(motions);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("does nothing when change event fires with no file selected", async () => {
     const onMotionsLoaded = vi.fn();
     renderComponent(onMotionsLoaded);
 
-    const input = screen.getByLabelText("Upload motions (Excel)");
+    const input = screen.getByLabelText("Upload motions (CSV or Excel)");
     // Fire change with an empty FileList (no file)
     fireEvent.change(input, { target: { files: [] } });
 
@@ -130,13 +153,13 @@ describe("MotionExcelUpload", () => {
 
   it("clears previous errors when a new file is selected", async () => {
     mockParse.mockResolvedValueOnce({ errors: ["Row 1: Motion must be a number"] });
-    mockParse.mockResolvedValueOnce({ motions: [{ title: "Motion A", description: "" }] });
+    mockParse.mockResolvedValueOnce({ motions: [{ title: "Motion A", description: "", motion_type: "general" as const }] });
 
     const onMotionsLoaded = vi.fn();
     const user = userEvent.setup();
     renderComponent(onMotionsLoaded);
 
-    const input = screen.getByLabelText("Upload motions (Excel)");
+    const input = screen.getByLabelText("Upload motions (CSV or Excel)");
 
     const badFile = new File([""], "bad.xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
     await user.upload(input, badFile);
@@ -151,6 +174,6 @@ describe("MotionExcelUpload", () => {
     await waitFor(() => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
-    expect(onMotionsLoaded).toHaveBeenCalledWith([{ title: "Motion A", description: "" }]);
+    expect(onMotionsLoaded).toHaveBeenCalledWith([{ title: "Motion A", description: "", motion_type: "general" }]);
   });
 });

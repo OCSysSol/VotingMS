@@ -16,20 +16,27 @@ from app.database import get_db
 from app.routers.admin_auth import require_admin
 from app.services.email_service import EmailService
 from app.schemas.admin import (
-    AGMCloseOut,
-    AGMCreate,
-    AGMDetail,
-    AGMListItem,
-    AGMOut,
+    AddEmailRequest,
+    GeneralMeetingBallotResetOut,
+    GeneralMeetingCloseOut,
+    GeneralMeetingCreate,
+    GeneralMeetingDetail,
+    GeneralMeetingListItem,
+    GeneralMeetingOut,
+    GeneralMeetingStartOut,
     BuildingArchiveOut,
     BuildingCreate,
     BuildingImportResult,
     BuildingOut,
+    BuildingUpdate,
+    FinancialPositionImportResult,
     LotOwnerCreate,
     LotOwnerImportResult,
     LotOwnerOut,
     LotOwnerUpdate,
+    ProxyImportResult,
     ResendReportOut,
+    SetProxyRequest,
 )
 from app.services import admin_service
 
@@ -132,6 +139,16 @@ async def archive_building(
     return BuildingArchiveOut.model_validate(building)
 
 
+@router.patch("/buildings/{building_id}", response_model=BuildingOut)
+async def update_building(
+    building_id: uuid.UUID,
+    data: BuildingUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> BuildingOut:
+    building = await admin_service.update_building(building_id, data, db)
+    return BuildingOut.model_validate(building)
+
+
 # ---------------------------------------------------------------------------
 # Lot owners
 # ---------------------------------------------------------------------------
@@ -146,7 +163,7 @@ async def list_lot_owners(
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
     owners = await admin_service.list_lot_owners(building_id, db)
-    return [LotOwnerOut.model_validate(o) for o in owners]
+    return [LotOwnerOut(**o) for o in owners]
 
 
 @router.post(
@@ -169,6 +186,44 @@ async def import_lot_owners(
 
 
 @router.post(
+    "/buildings/{building_id}/lot-owners/import-proxies",
+    response_model=ProxyImportResult,
+    status_code=status.HTTP_200_OK,
+)
+async def import_proxy_nominations(
+    building_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> ProxyImportResult:
+    fmt = _detect_file_format(file)
+    content = await file.read()
+    if fmt == "csv":
+        result = await admin_service.import_proxies_from_csv(building_id, content, db)
+    else:
+        result = await admin_service.import_proxies_from_excel(building_id, content, db)
+    return ProxyImportResult(**result)
+
+
+@router.post(
+    "/buildings/{building_id}/lot-owners/import-financial-positions",
+    response_model=FinancialPositionImportResult,
+    status_code=status.HTTP_200_OK,
+)
+async def import_financial_positions(
+    building_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> FinancialPositionImportResult:
+    fmt = _detect_file_format(file)
+    content = await file.read()
+    if fmt == "csv":
+        result = await admin_service.import_financial_positions_from_csv(building_id, content, db)
+    else:
+        result = await admin_service.import_financial_positions_from_excel(building_id, content, db)
+    return FinancialPositionImportResult(**result)
+
+
+@router.post(
     "/buildings/{building_id}/lot-owners",
     response_model=LotOwnerOut,
     status_code=status.HTTP_201_CREATED,
@@ -179,7 +234,19 @@ async def add_lot_owner(
     db: AsyncSession = Depends(get_db),
 ) -> LotOwnerOut:
     owner = await admin_service.add_lot_owner(building_id, data, db)
-    return LotOwnerOut.model_validate(owner)
+    return LotOwnerOut(**owner)
+
+
+@router.get(
+    "/lot-owners/{lot_owner_id}",
+    response_model=LotOwnerOut,
+)
+async def get_lot_owner(
+    lot_owner_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    owner = await admin_service.get_lot_owner(lot_owner_id, db)
+    return LotOwnerOut(**owner)
 
 
 @router.patch(
@@ -192,71 +259,170 @@ async def update_lot_owner(
     db: AsyncSession = Depends(get_db),
 ) -> LotOwnerOut:
     owner = await admin_service.update_lot_owner(lot_owner_id, data, db)
-    return LotOwnerOut.model_validate(owner)
-
-
-# ---------------------------------------------------------------------------
-# AGMs
-# ---------------------------------------------------------------------------
+    return LotOwnerOut(**owner)
 
 
 @router.post(
-    "/agms",
-    response_model=AGMOut,
+    "/lot-owners/{lot_owner_id}/emails",
+    response_model=LotOwnerOut,
     status_code=status.HTTP_201_CREATED,
 )
-async def create_agm(
-    data: AGMCreate,
+async def add_email_to_lot_owner(
+    lot_owner_id: uuid.UUID,
+    data: AddEmailRequest,
     db: AsyncSession = Depends(get_db),
-) -> AGMOut:
-    agm_dict = await admin_service.create_agm(data, db)
-    return AGMOut(**agm_dict)
+) -> LotOwnerOut:
+    """Add an email address to a lot owner."""
+    owner = await admin_service.add_email_to_lot_owner(lot_owner_id, data.email, db)
+    return LotOwnerOut(**owner)
 
 
-@router.get("/agms", response_model=list[AGMListItem])
-async def list_agms(
+@router.delete(
+    "/lot-owners/{lot_owner_id}/emails/{email}",
+    response_model=LotOwnerOut,
+)
+async def remove_email_from_lot_owner(
+    lot_owner_id: uuid.UUID,
+    email: str,
     db: AsyncSession = Depends(get_db),
-) -> list[AGMListItem]:
-    items = await admin_service.list_agms(db)
-    return [AGMListItem(**item) for item in items]
+) -> LotOwnerOut:
+    """Remove an email address from a lot owner."""
+    owner = await admin_service.remove_email_from_lot_owner(lot_owner_id, email, db)
+    return LotOwnerOut(**owner)
 
 
-@router.get("/agms/{agm_id}", response_model=AGMDetail)
-async def get_agm_detail(
-    agm_id: uuid.UUID,
+@router.put(
+    "/lot-owners/{lot_owner_id}/proxy",
+    response_model=LotOwnerOut,
+)
+async def set_lot_owner_proxy(
+    lot_owner_id: uuid.UUID,
+    data: SetProxyRequest,
     db: AsyncSession = Depends(get_db),
-) -> AGMDetail:
-    detail = await admin_service.get_agm_detail(agm_id, db)
-    return AGMDetail(**detail)
+) -> LotOwnerOut:
+    """Set or replace the proxy nomination for a lot owner."""
+    owner = await admin_service.set_lot_owner_proxy(lot_owner_id, data.proxy_email, db)
+    return LotOwnerOut(**owner)
+
+
+@router.delete(
+    "/lot-owners/{lot_owner_id}/proxy",
+    response_model=LotOwnerOut,
+)
+async def remove_lot_owner_proxy(
+    lot_owner_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    """Remove the proxy nomination for a lot owner."""
+    owner = await admin_service.remove_lot_owner_proxy(lot_owner_id, db)
+    return LotOwnerOut(**owner)
+
+
+# ---------------------------------------------------------------------------
+# General Meetings
+# ---------------------------------------------------------------------------
 
 
 @router.post(
-    "/agms/{agm_id}/close",
-    response_model=AGMCloseOut,
+    "/general-meetings",
+    response_model=GeneralMeetingOut,
+    status_code=status.HTTP_201_CREATED,
 )
-async def close_agm(
-    agm_id: uuid.UUID,
+async def create_general_meeting(
+    data: GeneralMeetingCreate,
     db: AsyncSession = Depends(get_db),
-) -> AGMCloseOut:
-    agm = await admin_service.close_agm(agm_id, db)
-    email_service = EmailService()
-    asyncio.create_task(email_service.trigger_with_retry(agm.id))
-    return AGMCloseOut(
-        id=agm.id,
-        status=agm.status.value if hasattr(agm.status, "value") else agm.status,
-        closed_at=agm.closed_at,
+) -> GeneralMeetingOut:
+    meeting_dict = await admin_service.create_general_meeting(data, db)
+    return GeneralMeetingOut(**meeting_dict)
+
+
+@router.get("/general-meetings", response_model=list[GeneralMeetingListItem])
+async def list_general_meetings(
+    db: AsyncSession = Depends(get_db),
+) -> list[GeneralMeetingListItem]:
+    items = await admin_service.list_general_meetings(db)
+    return [GeneralMeetingListItem(**item) for item in items]
+
+
+@router.get("/general-meetings/{general_meeting_id}", response_model=GeneralMeetingDetail)
+async def get_general_meeting_detail(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingDetail:
+    detail = await admin_service.get_general_meeting_detail(general_meeting_id, db)
+    return GeneralMeetingDetail(**detail)
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/start",
+    response_model=GeneralMeetingStartOut,
+)
+async def start_general_meeting_endpoint(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingStartOut:
+    meeting = await admin_service.start_general_meeting(general_meeting_id, db)
+    return GeneralMeetingStartOut(
+        id=meeting.id,
+        status=meeting.status.value if hasattr(meeting.status, "value") else meeting.status,
+        meeting_at=meeting.meeting_at,
     )
 
 
 @router.post(
-    "/agms/{agm_id}/resend-report",
+    "/general-meetings/{general_meeting_id}/close",
+    response_model=GeneralMeetingCloseOut,
+)
+async def close_general_meeting(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingCloseOut:
+    meeting = await admin_service.close_general_meeting(general_meeting_id, db)
+    email_service = EmailService()
+    asyncio.create_task(email_service.trigger_with_retry(meeting.id))
+    return GeneralMeetingCloseOut(
+        id=meeting.id,
+        status=meeting.status.value if hasattr(meeting.status, "value") else meeting.status,
+        closed_at=meeting.closed_at,
+        voting_closes_at=meeting.voting_closes_at,
+    )
+
+
+@router.delete("/general-meetings/{general_meeting_id}", status_code=204)
+async def delete_general_meeting_endpoint(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(require_admin),
+):
+    await admin_service.delete_general_meeting(general_meeting_id, db)
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/resend-report",
     response_model=ResendReportOut,
 )
 async def resend_report(
-    agm_id: uuid.UUID,
+    general_meeting_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
 ) -> ResendReportOut:
-    result = await admin_service.resend_report(agm_id, db)
+    result = await admin_service.resend_report(general_meeting_id, db)
     email_service = EmailService()
-    asyncio.create_task(email_service.trigger_with_retry(agm_id))
+    asyncio.create_task(email_service.trigger_with_retry(general_meeting_id))
     return ResendReportOut(**result)
+
+
+@router.delete(
+    "/general-meetings/{general_meeting_id}/ballots",
+    response_model=GeneralMeetingBallotResetOut,
+)
+async def reset_general_meeting_ballots(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingBallotResetOut:
+    """Delete all ballot submissions for a General Meeting.
+
+    Intended for E2E test setup only — clears submitted votes so the test
+    suite can re-run the voting flow without hitting a 409 conflict.
+    """
+    result = await admin_service.reset_general_meeting_ballots(general_meeting_id, db)
+    return GeneralMeetingBallotResetOut(**result)

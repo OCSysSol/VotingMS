@@ -1,7 +1,5 @@
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import AGMReportView from "../AGMReportView";
 import type { MotionDetail } from "../../../api/admin";
 
@@ -11,11 +9,13 @@ const motions: MotionDetail[] = [
     title: "Motion 1",
     description: "First motion description",
     order_index: 0,
+    motion_type: "general" as const,
     tally: {
       yes: { voter_count: 2, entitlement_sum: 200 },
       no: { voter_count: 1, entitlement_sum: 100 },
       abstained: { voter_count: 0, entitlement_sum: 0 },
       absent: { voter_count: 2, entitlement_sum: 150 },
+      not_eligible: { voter_count: 0, entitlement_sum: 0 },
     },
     voter_lists: {
       yes: [
@@ -28,6 +28,7 @@ const motions: MotionDetail[] = [
         { voter_email: "voter4@example.com", lot_number: "L4", entitlement: 100 },
         { voter_email: "voter5@example.com", lot_number: "L5", entitlement: 50 },
       ],
+      not_eligible: [],
     },
   },
   {
@@ -35,11 +36,13 @@ const motions: MotionDetail[] = [
     title: "Motion 2",
     description: null,
     order_index: 1,
+    motion_type: "special" as const,
     tally: {
       yes: { voter_count: 1, entitlement_sum: 50 },
       no: { voter_count: 0, entitlement_sum: 0 },
       abstained: { voter_count: 2, entitlement_sum: 200 },
       absent: { voter_count: 0, entitlement_sum: 0 },
+      not_eligible: { voter_count: 0, entitlement_sum: 0 },
     },
     voter_lists: {
       yes: [{ voter_email: "voter1@example.com", lot_number: "L1", entitlement: 50 }],
@@ -49,6 +52,7 @@ const motions: MotionDetail[] = [
         { voter_email: "voter3@example.com", lot_number: "L3", entitlement: 100 },
       ],
       absent: [],
+      not_eligible: [],
     },
   },
 ];
@@ -68,13 +72,36 @@ describe("AGMReportView", () => {
     expect(againstCells.length).toBeGreaterThan(0);
   });
 
-  it("renders voter counts and entitlement sums", () => {
-    render(<AGMReportView motions={motions} />);
-    // Yes tally: voter_count=2, entitlement_sum=200
+  it("renders voter counts", () => {
+    render(<AGMReportView motions={motions} totalEntitlement={1000} />);
+    // Yes tally for motion 1: voter_count=2
     const cells = screen.getAllByText("2");
     expect(cells.length).toBeGreaterThan(0);
-    const entitlementCells = screen.getAllByText("200");
-    expect(entitlementCells.length).toBeGreaterThan(0);
+  });
+
+  it("shows entitlement sum with percentage when totalEntitlement > 0", () => {
+    // Motion 1 yes: entitlement_sum=200, total=1000 → 20.0%
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={1000} />);
+    expect(screen.getByText("200 (20.0%)")).toBeInTheDocument();
+  });
+
+  it("shows entitlement sum with percentage rounded to 1 decimal", () => {
+    // Motion 1 no: entitlement_sum=100, total=300 → 33.3%
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={300} />);
+    expect(screen.getByText("100 (33.3%)")).toBeInTheDocument();
+  });
+
+  it("shows — for entitlement when totalEntitlement is 0", () => {
+    render(<AGMReportView motions={[motions[0]]} totalEntitlement={0} />);
+    // All categories should show — for entitlement
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThan(0);
+  });
+
+  it("shows — when totalEntitlement prop is omitted (defaults to 0)", () => {
+    render(<AGMReportView motions={[motions[0]]} />);
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThan(0);
   });
 
   it("renders motion description when present", () => {
@@ -86,6 +113,20 @@ describe("AGMReportView", () => {
     render(<AGMReportView motions={[motions[1]]} />);
     // Motion 2 has no description
     expect(screen.queryByText("First motion description")).not.toBeInTheDocument();
+  });
+
+  it("shows General badge for general motion", () => {
+    render(<AGMReportView motions={[motions[0]]} />);
+    const badge = screen.getByLabelText("Motion type: General");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass("motion-type-badge--general");
+  });
+
+  it("shows Special badge for special motion", () => {
+    render(<AGMReportView motions={[motions[1]]} />);
+    const badge = screen.getByLabelText("Motion type: Special");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveClass("motion-type-badge--special");
   });
 
   it("renders export CSV button", () => {

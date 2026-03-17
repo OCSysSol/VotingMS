@@ -3,13 +3,14 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
-from app.models.agm import AGMStatus
+from app.models.general_meeting import GeneralMeetingStatus
+from app.models.motion import MotionType
 
 
-class AGMOut(BaseModel):
+class GeneralMeetingOut(BaseModel):
     id: uuid.UUID
     title: str
-    status: AGMStatus
+    status: GeneralMeetingStatus
     meeting_at: datetime
     voting_closes_at: datetime
 
@@ -20,12 +21,14 @@ class MotionSummaryOut(BaseModel):
     order_index: int
     title: str
     description: str | None
+    motion_type: MotionType
 
     model_config = {"from_attributes": True}
 
 
-class AGMSummaryOut(BaseModel):
-    agm_id: uuid.UUID
+class GeneralMeetingSummaryOut(BaseModel):
+    general_meeting_id: uuid.UUID
+    building_id: uuid.UUID
     title: str
     status: str
     meeting_at: datetime

@@ -1,12 +1,14 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { fetchBuildings, fetchAGMs } from "../../api/voter";
+import { fetchBuildings, fetchGeneralMeetings } from "../../api/voter";
 import { BuildingDropdown } from "../../components/vote/BuildingDropdown";
-import { AGMList } from "../../components/vote/AGMList";
+import { GeneralMeetingList } from "../../components/vote/GeneralMeetingList";
 
 export function BuildingSelectPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const pendingMessage = (location.state as { pendingMessage?: string } | null)?.pendingMessage ?? null;
   const [selectedBuildingId, setSelectedBuildingId] = useState("");
   const [buildingError, setBuildingError] = useState("");
 
@@ -15,9 +17,9 @@ export function BuildingSelectPage() {
     queryFn: fetchBuildings,
   });
 
-  const { data: agms, isLoading: agmsLoading } = useQuery({
-    queryKey: ["agms", selectedBuildingId],
-    queryFn: () => fetchAGMs(selectedBuildingId),
+  const { data: meetings, isLoading: meetingsLoading } = useQuery({
+    queryKey: ["general-meetings", selectedBuildingId],
+    queryFn: () => fetchGeneralMeetings(selectedBuildingId),
     enabled: !!selectedBuildingId,
   });
 
@@ -26,21 +28,13 @@ export function BuildingSelectPage() {
     setBuildingError("");
   };
 
-  const handleEnterVoting = (agmId: string) => {
-    navigate(`/vote/${agmId}/auth`);
+  const handleEnterVoting = (meetingId: string) => {
+    navigate(`/vote/${meetingId}/auth`);
   };
 
-  const handleViewSubmission = (agmId: string) => {
-    navigate(`/vote/${agmId}/auth?view=submission`);
+  const handleViewSubmission = (meetingId: string) => {
+    navigate(`/vote/${meetingId}/auth?view=submission`);
   };
-
-  if (buildingsLoading) {
-    return (
-      <main className="voter-content">
-        <p className="state-message">Loading buildings...</p>
-      </main>
-    );
-  }
 
   if (buildingsError) {
     return (
@@ -54,11 +48,16 @@ export function BuildingSelectPage() {
 
   return (
     <main className="voter-content">
+      {pendingMessage && (
+        <div role="status" className="info-banner" data-testid="pending-message">
+          {pendingMessage}
+        </div>
+      )}
       <div className="hero">
         <span className="hero__badge">Annual General Meeting</span>
         <h1 className="hero__title">Cast Your Vote</h1>
         <p className="hero__subtitle">
-          Select your building to find and vote on open AGM motions.
+          Select your building to find and vote on open General Meeting motions.
         </p>
       </div>
 
@@ -69,21 +68,24 @@ export function BuildingSelectPage() {
       </div>
 
       <div className="card">
-        <BuildingDropdown
-          /* c8 ignore next */
-          buildings={buildings ?? []}
-          value={selectedBuildingId}
-          onChange={handleBuildingChange}
-          error={buildingError}
-        />
-        {agmsLoading && (
+        {buildingsLoading ? (
+          <p className="state-message">Loading buildings...</p>
+        ) : (
+          <BuildingDropdown
+            buildings={buildings ?? []}
+            value={selectedBuildingId}
+            onChange={handleBuildingChange}
+            error={buildingError}
+          />
+        )}
+        {meetingsLoading && (
           <p className="state-message" style={{ padding: "24px 0 8px" }}>
-            Loading AGMs...
+            Loading General Meetings...
           </p>
         )}
-        {agms && (
-          <AGMList
-            agms={agms}
+        {meetings && (
+          <GeneralMeetingList
+            meetings={meetings}
             onEnterVoting={handleEnterVoting}
             onViewSubmission={handleViewSubmission}
           />

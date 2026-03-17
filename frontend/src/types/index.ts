@@ -1,9 +1,11 @@
 // TypeScript types matching backend SQLAlchemy models
 
-export type AGMStatus = "open" | "closed";
-export type VoteChoice = "yes" | "no" | "abstained";
+export type GeneralMeetingStatus = "open" | "closed" | "pending";
+export type VoteChoice = "yes" | "no" | "abstained" | "not_eligible";
 export type VoteStatus = "draft" | "submitted";
 export type EmailDeliveryStatus = "pending" | "delivered" | "failed";
+export type MotionType = "general" | "special";
+export type FinancialPosition = "normal" | "in_arrear";
 
 export interface Building {
   id: string;
@@ -17,17 +19,17 @@ export interface LotOwner {
   id: string;
   building_id: string;
   lot_number: string;
-  email: string;
+  emails: string[];
   unit_entitlement: number;
-  created_at: string;
-  updated_at: string;
+  financial_position: FinancialPosition;
+  proxy_email: string | null;
 }
 
-export interface AGM {
+export interface GeneralMeeting {
   id: string;
   building_id: string;
   title: string;
-  status: AGMStatus;
+  status: GeneralMeetingStatus;
   meeting_at: string;
   voting_closes_at: string;
   created_at: string;
@@ -36,15 +38,16 @@ export interface AGM {
 
 export interface Motion {
   id: string;
-  agm_id: string;
+  general_meeting_id: string;
   title: string;
   description: string | null;
   order_index: number;
+  motion_type: MotionType;
 }
 
-export interface AGMLotWeight {
+export interface GeneralMeetingLotWeight {
   id: string;
-  agm_id: string;
+  general_meeting_id: string;
   lot_owner_id: string;
   voter_email: string;
   unit_entitlement_snapshot: number;
@@ -52,7 +55,7 @@ export interface AGMLotWeight {
 
 export interface Vote {
   id: string;
-  agm_id: string;
+  general_meeting_id: string;
   motion_id: string;
   voter_email: string;
   choice: VoteChoice | null;
@@ -63,7 +66,7 @@ export interface Vote {
 
 export interface BallotSubmission {
   id: string;
-  agm_id: string;
+  general_meeting_id: string;
   voter_email: string;
   submitted_at: string;
 }
@@ -73,14 +76,14 @@ export interface SessionRecord {
   session_token: string;
   voter_email: string;
   building_id: string;
-  agm_id: string;
+  general_meeting_id: string;
   created_at: string;
   expires_at: string;
 }
 
 export interface EmailDelivery {
   id: string;
-  agm_id: string;
+  general_meeting_id: string;
   status: EmailDeliveryStatus;
   total_attempts: number;
   last_error: string | null;

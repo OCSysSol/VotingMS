@@ -1,5 +1,5 @@
 import { apiFetch } from "./client";
-import type { Building, LotOwner } from "../types";
+import type { Building, LotOwner, MotionType } from "../types";
 
 // ---------------------------------------------------------------------------
 // Response types (matching backend schemas)
@@ -12,6 +12,18 @@ export interface BuildingImportResult {
 
 export interface LotOwnerImportResult {
   imported: number;
+  emails: number;
+}
+
+export interface ProxyImportResult {
+  upserted: number;
+  removed: number;
+  skipped: number;
+}
+
+export interface FinancialPositionImportResult {
+  updated: number;
+  skipped: number;
 }
 
 export interface MotionOut {
@@ -19,9 +31,10 @@ export interface MotionOut {
   title: string;
   description: string | null;
   order_index: number;
+  motion_type: MotionType;
 }
 
-export interface AGMOut {
+export interface GeneralMeetingOut {
   id: string;
   building_id: string;
   title: string;
@@ -31,7 +44,7 @@ export interface AGMOut {
   motions: MotionOut[];
 }
 
-export interface AGMListItem {
+export interface GeneralMeetingListItem {
   id: string;
   building_id: string;
   building_name: string;
@@ -43,7 +56,8 @@ export interface AGMListItem {
 }
 
 export interface VoterEntry {
-  lot_number: string;
+  voter_email?: string;
+  lot_number?: string;
   entitlement: number;
 }
 
@@ -57,6 +71,7 @@ export interface MotionTally {
   no: TallyCategory;
   abstained: TallyCategory;
   absent: TallyCategory;
+  not_eligible: TallyCategory;
 }
 
 export interface MotionVoterLists {
@@ -64,6 +79,7 @@ export interface MotionVoterLists {
   no: VoterEntry[];
   abstained: VoterEntry[];
   absent: VoterEntry[];
+  not_eligible: VoterEntry[];
 }
 
 export interface MotionDetail {
@@ -71,11 +87,12 @@ export interface MotionDetail {
   title: string;
   description: string | null;
   order_index: number;
+  motion_type: MotionType;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
 
-export interface AGMDetail {
+export interface GeneralMeetingDetail {
   id: string;
   building_name: string;
   title: string;
@@ -85,13 +102,20 @@ export interface AGMDetail {
   closed_at: string | null;
   total_eligible_voters: number;
   total_submitted: number;
+  total_entitlement: number;
   motions: MotionDetail[];
 }
 
-export interface AGMCloseOut {
+export interface GeneralMeetingCloseOut {
   id: string;
   status: string;
   closed_at: string;
+}
+
+export interface GeneralMeetingStartOut {
+  id: string;
+  status: string;
+  meeting_at: string;
 }
 
 export interface ResendReportOut {
@@ -109,22 +133,65 @@ export interface EmailDeliveryInfo {
 
 export interface LotOwnerCreateRequest {
   lot_number: string;
-  email: string;
+  emails: string[];
   unit_entitlement: number;
+  financial_position?: string;
 }
 
 export interface LotOwnerUpdateRequest {
-  email?: string;
   unit_entitlement?: number;
+  financial_position?: string;
+}
+
+export interface AddEmailRequest {
+  email: string;
+}
+
+export async function addEmailToLotOwner(
+  lotOwnerId: string,
+  email: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/emails`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
+export async function removeEmailFromLotOwner(
+  lotOwnerId: string,
+  email: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/emails/${encodeURIComponent(email)}`, {
+    method: "DELETE",
+  });
+}
+
+export async function setLotOwnerProxy(
+  lotOwnerId: string,
+  proxyEmail: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/proxy`, {
+    method: "PUT",
+    body: JSON.stringify({ proxy_email: proxyEmail }),
+  });
+}
+
+export async function removeLotOwnerProxy(
+  lotOwnerId: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/proxy`, {
+    method: "DELETE",
+  });
 }
 
 export interface MotionCreateRequest {
   title: string;
   description: string | null;
   order_index: number;
+  motion_type: MotionType;
 }
 
-export interface AGMCreateRequest {
+export interface GeneralMeetingCreateRequest {
   building_id: string;
   title: string;
   meeting_at: string;
@@ -139,6 +206,11 @@ export interface AGMCreateRequest {
 export interface BuildingCreateRequest {
   name: string;
   manager_email: string;
+}
+
+export interface BuildingUpdateRequest {
+  name?: string;
+  manager_email?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +246,13 @@ export async function createBuilding(data: BuildingCreateRequest): Promise<Build
 export async function archiveBuilding(buildingId: string): Promise<BuildingArchiveOut> {
   return apiFetch<BuildingArchiveOut>(`/api/admin/buildings/${buildingId}/archive`, {
     method: "POST",
+  });
+}
+
+export async function updateBuilding(buildingId: string, data: BuildingUpdateRequest): Promise<Building> {
+  return apiFetch<Building>(`/api/admin/buildings/${buildingId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
   });
 }
 
@@ -220,6 +299,10 @@ export async function listLotOwners(buildingId: string): Promise<LotOwner[]> {
   return apiFetch<LotOwner[]>(`/api/admin/buildings/${buildingId}/lot-owners`);
 }
 
+export async function getLotOwner(lotOwnerId: string): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}`);
+}
+
 export async function addLotOwner(
   buildingId: string,
   data: LotOwnerCreateRequest
@@ -261,33 +344,91 @@ export async function importLotOwners(
   return response.json() as Promise<LotOwnerImportResult>;
 }
 
-// ---------------------------------------------------------------------------
-// AGMs
-// ---------------------------------------------------------------------------
-
-export async function listAGMs(): Promise<AGMListItem[]> {
-  return apiFetch<AGMListItem[]>("/api/admin/agms");
+export async function importProxyNominations(
+  buildingId: string,
+  file: File
+): Promise<ProxyImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/admin/buildings/${buildingId}/lot-owners/import-proxies`,
+    {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ProxyImportResult>;
 }
 
-export async function createAGM(data: AGMCreateRequest): Promise<AGMOut> {
-  return apiFetch<AGMOut>("/api/admin/agms", {
+export async function importFinancialPositions(
+  buildingId: string,
+  file: File
+): Promise<FinancialPositionImportResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await fetch(
+    `${import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000"}/api/admin/buildings/${buildingId}/lot-owners/import-financial-positions`,
+    {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+    }
+  );
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<FinancialPositionImportResult>;
+}
+
+// ---------------------------------------------------------------------------
+// General Meetings
+// ---------------------------------------------------------------------------
+
+export async function listGeneralMeetings(): Promise<GeneralMeetingListItem[]> {
+  return apiFetch<GeneralMeetingListItem[]>("/api/admin/general-meetings");
+}
+
+export async function createGeneralMeeting(data: GeneralMeetingCreateRequest): Promise<GeneralMeetingOut> {
+  return apiFetch<GeneralMeetingOut>("/api/admin/general-meetings", {
     method: "POST",
     body: JSON.stringify(data),
   });
 }
 
-export async function getAGMDetail(agmId: string): Promise<AGMDetail> {
-  return apiFetch<AGMDetail>(`/api/admin/agms/${agmId}`);
+export async function getGeneralMeetingDetail(meetingId: string): Promise<GeneralMeetingDetail> {
+  return apiFetch<GeneralMeetingDetail>(`/api/admin/general-meetings/${meetingId}`);
 }
 
-export async function closeAGM(agmId: string): Promise<AGMCloseOut> {
-  return apiFetch<AGMCloseOut>(`/api/admin/agms/${agmId}/close`, {
+export async function closeGeneralMeeting(meetingId: string): Promise<GeneralMeetingCloseOut> {
+  return apiFetch<GeneralMeetingCloseOut>(`/api/admin/general-meetings/${meetingId}/close`, {
     method: "POST",
   });
 }
 
-export async function resendReport(agmId: string): Promise<ResendReportOut> {
-  return apiFetch<ResendReportOut>(`/api/admin/agms/${agmId}/resend-report`, {
+export async function startGeneralMeeting(meetingId: string): Promise<GeneralMeetingStartOut> {
+  return apiFetch<GeneralMeetingStartOut>(`/api/admin/general-meetings/${meetingId}/start`, {
     method: "POST",
   });
+}
+
+export async function resendReport(meetingId: string): Promise<ResendReportOut> {
+  return apiFetch<ResendReportOut>(`/api/admin/general-meetings/${meetingId}/resend-report`, {
+    method: "POST",
+  });
+}
+
+export async function deleteGeneralMeeting(meetingId: string): Promise<void> {
+  const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  const res = await fetch(`${BASE_URL}/api/admin/general-meetings/${meetingId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`Failed to delete meeting: ${res.status}`);
 }

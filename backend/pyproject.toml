@@ -15,13 +15,14 @@ dependencies = [
     "alembic>=1.13",
     "pydantic-settings>=2.0",
     "python-multipart>=0.0.9",
-    "resend>=0.8",
+    "aiosmtplib>=2.0",
     "structlog>=25.5.0",
     "python-json-logger>=4.0.0",
     "opentelemetry-api>=1.40.0",
     "jinja2>=3.1.6",
     "openpyxl>=3.1.5",
     "itsdangerous>=2.2.0",
+    "greenlet>=3.3.2",
 ]
 
 [project.optional-dependencies]

@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -33,8 +32,12 @@ function renderPage(buildingId = "b1") {
 }
 
 describe("BuildingDetailPage", () => {
-  it("shows loading state initially", () => {
+  it("shows loading state inline in table while page header remains visible", () => {
     renderPage();
+    // Page structure renders immediately
+    expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Lot Owner" })).toBeInTheDocument();
+    // Loading message is inside the table body
     expect(screen.getByText("Loading lot owners...")).toBeInTheDocument();
   });
 
@@ -160,22 +163,22 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("shows Create AGM button", async () => {
+  it("shows Create General Meeting button", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Create AGM" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create General Meeting" })).toBeInTheDocument();
     });
   });
 
-  it("navigates to /admin/agms/new when Create AGM clicked", async () => {
+  it("navigates to /admin/general-meetings/new when Create General Meeting clicked", async () => {
     mockNavigate.mockClear();
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Create AGM" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Create General Meeting" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Create AGM" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/admin/agms/new");
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/new");
   });
 
   it("shows Archive Building button for active buildings", async () => {
@@ -229,6 +232,82 @@ describe("BuildingDetailPage", () => {
     });
   });
 
+  it("shows Import Proxy Nominations upload section", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Proxy nominations file")).toBeInTheDocument();
+    });
+  });
+
+  it("shows success after proxy nominations upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Proxy nominations file")).toBeInTheDocument();
+    });
+    const file = new File(["Lot#,Proxy Email\n1A,proxy@test.com"], "proxies.csv", { type: "text/csv" });
+    await user.upload(screen.getByLabelText("Proxy nominations file"), file);
+    await waitFor(() => {
+      expect(screen.getByText(/3 upserted/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows error when proxy nominations upload fails", async () => {
+    server.use(
+      http.post("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/import-proxies", () => {
+        return HttpResponse.json({ detail: "Missing required CSV headers" }, { status: 422 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Proxy nominations file")).toBeInTheDocument();
+    });
+    const file = new File(["bad"], "bad.csv", { type: "text/csv" });
+    await user.upload(screen.getByLabelText("Proxy nominations file"), file);
+    await waitFor(() => {
+      expect(screen.getAllByText(/Error:/).length).toBeGreaterThan(0);
+    });
+  });
+
+  it("shows Import Financial Positions upload section", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Financial positions file")).toBeInTheDocument();
+    });
+  });
+
+  it("shows success after financial positions upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Financial positions file")).toBeInTheDocument();
+    });
+    const file = new File(["Lot#,Financial Position\n1A,Normal"], "fp.csv", { type: "text/csv" });
+    await user.upload(screen.getByLabelText("Financial positions file"), file);
+    await waitFor(() => {
+      expect(screen.getByText(/4 updated/)).toBeInTheDocument();
+    });
+  });
+
+  it("shows error when financial positions upload fails", async () => {
+    server.use(
+      http.post("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/import-financial-positions", () => {
+        return HttpResponse.json({ detail: "Invalid value" }, { status: 422 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Financial positions file")).toBeInTheDocument();
+    });
+    const file = new File(["bad"], "bad.csv", { type: "text/csv" });
+    await user.upload(screen.getByLabelText("Financial positions file"), file);
+    await waitFor(() => {
+      expect(screen.getAllByText(/Error:/).length).toBeGreaterThan(0);
+    });
+  });
+
   it("does not show Archive Building button for archived buildings", async () => {
     server.use(
       http.get("http://localhost:8000/api/admin/buildings", () => {
@@ -248,5 +327,131 @@ describe("BuildingDetailPage", () => {
       expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Archive Building" })).not.toBeInTheDocument();
+  });
+
+  it("renders back button", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+  });
+
+  it("clicking back navigates to /admin/buildings", async () => {
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "← Back" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/admin/buildings");
+  });
+
+  // --- Edit Building modal ---
+
+  it("shows Edit Building button when building is found", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+  });
+
+  it("does not show Edit Building button when building is not found", async () => {
+    renderPage("b-unknown");
+    await waitFor(() => {
+      expect(screen.getByText("Building")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Edit Building" })).not.toBeInTheDocument();
+  });
+
+  it("opens edit modal when Edit Building clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    expect(screen.getByRole("heading", { name: "Edit Building" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Alpha Tower");
+    expect(screen.getByLabelText("Manager Email")).toHaveValue("alpha@example.com");
+  });
+
+  it("closes modal on Cancel without saving", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    expect(screen.getByRole("heading", { name: "Edit Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("heading", { name: "Edit Building" })).not.toBeInTheDocument();
+  });
+
+  it("shows 'No changes detected' when neither field changed", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.getByText("No changes detected")).toBeInTheDocument();
+    });
+  });
+
+  it("submits with updated name only and closes modal", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const nameInput = screen.getByLabelText("Name");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Updated Tower");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Edit Building" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("submits with updated manager email only and closes modal", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const emailInput = screen.getByLabelText("Manager Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "new@example.com");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Edit Building" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows server error when PATCH fails", async () => {
+    server.use(
+      http.patch("http://localhost:8000/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({ detail: "Name already taken" }, { status: 409 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const nameInput = screen.getByLabelText("Name");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Duplicate Tower");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.getByText(/409/)).toBeInTheDocument();
+    });
   });
 });

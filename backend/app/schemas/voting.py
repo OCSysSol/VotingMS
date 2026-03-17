@@ -3,6 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+from app.models.motion import MotionType
 from app.models.vote import VoteChoice
 
 
@@ -11,6 +12,7 @@ class MotionOut(BaseModel):
     title: str
     description: Optional[str]
     order_index: int
+    motion_type: MotionType
 
     model_config = {"from_attributes": True}
 
@@ -18,6 +20,7 @@ class MotionOut(BaseModel):
 class DraftSaveRequest(BaseModel):
     motion_id: uuid.UUID
     choice: Optional[VoteChoice] = None
+    lot_owner_id: Optional[uuid.UUID] = None
 
 
 class DraftSaveResponse(BaseModel):
@@ -27,6 +30,7 @@ class DraftSaveResponse(BaseModel):
 class DraftItem(BaseModel):
     motion_id: uuid.UUID
     choice: VoteChoice
+    lot_owner_id: Optional[uuid.UUID] = None
 
     model_config = {"from_attributes": True}
 
@@ -41,9 +45,15 @@ class VoteSummaryItem(BaseModel):
     choice: VoteChoice
 
 
+class LotBallotResult(BaseModel):
+    lot_owner_id: uuid.UUID
+    lot_number: str
+    votes: list[VoteSummaryItem]
+
+
 class SubmitResponse(BaseModel):
     submitted: bool
-    votes: list[VoteSummaryItem]
+    lots: list[LotBallotResult]
 
 
 class BallotVoteItem(BaseModel):
@@ -51,10 +61,19 @@ class BallotVoteItem(BaseModel):
     motion_title: str
     order_index: int
     choice: VoteChoice
+    eligible: bool = True
+
+
+class LotBallotSummary(BaseModel):
+    lot_owner_id: uuid.UUID
+    lot_number: str
+    financial_position: str
+    votes: list[BallotVoteItem]
 
 
 class MyBallotResponse(BaseModel):
     voter_email: str
-    agm_title: str
+    meeting_title: str
     building_name: str
-    votes: list[BallotVoteItem]
+    submitted_lots: list[LotBallotSummary]
+    remaining_lot_owner_ids: list[uuid.UUID]

@@ -1,8 +1,8 @@
 """
-Email service for AGM results report delivery via Resend.
+Email service for AGM results report delivery via SMTP (aiosmtplib).
 
 Provides:
-- send_report(): render the HTML template and send via Resend
+- send_report(): render the HTML template and send via SMTP with STARTTLS
 - trigger_with_retry(): background task with exponential backoff, up to 30 attempts
 - requeue_pending_on_startup(): re-launch retry tasks for pending deliveries on startup
 """
@@ -14,7 +14,9 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import resend
+import aiosmtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -22,8 +24,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.logging_config import get_logger
 from app.models import (
-    AGM,
-    AGMLotWeight,
+    GeneralMeeting,
+    GeneralMeetingLotWeight,
     BallotSubmission,
     EmailDelivery,
     EmailDeliveryStatus,
@@ -32,7 +34,7 @@ from app.models import (
     VoteStatus,
 )
 from app.models.building import Building
-from app.services.admin_service import get_agm_detail
+from app.services.admin_service import get_general_meeting_detail
 
 logger = get_logger(__name__)
 
@@ -59,6 +61,37 @@ def _make_session_factory() -> async_sessionmaker:
     return async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
+async def send_otp_email(to_email: str, meeting_title: str, code: str) -> None:
+    """
+    Send an OTP verification email to the given address.
+    Respects settings.email_override: if set, all emails go to the override address
+    and the original recipient is preserved in X-Original-To header.
+    """
+    env = _get_jinja_env()
+    template = env.get_template("otp_email.html")
+    html_body = template.render(meeting_title=meeting_title, code=code)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = f"Your AGM Voting Code — {meeting_title}"
+    msg["From"] = settings.smtp_from_email
+    to_addr = settings.email_override if settings.email_override else to_email
+    msg["To"] = to_addr
+    if settings.email_override:
+        msg["X-Original-To"] = to_email
+    msg.attach(MIMEText(html_body, "html"))
+
+    await aiosmtplib.send(
+        msg,
+        hostname=settings.smtp_host,
+        port=settings.smtp_port,
+        username=settings.smtp_username,
+        password=settings.smtp_password,
+        start_tls=True,
+    )
+
+    logger.info("otp_email_sent", to=to_addr, meeting_title=meeting_title)
+
+
 class EmailService:
     async def send_report(self, agm_id: uuid.UUID, db: AsyncSession) -> None:
         """
@@ -69,8 +102,8 @@ class EmailService:
         """
         log = logger.bind(agm_id=str(agm_id))
 
-        # Fetch AGM detail (raises HTTPException with 404 if not found)
-        detail = await get_agm_detail(agm_id, db)
+        # Fetch General Meeting detail (raises HTTPException with 404 if not found)
+        detail = await get_general_meeting_detail(agm_id, db)
 
         building_name: str = detail["building_name"]
         agm_title: str = detail["title"]
@@ -78,17 +111,17 @@ class EmailService:
         voting_closes_at: str = str(detail["voting_closes_at"])
 
         # Fetch manager email from the Building record
-        agm_result = await db.execute(select(AGM).where(AGM.id == agm_id))
-        agm_obj = agm_result.scalar_one_or_none()
-        if agm_obj is None:  # pragma: no cover — already caught above by get_agm_detail
-            raise ValueError(f"AGM {agm_id} not found")
+        meeting_result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == agm_id))
+        meeting_obj = meeting_result.scalar_one_or_none()
+        if meeting_obj is None:  # pragma: no cover — already caught above by get_general_meeting_detail
+            raise ValueError(f"General Meeting {agm_id} not found")
 
         building_result = await db.execute(
-            select(Building).where(Building.id == agm_obj.building_id)
+            select(Building).where(Building.id == meeting_obj.building_id)
         )
         building = building_result.scalar_one_or_none()
         if building is None or not building.manager_email:
-            log.error("building_missing_manager_email", building_id=str(agm_obj.building_id))
+            log.error("building_missing_manager_email", building_id=str(meeting_obj.building_id))
             raise ValueError(
                 f"Building for AGM {agm_id} has no manager_email configured"
             )
@@ -108,17 +141,26 @@ class EmailService:
             motions=detail["motions"],
         )
 
-        # Send via Resend
-        resend.api_key = settings.resend_api_key
-        params: resend.Emails.SendParams = {
-            "from": settings.resend_from_email,
-            "to": [manager_email],
-            "subject": f"AGM Results Report: {agm_title}",
-            "html": html_body,
-        }
-        resend.Emails.send(params)
+        # Send via SMTP (STARTTLS)
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"General Meeting Results Report: {agm_title}"
+        msg["From"] = settings.smtp_from_email
+        to_addr = settings.email_override if settings.email_override else manager_email
+        msg["To"] = to_addr
+        if settings.email_override:
+            msg["X-Original-To"] = manager_email
+        msg.attach(MIMEText(html_body, "html"))
 
-        log.info("email_sent", to=manager_email, subject=f"AGM Results Report: {agm_title}")
+        await aiosmtplib.send(
+            msg,
+            hostname=settings.smtp_host,
+            port=settings.smtp_port,
+            username=settings.smtp_username,
+            password=settings.smtp_password,
+            start_tls=True,
+        )
+
+        log.info("email_sent", to=to_addr, subject=f"General Meeting Results Report: {agm_title}")
 
     async def trigger_with_retry(self, agm_id: uuid.UUID) -> None:
         """
@@ -137,7 +179,7 @@ class EmailService:
             async with session_factory() as db:
                 # Fetch current delivery record
                 result = await db.execute(
-                    select(EmailDelivery).where(EmailDelivery.agm_id == agm_id)
+                    select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm_id)
                 )
                 delivery = result.scalar_one_or_none()
 
@@ -247,7 +289,7 @@ class EmailService:
         for delivery in pending_deliveries:
             logger.info(
                 "requeueing_pending_email",
-                agm_id=str(delivery.agm_id),
+                general_meeting_id=str(delivery.general_meeting_id),
                 total_attempts=delivery.total_attempts,
             )
-            asyncio.create_task(self.trigger_with_retry(delivery.agm_id))
+            asyncio.create_task(self.trigger_with_retry(delivery.general_meeting_id))

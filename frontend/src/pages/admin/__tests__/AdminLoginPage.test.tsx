@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -101,5 +100,18 @@ describe("AdminLoginPage", () => {
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     expect(screen.getByRole("button", { name: "Signing in…" })).toBeDisabled();
     resolve(HttpResponse.json({ ok: true }) as unknown as Response);
+  });
+
+  it("renders Back to home button", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "← Back to home" })).toBeInTheDocument();
+  });
+
+  it("navigates to / when Back to home is clicked", async () => {
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "← Back to home" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/");
   });
 });

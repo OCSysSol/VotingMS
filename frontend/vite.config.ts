@@ -3,6 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ["react", "react-dom", "react-router-dom"],
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: "jsdom",
@@ -17,7 +26,6 @@ export default defineConfig({
         "src/components/vote/**/*.tsx",
         "src/hooks/useServerTime.ts",
         "src/hooks/useCountdown.ts",
-        "src/hooks/useAutoSave.ts",
         "src/pages/vote/**/*.tsx",
         "src/routes/VoteRoutes.tsx",
         "src/App.tsx",
@@ -30,7 +38,7 @@ export default defineConfig({
         "src/utils/parseMotionsExcel.ts",
         // Phase D public summary
         "src/api/public.ts",
-        "src/pages/AGMSummaryPage.tsx",
+        "src/pages/GeneralMeetingSummaryPage.tsx",
       ],
       thresholds: {
         // Per-file thresholds for Phase 4 vote files
@@ -38,12 +46,11 @@ export default defineConfig({
         "src/api/client.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/hooks/useServerTime.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/hooks/useCountdown.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
-        "src/hooks/useAutoSave.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/App.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/routes/VoteRoutes.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/utils/parseMotionsExcel.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/api/public.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
-        "src/pages/AGMSummaryPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/pages/GeneralMeetingSummaryPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

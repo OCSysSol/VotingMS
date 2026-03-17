@@ -1,14 +1,11 @@
 import type { VoteChoice } from "../../types";
 import type { MotionOut } from "../../api/voter";
 import { VoteButton } from "./VoteButton";
-import { SaveIndicator } from "./SaveIndicator";
-import { useAutoSave } from "../../hooks/useAutoSave";
 
 const CHOICES: VoteChoice[] = ["yes", "no", "abstained"];
 
 interface MotionCardProps {
   motion: MotionOut;
-  agmId: string;
   choice: VoteChoice | null;
   onChoiceChange: (motionId: string, choice: VoteChoice | null) => void;
   disabled: boolean;
@@ -17,14 +14,11 @@ interface MotionCardProps {
 
 export function MotionCard({
   motion,
-  agmId,
   choice,
   onChoiceChange,
   disabled,
   highlight,
 }: MotionCardProps) {
-  const { status, saveNow } = useAutoSave(agmId, motion.id, choice);
-
   const handleClick = (c: VoteChoice) => {
     /* c8 ignore next */
     if (disabled) return;
@@ -33,12 +27,22 @@ export function MotionCard({
     onChoiceChange(motion.id, next);
   };
 
+  const isSpecial = motion.motion_type === "special";
+
   return (
     <div
       data-testid={`motion-card-${motion.id}`}
       className={`motion-card${highlight ? " motion-card--highlight" : ""}`}
     >
-      <p className="motion-card__number">Motion {motion.order_index}</p>
+      <div className="motion-card__top-row">
+        <p className="motion-card__number">Motion {motion.order_index}</p>
+        <span
+          className={`motion-type-badge${isSpecial ? " motion-type-badge--special" : " motion-type-badge--general"}`}
+          aria-label={`Motion type: ${isSpecial ? "Special" : "General"}`}
+        >
+          {isSpecial ? "Special" : "General"}
+        </span>
+      </div>
       <h3 className="motion-card__title">{motion.title}</h3>
       {motion.description && (
         <p className="motion-card__description">{motion.description}</p>
@@ -50,12 +54,10 @@ export function MotionCard({
             choice={c}
             selected={choice === c}
             disabled={disabled}
+            ariaDisabled={false}
             onClick={() => handleClick(c)}
           />
         ))}
-      </div>
-      <div className="motion-card__footer">
-        <SaveIndicator status={status} onSave={saveNow} />
       </div>
     </div>
   );

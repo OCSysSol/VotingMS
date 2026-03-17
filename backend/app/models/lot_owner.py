@@ -1,10 +1,16 @@
+import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
+
+
+class FinancialPosition(str, enum.Enum):
+    normal = "normal"
+    in_arrear = "in_arrear"
 
 
 class LotOwner(Base):
@@ -23,8 +29,13 @@ class LotOwner(Base):
         nullable=False,
     )
     lot_number: Mapped[str] = mapped_column(String, nullable=False)
-    email: Mapped[str] = mapped_column(String, nullable=False)
     unit_entitlement: Mapped[int] = mapped_column(Integer, nullable=False)
+    financial_position: Mapped[FinancialPosition] = mapped_column(
+        Enum(FinancialPosition, name="financialposition"),
+        nullable=False,
+        default=FinancialPosition.normal,
+        server_default=FinancialPosition.normal.value,
+    )
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -42,6 +53,15 @@ class LotOwner(Base):
     building: Mapped["Building"] = relationship(  # noqa: F821
         "Building", back_populates="lot_owners"
     )
-    agm_lot_weights: Mapped[list["AGMLotWeight"]] = relationship(  # noqa: F821
-        "AGMLotWeight", back_populates="lot_owner", cascade="all, delete-orphan"
+    emails: Mapped[list["LotOwnerEmail"]] = relationship(  # noqa: F821
+        "LotOwnerEmail", back_populates="lot_owner", cascade="all, delete-orphan"
+    )
+    general_meeting_lot_weights: Mapped[list["GeneralMeetingLotWeight"]] = relationship(  # noqa: F821
+        "GeneralMeetingLotWeight", back_populates="lot_owner", cascade="all, delete-orphan"
+    )
+    ballot_submissions: Mapped[list["BallotSubmission"]] = relationship(  # noqa: F821
+        "BallotSubmission", back_populates="lot_owner", cascade="all, delete-orphan"
+    )
+    lot_proxy: Mapped["LotProxy | None"] = relationship(  # noqa: F821
+        "LotProxy", back_populates="lot_owner", cascade="all, delete-orphan", uselist=False
     )

@@ -1,6 +1,18 @@
 import { test as base, expect } from "@playwright/test";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 export { expect };
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Read the branch-name suffix written by global-setup so every spec can
+// namespace its seeded entity names without re-computing the branch name.
+const suffixFile = path.join(__dirname, ".run-suffix");
+export const RUN_SUFFIX = fs.existsSync(suffixFile)
+  ? fs.readFileSync(suffixFile, "utf-8").trim()
+  : "local";
 
 // Console/network error patterns that are safe to ignore
 const IGNORED_PATTERNS = [
@@ -17,6 +29,10 @@ const IGNORED_PATTERNS = [
   // the browser logs "Failed to load resource: status of 401" for intentional
   // wrong-credential submissions, which is correct app behaviour not an error.
   /status of 401/i,
+  // 404 from /api/general-meeting/{id}/summary is expected in the "invalid AGM ID
+  // shows not-found state" test — the test deliberately uses a non-existent UUID
+  // to verify that the component renders the "Meeting not found" fallback UI.
+  /status of 404/i,
 ];
 
 /**
@@ -48,11 +64,14 @@ export const test = base.extend<{ consoleErrors: string[] }>({
       // Capture failed network requests to our API — catches wrong base URL,
       // connection refused (e.g. VITE_API_BASE_URL pointing to localhost),
       // and other network-level failures.
+      // ERR_ABORTED is excluded: it fires when page.goto() navigates away while
+      // requests are still in-flight, which is expected behaviour, not an error.
       page.on("requestfailed", (req) => {
         const url = req.url();
-        if (url.includes("/api/")) {
+        const errorText = req.failure()?.errorText ?? "unknown";
+        if (url.includes("/api/") && !errorText.includes("ERR_ABORTED")) {
           errors.push(
-            `[network] ${req.method()} ${url} failed: ${req.failure()?.errorText ?? "unknown"}`
+            `[network] ${req.method()} ${url} failed: ${errorText}`
           );
         }
       });

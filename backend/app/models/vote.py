@@ -19,6 +19,7 @@ class VoteChoice(str, enum.Enum):
     yes = "yes"
     no = "no"
     abstained = "abstained"
+    not_eligible = "not_eligible"
 
 
 class VoteStatus(str, enum.Enum):
@@ -30,8 +31,8 @@ class Vote(Base):
     __tablename__ = "votes"
     __table_args__ = (
         UniqueConstraint(
-            "agm_id", "motion_id", "voter_email",
-            name="uq_votes_agm_motion_voter",
+            "general_meeting_id", "motion_id", "lot_owner_id",
+            name="uq_votes_gm_motion_lot_owner",
         ),
     )
 
@@ -39,8 +40,8 @@ class Vote(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    agm_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("agms.id", ondelete="CASCADE"),
+    general_meeting_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("general_meetings.id", ondelete="CASCADE"),
         nullable=False,
     )
     motion_id: Mapped[uuid.UUID] = mapped_column(
@@ -48,6 +49,10 @@ class Vote(Base):
         nullable=False,
     )
     voter_email: Mapped[str] = mapped_column(String, nullable=False)
+    lot_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("lot_owners.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     choice: Mapped[VoteChoice | None] = mapped_column(
         Enum(VoteChoice, name="votechoice"),
         nullable=True,
@@ -71,8 +76,8 @@ class Vote(Base):
     )
 
     # Relationships
-    agm: Mapped["AGM"] = relationship(  # noqa: F821
-        "AGM", back_populates="votes"
+    general_meeting: Mapped["GeneralMeeting"] = relationship(  # noqa: F821
+        "GeneralMeeting", back_populates="votes"
     )
     motion: Mapped["Motion"] = relationship(  # noqa: F821
         "Motion", back_populates="votes"

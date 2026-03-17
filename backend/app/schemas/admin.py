@@ -8,6 +8,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, field_validator, model_validator
 
+from app.models.motion import MotionType
+
 
 # ---------------------------------------------------------------------------
 # Building schemas
@@ -43,6 +45,31 @@ class BuildingCreate(BaseModel):
         return v
 
 
+class BuildingUpdate(BaseModel):
+    name: str | None = None
+    manager_email: str | None = None
+
+    @field_validator("name")
+    @classmethod
+    def name_non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("name must not be empty")
+        return v
+
+    @field_validator("manager_email")
+    @classmethod
+    def email_non_empty(cls, v: str | None) -> str | None:
+        if v is not None and not v.strip():
+            raise ValueError("manager_email must not be empty")
+        return v
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "BuildingUpdate":
+        if self.name is None and self.manager_email is None:
+            raise ValueError("At least one of name or manager_email must be provided")
+        return self
+
+
 class BuildingImportResult(BaseModel):
     created: int
     updated: int
@@ -56,16 +83,19 @@ class BuildingImportResult(BaseModel):
 class LotOwnerOut(BaseModel):
     id: uuid.UUID
     lot_number: str
-    email: str
+    emails: list[str]
     unit_entitlement: int
+    financial_position: str
+    proxy_email: str | None = None
 
     model_config = {"from_attributes": True}
 
 
 class LotOwnerCreate(BaseModel):
     lot_number: str
-    email: str
     unit_entitlement: int
+    financial_position: str = "normal"
+    emails: list[str] = []
 
     @field_validator("unit_entitlement")
     @classmethod
@@ -81,17 +111,17 @@ class LotOwnerCreate(BaseModel):
             raise ValueError("lot_number must not be empty")
         return v
 
-    @field_validator("email")
+    @field_validator("financial_position")
     @classmethod
-    def email_non_empty(cls, v: str) -> str:
-        if not v.strip():
-            raise ValueError("email must not be empty")
+    def financial_position_valid(cls, v: str) -> str:
+        if v not in ("normal", "in_arrear"):
+            raise ValueError("financial_position must be 'normal' or 'in_arrear'")
         return v
 
 
 class LotOwnerUpdate(BaseModel):
-    email: str | None = None
     unit_entitlement: int | None = None
+    financial_position: str | None = None
 
     @field_validator("unit_entitlement")
     @classmethod
@@ -100,15 +130,45 @@ class LotOwnerUpdate(BaseModel):
             raise ValueError("unit_entitlement must be >= 0")
         return v
 
+    @field_validator("financial_position")
+    @classmethod
+    def financial_position_valid(cls, v: str | None) -> str | None:
+        if v is not None and v not in ("normal", "in_arrear"):
+            raise ValueError("financial_position must be 'normal' or 'in_arrear'")
+        return v
+
     @model_validator(mode="after")
     def at_least_one_field(self) -> "LotOwnerUpdate":
-        if self.email is None and self.unit_entitlement is None:
-            raise ValueError("At least one of email or unit_entitlement must be provided")
+        if self.unit_entitlement is None and self.financial_position is None:
+            raise ValueError("At least one of unit_entitlement or financial_position must be provided")
         return self
+
+
+class AddEmailRequest(BaseModel):
+    email: str
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
+class SetProxyRequest(BaseModel):
+    proxy_email: str
+
+    @field_validator("proxy_email")
+    @classmethod
+    def proxy_email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("proxy_email must not be empty")
+        return v
 
 
 class LotOwnerImportResult(BaseModel):
     imported: int
+    emails: int
 
 
 # ---------------------------------------------------------------------------
@@ -120,6 +180,7 @@ class MotionCreate(BaseModel):
     title: str
     description: str | None = None
     order_index: int
+    motion_type: MotionType = MotionType.general
 
 
 class MotionOut(BaseModel):
@@ -127,16 +188,17 @@ class MotionOut(BaseModel):
     title: str
     description: str | None
     order_index: int
+    motion_type: MotionType
 
     model_config = {"from_attributes": True}
 
 
 # ---------------------------------------------------------------------------
-# AGM schemas
+# General Meeting schemas
 # ---------------------------------------------------------------------------
 
 
-class AGMCreate(BaseModel):
+class GeneralMeetingCreate(BaseModel):
     building_id: uuid.UUID
     title: str
     meeting_at: datetime
@@ -151,13 +213,13 @@ class AGMCreate(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def voting_closes_after_meeting(self) -> "AGMCreate":
+    def voting_closes_after_meeting(self) -> "GeneralMeetingCreate":
         if self.voting_closes_at <= self.meeting_at:
             raise ValueError("voting_closes_at must be after meeting_at")
         return self
 
 
-class AGMOut(BaseModel):
+class GeneralMeetingOut(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID
     title: str
@@ -169,7 +231,7 @@ class AGMOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class AGMListItem(BaseModel):
+class GeneralMeetingListItem(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID
     building_name: str
@@ -203,6 +265,7 @@ class MotionTally(BaseModel):
     no: TallyCategory
     abstained: TallyCategory
     absent: TallyCategory
+    not_eligible: TallyCategory
 
 
 class MotionVoterLists(BaseModel):
@@ -210,6 +273,7 @@ class MotionVoterLists(BaseModel):
     no: list[VoterEntry]
     abstained: list[VoterEntry]
     absent: list[VoterEntry]
+    not_eligible: list[VoterEntry]
 
 
 class MotionDetail(BaseModel):
@@ -217,11 +281,12 @@ class MotionDetail(BaseModel):
     title: str
     description: str | None
     order_index: int
+    motion_type: MotionType
     tally: MotionTally
     voter_lists: MotionVoterLists
 
 
-class AGMDetail(BaseModel):
+class GeneralMeetingDetail(BaseModel):
     id: uuid.UUID
     building_name: str
     title: str
@@ -231,22 +296,34 @@ class AGMDetail(BaseModel):
     closed_at: datetime | None
     total_eligible_voters: int
     total_submitted: int
+    total_entitlement: int
     motions: list[MotionDetail]
 
 
 # ---------------------------------------------------------------------------
-# AGM close / resend schemas
+# General Meeting close / resend schemas
 # ---------------------------------------------------------------------------
 
 
-class AGMCloseOut(BaseModel):
+class GeneralMeetingStartOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    meeting_at: datetime
+
+
+class GeneralMeetingCloseOut(BaseModel):
     id: uuid.UUID
     status: str
     closed_at: datetime
+    voting_closes_at: datetime
 
 
 class ResendReportOut(BaseModel):
     queued: bool
+
+
+class GeneralMeetingBallotResetOut(BaseModel):
+    deleted: int
 
 
 # ---------------------------------------------------------------------------
@@ -260,6 +337,27 @@ class BuildingArchiveOut(BaseModel):
     is_archived: bool
 
     model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# Proxy nomination import schemas
+# ---------------------------------------------------------------------------
+
+
+class ProxyImportResult(BaseModel):
+    upserted: int
+    removed: int
+    skipped: int
+
+
+# ---------------------------------------------------------------------------
+# Financial position import schemas
+# ---------------------------------------------------------------------------
+
+
+class FinancialPositionImportResult(BaseModel):
+    updated: int
+    skipped: int
 
 
 # ---------------------------------------------------------------------------

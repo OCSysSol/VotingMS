@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -20,11 +19,11 @@ vi.mock("react-router-dom", async () => {
 
 const BASE = "http://localhost:8000";
 
-function renderPage(path = "/") {
+function renderPage(path = "/", locationState?: { pendingMessage?: string }) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[path]}>
+      <MemoryRouter initialEntries={[{ pathname: path, state: locationState }]}>
         <BuildingSelectPage />
       </MemoryRouter>
     </QueryClientProvider>
@@ -32,9 +31,28 @@ function renderPage(path = "/") {
 }
 
 describe("BuildingSelectPage", () => {
-  it("shows loading state initially", () => {
+  it("shows loading state inside card while page hero remains visible", () => {
     renderPage();
+    // Hero renders immediately
+    expect(screen.getByText("Cast Your Vote")).toBeInTheDocument();
+    // Loading message appears inside the card (not replacing the full page)
     expect(screen.getByText("Loading buildings...")).toBeInTheDocument();
+  });
+
+  it("shows pending message banner when navigated from auth with pendingMessage state", async () => {
+    renderPage("/", { pendingMessage: "This meeting has not started yet. Please check back later." });
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "This meeting has not started yet. Please check back later."
+      );
+    });
+  });
+
+  it("does not show pending message banner when no state provided", async () => {
+    renderPage("/");
+    // Wait for buildings to load so main content is rendered, then assert no status banner
+    await waitFor(() => screen.getByLabelText("Select your building"));
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
 
@@ -86,10 +104,10 @@ describe("BuildingSelectPage", () => {
     });
   });
 
-  it("shows AGMs loading state briefly before AGMs appear", async () => {
+  it("shows General Meetings loading state briefly before General Meetings appear", async () => {
     let resolveAGMs!: (value: Response) => void;
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/agms`, () =>
+      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () =>
         new Promise<Response>((res) => {
           resolveAGMs = res;
         })
@@ -101,17 +119,17 @@ describe("BuildingSelectPage", () => {
     await user.selectOptions(screen.getByRole("combobox"), BUILDING_ID);
     // While AGMs are still loading (pending promise)
     await waitFor(() => {
-      expect(screen.getByText("Loading AGMs...")).toBeInTheDocument();
+      expect(screen.getByText("Loading General Meetings...")).toBeInTheDocument();
     });
     resolveAGMs(HttpResponse.json([]) as unknown as Response);
     await waitFor(() => {
-      expect(screen.queryByText("Loading AGMs...")).not.toBeInTheDocument();
+      expect(screen.queryByText("Loading General Meetings...")).not.toBeInTheDocument();
     });
   });
 
   it("shows empty AGM list when no AGMs returned", async () => {
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/agms`, () =>
+      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () =>
         HttpResponse.json([])
       )
     );
@@ -120,7 +138,7 @@ describe("BuildingSelectPage", () => {
     await waitFor(() => screen.getByLabelText("Select your building"));
     await user.selectOptions(screen.getByRole("combobox"), BUILDING_ID);
     await waitFor(() => {
-      expect(screen.getByText("No AGMs found for this building.")).toBeInTheDocument();
+      expect(screen.getByText("No General Meetings found for this building.")).toBeInTheDocument();
     });
   });
 

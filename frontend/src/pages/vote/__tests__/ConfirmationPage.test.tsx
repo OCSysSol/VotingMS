@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -17,13 +16,13 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-function renderPage(agmId = AGM_ID) {
+function renderPage(meetingId = AGM_ID) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[`/vote/${agmId}/confirmation`]}>
+      <MemoryRouter initialEntries={[`/vote/${meetingId}/confirmation`]}>
         <Routes>
-          <Route path="/vote/:agmId/confirmation" element={<ConfirmationPage />} />
+          <Route path="/vote/:meetingId/confirmation" element={<ConfirmationPage />} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>
@@ -36,7 +35,7 @@ describe("ConfirmationPage", () => {
     expect(screen.getByText("Loading your submission...")).toBeInTheDocument();
   });
 
-  it("renders building name and AGM title", async () => {
+  it("renders building name and meeting title", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText(/Sunset Towers/)).toBeInTheDocument();
@@ -63,7 +62,7 @@ describe("ConfirmationPage", () => {
 
   it("shows 'You did not submit' on 404", async () => {
     server.use(
-      http.get(`${BASE}/api/agm/${AGM_ID}/my-ballot`, () =>
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({ detail: "not found" }, { status: 404 })
       )
     );
@@ -77,7 +76,7 @@ describe("ConfirmationPage", () => {
 
   it("shows error message on non-404 failure", async () => {
     server.use(
-      http.get(`${BASE}/api/agm/${AGM_ID}/my-ballot`, () =>
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({ detail: "server error" }, { status: 500 })
       )
     );
@@ -89,15 +88,23 @@ describe("ConfirmationPage", () => {
 
   it("votes are sorted by order_index", async () => {
     server.use(
-      http.get(`${BASE}/api/agm/${AGM_ID}/my-ballot`, () =>
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({
           voter_email: "voter@test.com",
-          agm_title: "Test AGM",
+          meeting_title: "Test Meeting",
           building_name: "Test Building",
-          votes: [
-            { motion_id: "m2", motion_title: "Second Motion", order_index: 1, choice: "no" },
-            { motion_id: "m1", motion_title: "First Motion", order_index: 0, choice: "yes" },
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m2", motion_title: "Second Motion", order_index: 1, choice: "no", eligible: true },
+                { motion_id: "m1", motion_title: "First Motion", order_index: 0, choice: "yes", eligible: true },
+              ],
+            },
           ],
+          remaining_lot_owner_ids: [],
         })
       )
     );
@@ -111,14 +118,22 @@ describe("ConfirmationPage", () => {
 
   it("shows Abstained for abstained votes", async () => {
     server.use(
-      http.get(`${BASE}/api/agm/${AGM_ID}/my-ballot`, () =>
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({
           voter_email: "voter@test.com",
-          agm_title: "Test AGM",
+          meeting_title: "Test Meeting",
           building_name: "Test Building",
-          votes: [
-            { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "abstained" },
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "abstained", eligible: true },
+              ],
+            },
           ],
+          remaining_lot_owner_ids: [],
         })
       )
     );
@@ -141,20 +156,101 @@ describe("ConfirmationPage", () => {
 
   it("falls back to raw choice value for unknown choice key", async () => {
     server.use(
-      http.get(`${BASE}/api/agm/${AGM_ID}/my-ballot`, () =>
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({
           voter_email: "voter@test.com",
-          agm_title: "Test AGM",
+          meeting_title: "Test Meeting",
           building_name: "Test Building",
-          votes: [
-            { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "unknown_choice" },
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "unknown_choice", eligible: true },
+              ],
+            },
           ],
+          remaining_lot_owner_ids: [],
         })
       )
     );
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("unknown_choice")).toBeInTheDocument();
+    });
+  });
+
+  it("renders multi-lot ballot with lot headers", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "voter@test.com",
+          meeting_title: "Test Meeting",
+          building_name: "Test Building",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "yes", eligible: true },
+              ],
+            },
+            {
+              lot_owner_id: "lo2",
+              lot_number: "2B",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "no", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Lot 1A")).toBeInTheDocument();
+      expect(screen.getByText("Lot 2B")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Not eligible' label for not_eligible votes in multi-lot ballot", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "voter@test.com",
+          meeting_title: "Test Meeting",
+          building_name: "Test Building",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "in_arrear",
+              votes: [
+                { motion_id: "m1", motion_title: "General Motion", order_index: 0, choice: "not_eligible", eligible: false },
+                { motion_id: "m2", motion_title: "Special Motion", order_index: 1, choice: "yes", eligible: true },
+              ],
+            },
+            {
+              lot_owner_id: "lo2",
+              lot_number: "2B",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "General Motion", order_index: 0, choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Lot 1A")).toBeInTheDocument();
+      expect(screen.getByText("Not eligible")).toBeInTheDocument();
     });
   });
 });

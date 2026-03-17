@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -58,10 +57,10 @@ describe("Voting Flow Integration", () => {
     expect(screen.getByRole("button", { name: "View My Submission" })).toBeInTheDocument();
   });
 
-  it("auth page renders after navigating to /vote/:agmId/auth", async () => {
+  it("auth page renders after navigating to /vote/:meetingId/auth", async () => {
     renderApp(`/vote/${AGM_ID}/auth`);
     await waitFor(() => {
-      expect(screen.getByLabelText("Lot number")).toBeInTheDocument();
+      expect(screen.getByLabelText("Email address")).toBeInTheDocument();
     });
   });
 

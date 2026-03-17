@@ -4,11 +4,13 @@ Unit tests for all SQLAlchemy models.
 Covers:
 - Building: create, name uniqueness constraint
 - LotOwner: create, lot_number uniqueness per building, unit_entitlement >= 0
-- AGM: create open status default, voting_closes_at > meeting_at constraint
-- Motion: create, order_index uniqueness per AGM
-- AGMLotWeight: create, UniqueConstraint(agm_id, lot_owner_id)
+- LotOwnerEmail: create, unique constraint (lot_owner_id, email)
+- GeneralMeeting: create open status default, voting_closes_at > meeting_at constraint
+- Motion: create, order_index uniqueness per GeneralMeeting
+- GeneralMeetingLotWeight: create, UniqueConstraint(general_meeting_id, lot_owner_id), financial_position_snapshot
 - Vote: create draft, UniqueConstraint(agm_id, motion_id, voter_email), status transitions
-- BallotSubmission: create, UniqueConstraint(agm_id, voter_email)
+- BallotSubmission: create, UniqueConstraint(general_meeting_id, lot_owner_id), proxy_email nullable
+- LotProxy: create, unique constraint on lot_owner_id, index on proxy_email, cascade delete
 - SessionRecord: create
 - EmailDelivery: create, unique per agm_id
 """
@@ -21,19 +23,23 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
-    AGM,
-    AGMLotWeight,
-    AGMStatus,
+    GeneralMeeting,
+    GeneralMeetingLotWeight,
+    GeneralMeetingStatus,
     BallotSubmission,
     Building,
     EmailDelivery,
     EmailDeliveryStatus,
+    FinancialPositionSnapshot,
     LotOwner,
+    LotOwnerEmail,
+    LotProxy,
     Motion,
     SessionRecord,
     Vote,
     VoteChoice,
     VoteStatus,
+    get_effective_status,
 )
 
 # ---------------------------------------------------------------------------
@@ -51,18 +57,17 @@ def make_building(name: str = "Test Building", email: str = "mgr@example.com") -
     return Building(name=name, manager_email=email)
 
 
-def make_lot_owner(building: Building, lot_number: str = "1A", email: str = "owner@example.com", entitlement: int = 100) -> LotOwner:
+def make_lot_owner(building: Building, lot_number: str = "1A", entitlement: int = 100) -> LotOwner:
     return LotOwner(
         building_id=building.id,
         lot_number=lot_number,
-        email=email,
         unit_entitlement=entitlement,
     )
 
 
-def make_agm(building: Building, title: str = "AGM 2026") -> AGM:
+def make_agm(building: Building, title: str = "GeneralMeeting 2026") -> GeneralMeeting:
     now = utcnow()
-    return AGM(
+    return GeneralMeeting(
         building_id=building.id,
         title=title,
         meeting_at=now + timedelta(days=1),
@@ -70,8 +75,8 @@ def make_agm(building: Building, title: str = "AGM 2026") -> AGM:
     )
 
 
-def make_motion(agm: AGM, title: str = "Motion 1", order_index: int = 1) -> Motion:
-    return Motion(agm_id=agm.id, title=title, order_index=order_index)
+def make_motion(agm: GeneralMeeting, title: str = "Motion 1", order_index: int = 1) -> Motion:
+    return Motion(general_meeting_id=agm.id, title=title, order_index=order_index)
 
 
 # ---------------------------------------------------------------------------
@@ -171,7 +176,6 @@ class TestLotOwner:
         assert lo.id is not None
         assert lo.building_id == b.id
         assert lo.lot_number == "1A"
-        assert lo.email == "owner@example.com"
         assert lo.unit_entitlement == 100
 
     async def test_lot_owner_zero_entitlement(self, db_session: AsyncSession):
@@ -195,14 +199,14 @@ class TestLotOwner:
         await db_session.flush()
         assert lo.unit_entitlement == 2_147_483_647
 
-    async def test_multiple_lots_same_email(self, db_session: AsyncSession):
-        """Multiple lots can share the same email within a building."""
+    async def test_multiple_lots_no_email_required(self, db_session: AsyncSession):
+        """Lot owners do not require email — emails are optional in lot_owner_emails."""
         b = make_building("Multi Lot Building")
         db_session.add(b)
         await db_session.flush()
 
-        lo1 = make_lot_owner(b, lot_number="1A", email="shared@example.com")
-        lo2 = make_lot_owner(b, lot_number="1B", email="shared@example.com")
+        lo1 = make_lot_owner(b, lot_number="1A")
+        lo2 = make_lot_owner(b, lot_number="1B")
         db_session.add_all([lo1, lo2])
         await db_session.flush()
         assert lo1.id != lo2.id
@@ -219,7 +223,7 @@ class TestLotOwner:
         db_session.add(lo1)
         await db_session.flush()
 
-        lo2 = make_lot_owner(b, lot_number="SAME", email="other@example.com")
+        lo2 = make_lot_owner(b, lot_number="SAME")
         db_session.add(lo2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
@@ -263,17 +267,112 @@ class TestLotOwner:
 
 
 # ---------------------------------------------------------------------------
-# AGM tests
+# LotOwnerEmail tests
+# ---------------------------------------------------------------------------
+
+
+class TestLotOwnerEmail:
+    """Tests for LotOwnerEmail model."""
+
+    # --- Happy path ---
+
+    async def test_create_lot_owner_email(self, db_session: AsyncSession):
+        b = make_building("Email Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        email_rec = LotOwnerEmail(lot_owner_id=lo.id, email="owner@example.com")
+        db_session.add(email_rec)
+        await db_session.flush()
+
+        assert email_rec.id is not None
+        assert email_rec.lot_owner_id == lo.id
+        assert email_rec.email == "owner@example.com"
+
+    async def test_multiple_emails_per_lot_owner(self, db_session: AsyncSession):
+        b = make_building("Multi Email Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        e1 = LotOwnerEmail(lot_owner_id=lo.id, email="first@example.com")
+        e2 = LotOwnerEmail(lot_owner_id=lo.id, email="second@example.com")
+        db_session.add_all([e1, e2])
+        await db_session.flush()
+        assert e1.id != e2.id
+
+    async def test_same_email_different_lot_owners(self, db_session: AsyncSession):
+        b = make_building("Shared Email Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo1 = make_lot_owner(b, lot_number="1A")
+        lo2 = make_lot_owner(b, lot_number="2B")
+        db_session.add_all([lo1, lo2])
+        await db_session.flush()
+
+        e1 = LotOwnerEmail(lot_owner_id=lo1.id, email="shared@example.com")
+        e2 = LotOwnerEmail(lot_owner_id=lo2.id, email="shared@example.com")
+        db_session.add_all([e1, e2])
+        await db_session.flush()  # Should NOT raise
+        assert e1.id != e2.id
+
+    async def test_null_email_allowed(self, db_session: AsyncSession):
+        """Email can be null."""
+        b = make_building("Null Email Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        email_rec = LotOwnerEmail(lot_owner_id=lo.id, email=None)
+        db_session.add(email_rec)
+        await db_session.flush()
+        assert email_rec.email is None
+
+    # --- Constraints ---
+
+    async def test_unique_constraint_owner_email(self, db_session: AsyncSession):
+        """Same (lot_owner_id, email) pair raises IntegrityError."""
+        b = make_building("Dup Email Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        e1 = LotOwnerEmail(lot_owner_id=lo.id, email="dup@example.com")
+        db_session.add(e1)
+        await db_session.flush()
+
+        e2 = LotOwnerEmail(lot_owner_id=lo.id, email="dup@example.com")
+        db_session.add(e2)
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+
+# ---------------------------------------------------------------------------
+# GeneralMeeting tests
 # ---------------------------------------------------------------------------
 
 
 class TestAGM:
-    """Happy path and constraint tests for AGM model."""
+    """Happy path and constraint tests for GeneralMeeting model."""
 
     # --- Happy path ---
 
     async def test_create_agm_defaults_to_open(self, db_session: AsyncSession):
-        b = make_building("AGM Test Building")
+        b = make_building("GeneralMeeting Test Building")
         db_session.add(b)
         await db_session.flush()
 
@@ -282,7 +381,7 @@ class TestAGM:
         await db_session.flush()
 
         assert agm.id is not None
-        assert agm.status == AGMStatus.open
+        assert agm.status == GeneralMeetingStatus.open
         assert agm.closed_at is None
         assert agm.building_id == b.id
 
@@ -305,11 +404,11 @@ class TestAGM:
         db_session.add(agm)
         await db_session.flush()
 
-        agm.status = AGMStatus.closed
+        agm.status = GeneralMeetingStatus.closed
         agm.closed_at = utcnow()
         await db_session.flush()
 
-        assert agm.status == AGMStatus.closed
+        assert agm.status == GeneralMeetingStatus.closed
         assert agm.closed_at is not None
 
     async def test_agm_meeting_times_stored(self, db_session: AsyncSession):
@@ -320,7 +419,7 @@ class TestAGM:
         now = utcnow()
         meeting = now + timedelta(hours=2)
         closes = now + timedelta(hours=4)
-        agm = AGM(building_id=b.id, title="Timed AGM", meeting_at=meeting, voting_closes_at=closes)
+        agm = GeneralMeeting(building_id=b.id, title="Timed GeneralMeeting", meeting_at=meeting, voting_closes_at=closes)
         db_session.add(agm)
         await db_session.flush()
 
@@ -336,9 +435,9 @@ class TestAGM:
         await db_session.flush()
 
         now = utcnow()
-        agm = AGM(
+        agm = GeneralMeeting(
             building_id=b.id,
-            title="Bad AGM",
+            title="Bad GeneralMeeting",
             meeting_at=now + timedelta(days=2),
             voting_closes_at=now + timedelta(days=1),  # BEFORE meeting_at
         )
@@ -353,9 +452,9 @@ class TestAGM:
         await db_session.flush()
 
         same_time = utcnow() + timedelta(days=1)
-        agm = AGM(
+        agm = GeneralMeeting(
             building_id=b.id,
-            title="Equal Time AGM",
+            title="Equal Time GeneralMeeting",
             meeting_at=same_time,
             voting_closes_at=same_time,
         )
@@ -367,15 +466,129 @@ class TestAGM:
 
     async def test_multiple_agms_per_building_allowed_at_db_level(self, db_session: AsyncSession):
         """DB allows multiple open AGMs; the one-per-building rule is enforced at app level."""
-        b = make_building("Multi AGM Bldg")
+        b = make_building("Multi GeneralMeeting Bldg")
         db_session.add(b)
         await db_session.flush()
 
-        agm1 = make_agm(b, title="AGM One")
-        agm2 = make_agm(b, title="AGM Two")
+        agm1 = make_agm(b, title="GeneralMeeting One")
+        agm2 = make_agm(b, title="GeneralMeeting Two")
         db_session.add_all([agm1, agm2])
         await db_session.flush()  # Should succeed at DB level
         assert agm1.id != agm2.id
+
+
+# ---------------------------------------------------------------------------
+# get_effective_status unit tests (US-PS01)
+# ---------------------------------------------------------------------------
+
+
+class _FakeMeeting:
+    """Minimal stand-in for GeneralMeeting to unit-test get_effective_status without DB."""
+
+    def __init__(
+        self,
+        status: GeneralMeetingStatus,
+        voting_closes_at,
+        meeting_at=None,
+    ):
+        self.status = status
+        self.voting_closes_at = voting_closes_at
+        self.meeting_at = meeting_at
+
+
+class TestGetEffectiveStatus:
+    """Unit tests for get_effective_status helper (US-PS01)."""
+
+    def test_pending_stored_status_with_future_meeting_at_returns_pending(self):
+        """Meeting stored as pending with future meeting_at returns pending."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.pending,
+            datetime.now(UTC) + timedelta(days=2),
+            meeting_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.pending  # type: ignore[arg-type]
+
+    def test_open_stored_status_with_future_meeting_at_returns_pending(self):
+        """Meeting stored as open but with future meeting_at returns pending."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime.now(UTC) + timedelta(days=2),
+            meeting_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.pending  # type: ignore[arg-type]
+
+    def test_open_stored_status_with_past_meeting_at_future_closes_at_returns_open(self):
+        """Meeting whose start has passed but voting is still open returns open."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime.now(UTC) + timedelta(days=1),
+            meeting_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.open  # type: ignore[arg-type]
+
+    def test_open_stored_status_with_past_closes_at_returns_closed(self):
+        """Meeting whose voting_closes_at has passed is effectively closed."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime.now(UTC) - timedelta(seconds=1),
+            meeting_at=datetime.now(UTC) - timedelta(hours=2),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.closed  # type: ignore[arg-type]
+
+    def test_closed_stored_status_with_future_voting_closes_at_returns_closed(self):
+        """Manually closed meeting returns closed even if voting_closes_at is in the future."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.closed,
+            datetime.now(UTC) + timedelta(days=1),
+            meeting_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.closed  # type: ignore[arg-type]
+
+    def test_pending_stored_status_with_both_timestamps_past_returns_closed(self):
+        """Meeting stored as pending but both timestamps past returns closed (voting_closes_at wins)."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.pending,
+            datetime.now(UTC) - timedelta(hours=1),
+            meeting_at=datetime.now(UTC) - timedelta(hours=2),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.closed  # type: ignore[arg-type]
+
+    def test_future_meeting_at_but_past_voting_closes_at_returns_closed(self):
+        """voting_closes_at in the past takes priority even if meeting_at is in the future."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime.now(UTC) - timedelta(seconds=1),
+            meeting_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.closed  # type: ignore[arg-type]
+
+    def test_open_with_none_meeting_at_and_future_closes_at_returns_open(self):
+        """Meeting with no meeting_at and future voting_closes_at returns open."""
+        m = _FakeMeeting(GeneralMeetingStatus.open, datetime.now(UTC) + timedelta(days=1))
+        assert get_effective_status(m) == GeneralMeetingStatus.open  # type: ignore[arg-type]
+
+    def test_open_with_none_closes_at_and_none_meeting_at_returns_open(self):
+        """Meeting with no timestamps at all returns open (edge case)."""
+        m = _FakeMeeting(GeneralMeetingStatus.open, None)
+        assert get_effective_status(m) == GeneralMeetingStatus.open  # type: ignore[arg-type]
+
+    def test_naive_future_meeting_at_returns_pending(self):
+        """Naive (tz-unaware) meeting_at far in the future derives pending."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime(2099, 12, 31, 23, 59, 59),
+            meeting_at=datetime(2099, 12, 31, 12, 0, 0),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.pending  # type: ignore[arg-type]
+
+    def test_naive_past_closes_at_returns_closed(self):
+        """Naive (tz-unaware) voting_closes_at in the past is treated as UTC and returns closed."""
+        m = _FakeMeeting(
+            GeneralMeetingStatus.open,
+            datetime(2000, 1, 1, 0, 0, 0),
+            meeting_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        assert get_effective_status(m) == GeneralMeetingStatus.closed  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -402,7 +615,7 @@ class TestMotion:
         await db_session.flush()
 
         assert motion.id is not None
-        assert motion.agm_id == agm.id
+        assert motion.general_meeting_id == agm.id
         assert motion.title == "Motion 1"
         assert motion.order_index == 1
         assert motion.description is None
@@ -416,7 +629,7 @@ class TestMotion:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(agm_id=agm.id, title="Approve Budget", description="Approve the 2026 budget of $500k", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Approve Budget", description="Approve the 2026 budget of $500k", order_index=1)
         db_session.add(motion)
         await db_session.flush()
         assert motion.description == "Approve the 2026 budget of $500k"
@@ -431,13 +644,13 @@ class TestMotion:
         await db_session.flush()
 
         for i in range(1, 6):
-            db_session.add(Motion(agm_id=agm.id, title=f"Motion {i}", order_index=i))
+            db_session.add(Motion(general_meeting_id=agm.id, title=f"Motion {i}", order_index=i))
         await db_session.flush()  # Should succeed
 
     # --- Input validation / constraints ---
 
     async def test_order_index_uniqueness_per_agm(self, db_session: AsyncSession):
-        """Two motions with the same order_index in the same AGM violate the unique constraint."""
+        """Two motions with the same order_index in the same GeneralMeeting violate the unique constraint."""
         b = make_building("Order Index Bldg")
         db_session.add(b)
         await db_session.flush()
@@ -446,27 +659,27 @@ class TestMotion:
         db_session.add(agm)
         await db_session.flush()
 
-        m1 = Motion(agm_id=agm.id, title="Motion A", order_index=1)
+        m1 = Motion(general_meeting_id=agm.id, title="Motion A", order_index=1)
         db_session.add(m1)
         await db_session.flush()
 
-        m2 = Motion(agm_id=agm.id, title="Motion B", order_index=1)
+        m2 = Motion(general_meeting_id=agm.id, title="Motion B", order_index=1)
         db_session.add(m2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
 
     async def test_same_order_index_different_agms_allowed(self, db_session: AsyncSession):
-        b = make_building("Cross AGM Motion Bldg")
+        b = make_building("Cross GeneralMeeting Motion Bldg")
         db_session.add(b)
         await db_session.flush()
 
-        agm1 = make_agm(b, title="AGM A")
-        agm2 = make_agm(b, title="AGM B")
+        agm1 = make_agm(b, title="GeneralMeeting A")
+        agm2 = make_agm(b, title="GeneralMeeting B")
         db_session.add_all([agm1, agm2])
         await db_session.flush()
 
-        m1 = Motion(agm_id=agm1.id, title="Motion 1", order_index=1)
-        m2 = Motion(agm_id=agm2.id, title="Motion 1", order_index=1)
+        m1 = Motion(general_meeting_id=agm1.id, title="Motion 1", order_index=1)
+        m2 = Motion(general_meeting_id=agm2.id, title="Motion 1", order_index=1)
         db_session.add_all([m1, m2])
         await db_session.flush()  # Should NOT raise
         assert m1.id != m2.id
@@ -482,19 +695,19 @@ class TestMotion:
         db_session.add(agm)
         await db_session.flush()
 
-        m = Motion(agm_id=agm.id, title="Preamble", order_index=0)
+        m = Motion(general_meeting_id=agm.id, title="Preamble", order_index=0)
         db_session.add(m)
         await db_session.flush()
         assert m.order_index == 0
 
 
 # ---------------------------------------------------------------------------
-# AGMLotWeight tests
+# GeneralMeetingLotWeight tests
 # ---------------------------------------------------------------------------
 
 
-class TestAGMLotWeight:
-    """Happy path and constraint tests for AGMLotWeight model."""
+class TestGeneralMeetingLotWeight:
+    """Happy path and constraint tests for GeneralMeetingLotWeight model."""
 
     # --- Happy path ---
 
@@ -511,10 +724,9 @@ class TestAGMLotWeight:
         db_session.add(agm)
         await db_session.flush()
 
-        weight = AGMLotWeight(
-            agm_id=agm.id,
+        weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
             lot_owner_id=lo.id,
-            voter_email=lo.email,
             unit_entitlement_snapshot=250,
         )
         db_session.add(weight)
@@ -522,7 +734,7 @@ class TestAGMLotWeight:
 
         assert weight.id is not None
         assert weight.unit_entitlement_snapshot == 250
-        assert weight.voter_email == "owner@example.com"
+        assert weight.financial_position_snapshot == FinancialPositionSnapshot.normal
 
     async def test_snapshot_zero_entitlement(self, db_session: AsyncSession):
         b = make_building("Zero Snapshot Bldg")
@@ -537,20 +749,42 @@ class TestAGMLotWeight:
         db_session.add(agm)
         await db_session.flush()
 
-        weight = AGMLotWeight(
-            agm_id=agm.id,
+        weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
             lot_owner_id=lo.id,
-            voter_email=lo.email,
             unit_entitlement_snapshot=0,
         )
         db_session.add(weight)
         await db_session.flush()
         assert weight.unit_entitlement_snapshot == 0
 
+    async def test_in_arrear_snapshot(self, db_session: AsyncSession):
+        b = make_building("Arrear Snapshot Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        agm = make_agm(b)
+        db_session.add(agm)
+        await db_session.flush()
+
+        weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=100,
+            financial_position_snapshot=FinancialPositionSnapshot.in_arrear,
+        )
+        db_session.add(weight)
+        await db_session.flush()
+        assert weight.financial_position_snapshot == FinancialPositionSnapshot.in_arrear
+
     # --- Input validation / constraints ---
 
     async def test_unique_constraint_agm_lot_owner(self, db_session: AsyncSession):
-        """Same (agm_id, lot_owner_id) pair raises IntegrityError."""
+        """Same (general_meeting_id, lot_owner_id) pair raises IntegrityError."""
         b = make_building("Dup Weight Bldg")
         db_session.add(b)
         await db_session.flush()
@@ -563,11 +797,11 @@ class TestAGMLotWeight:
         db_session.add(agm)
         await db_session.flush()
 
-        w1 = AGMLotWeight(agm_id=agm.id, lot_owner_id=lo.id, voter_email=lo.email, unit_entitlement_snapshot=100)
+        w1 = GeneralMeetingLotWeight(general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=100)
         db_session.add(w1)
         await db_session.flush()
 
-        w2 = AGMLotWeight(agm_id=agm.id, lot_owner_id=lo.id, voter_email=lo.email, unit_entitlement_snapshot=200)
+        w2 = GeneralMeetingLotWeight(general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=200)
         db_session.add(w2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
@@ -585,14 +819,14 @@ class TestAGMLotWeight:
         db_session.add(agm)
         await db_session.flush()
 
-        w = AGMLotWeight(agm_id=agm.id, lot_owner_id=lo.id, voter_email=lo.email, unit_entitlement_snapshot=-5)
+        w = GeneralMeetingLotWeight(general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=-5)
         db_session.add(w)
         with pytest.raises(IntegrityError):
             await db_session.flush()
 
     async def test_same_lot_different_agms_allowed(self, db_session: AsyncSession):
         """Same lot owner can have weight records across multiple AGMs."""
-        b = make_building("Multi AGM Weight Bldg")
+        b = make_building("Multi GeneralMeeting Weight Bldg")
         db_session.add(b)
         await db_session.flush()
 
@@ -600,13 +834,13 @@ class TestAGMLotWeight:
         db_session.add(lo)
         await db_session.flush()
 
-        agm1 = make_agm(b, title="First AGM")
-        agm2 = make_agm(b, title="Second AGM")
+        agm1 = make_agm(b, title="First GeneralMeeting")
+        agm2 = make_agm(b, title="Second GeneralMeeting")
         db_session.add_all([agm1, agm2])
         await db_session.flush()
 
-        w1 = AGMLotWeight(agm_id=agm1.id, lot_owner_id=lo.id, voter_email=lo.email, unit_entitlement_snapshot=100)
-        w2 = AGMLotWeight(agm_id=agm2.id, lot_owner_id=lo.id, voter_email=lo.email, unit_entitlement_snapshot=150)
+        w1 = GeneralMeetingLotWeight(general_meeting_id=agm1.id, lot_owner_id=lo.id, unit_entitlement_snapshot=100)
+        w2 = GeneralMeetingLotWeight(general_meeting_id=agm2.id, lot_owner_id=lo.id, unit_entitlement_snapshot=150)
         db_session.add_all([w1, w2])
         await db_session.flush()  # Should NOT raise
 
@@ -640,7 +874,7 @@ class TestVote:
         _, agm, motion = await self._setup_vote_context(db_session, " Draft")
 
         vote = Vote(
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             motion_id=motion.id,
             voter_email="voter@example.com",
         )
@@ -655,7 +889,7 @@ class TestVote:
         _, agm, motion = await self._setup_vote_context(db_session, " Yes")
 
         vote = Vote(
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             motion_id=motion.id,
             voter_email="yes@example.com",
             choice=VoteChoice.yes,
@@ -668,7 +902,7 @@ class TestVote:
         _, agm, motion = await self._setup_vote_context(db_session, " No")
 
         vote = Vote(
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             motion_id=motion.id,
             voter_email="no@example.com",
             choice=VoteChoice.no,
@@ -681,7 +915,7 @@ class TestVote:
         _, agm, motion = await self._setup_vote_context(db_session, " Abstain")
 
         vote = Vote(
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             motion_id=motion.id,
             voter_email="abs@example.com",
             choice=VoteChoice.abstained,
@@ -694,7 +928,7 @@ class TestVote:
         _, agm, motion = await self._setup_vote_context(db_session, " Transition")
 
         vote = Vote(
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             motion_id=motion.id,
             voter_email="transition@example.com",
             choice=VoteChoice.yes,
@@ -709,15 +943,19 @@ class TestVote:
 
     # --- Input validation / constraints ---
 
-    async def test_unique_constraint_agm_motion_voter(self, db_session: AsyncSession):
-        """Same (agm_id, motion_id, voter_email) raises IntegrityError."""
-        _, agm, motion = await self._setup_vote_context(db_session, " Dup")
+    async def test_unique_constraint_agm_motion_lot_owner(self, db_session: AsyncSession):
+        """Same (agm_id, motion_id, lot_owner_id) raises IntegrityError."""
+        b, agm, motion = await self._setup_vote_context(db_session, " Dup")
 
-        v1 = Vote(agm_id=agm.id, motion_id=motion.id, voter_email="dup@example.com", choice=VoteChoice.yes)
+        lo = make_lot_owner(b, lot_number="Dup1")
+        db_session.add(lo)
+        await db_session.flush()
+
+        v1 = Vote(general_meeting_id=agm.id, motion_id=motion.id, voter_email="dup@example.com", lot_owner_id=lo.id, choice=VoteChoice.yes)
         db_session.add(v1)
         await db_session.flush()
 
-        v2 = Vote(agm_id=agm.id, motion_id=motion.id, voter_email="dup@example.com", choice=VoteChoice.no)
+        v2 = Vote(general_meeting_id=agm.id, motion_id=motion.id, voter_email="dup@example.com", lot_owner_id=lo.id, choice=VoteChoice.no)
         db_session.add(v2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
@@ -731,24 +969,42 @@ class TestVote:
         db_session.add(agm)
         await db_session.flush()
 
-        m1 = Motion(agm_id=agm.id, title="Motion A", order_index=1)
-        m2 = Motion(agm_id=agm.id, title="Motion B", order_index=2)
+        m1 = Motion(general_meeting_id=agm.id, title="Motion A", order_index=1)
+        m2 = Motion(general_meeting_id=agm.id, title="Motion B", order_index=2)
         db_session.add_all([m1, m2])
         await db_session.flush()
 
-        v1 = Vote(agm_id=agm.id, motion_id=m1.id, voter_email="multi@example.com", choice=VoteChoice.yes)
-        v2 = Vote(agm_id=agm.id, motion_id=m2.id, voter_email="multi@example.com", choice=VoteChoice.no)
+        v1 = Vote(general_meeting_id=agm.id, motion_id=m1.id, voter_email="multi@example.com", choice=VoteChoice.yes)
+        v2 = Vote(general_meeting_id=agm.id, motion_id=m2.id, voter_email="multi@example.com", choice=VoteChoice.no)
         db_session.add_all([v1, v2])
         await db_session.flush()  # Should NOT raise
 
     async def test_vote_timestamps_set(self, db_session: AsyncSession):
         _, agm, motion = await self._setup_vote_context(db_session, " Timestamps")
 
-        vote = Vote(agm_id=agm.id, motion_id=motion.id, voter_email="ts@example.com")
+        vote = Vote(general_meeting_id=agm.id, motion_id=motion.id, voter_email="ts@example.com")
         db_session.add(vote)
         await db_session.flush()
         assert vote.created_at is not None
         assert vote.updated_at is not None
+
+    async def test_vote_with_lot_owner_id(self, db_session: AsyncSession):
+        b, agm, motion = await self._setup_vote_context(db_session, " LotOwner")
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        vote = Vote(
+            general_meeting_id=agm.id,
+            motion_id=motion.id,
+            voter_email="voter@example.com",
+            lot_owner_id=lo.id,
+            choice=VoteChoice.yes,
+        )
+        db_session.add(vote)
+        await db_session.flush()
+        assert vote.lot_owner_id == lo.id
 
 
 # ---------------------------------------------------------------------------
@@ -764,55 +1020,225 @@ class TestBallotSubmission:
         db_session.add(b)
         await db_session.flush()
 
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
         agm = make_agm(b)
         db_session.add(agm)
         await db_session.flush()
 
-        return b, agm
+        return b, lo, agm
 
     # --- Happy path ---
 
     async def test_create_ballot_submission(self, db_session: AsyncSession):
-        _, agm = await self._setup(db_session, " Create")
+        _, lo, agm = await self._setup(db_session, " Create")
 
-        sub = BallotSubmission(agm_id=agm.id, voter_email="voter@example.com")
+        sub = BallotSubmission(general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="voter@example.com")
         db_session.add(sub)
         await db_session.flush()
 
         assert sub.id is not None
-        assert sub.agm_id == agm.id
+        assert sub.general_meeting_id == agm.id
+        assert sub.lot_owner_id == lo.id
         assert sub.voter_email == "voter@example.com"
         assert sub.submitted_at is not None
 
     # --- Input validation / constraints ---
 
-    async def test_unique_constraint_agm_voter(self, db_session: AsyncSession):
-        """Same (agm_id, voter_email) pair raises IntegrityError."""
-        _, agm = await self._setup(db_session, " Dup")
+    async def test_unique_constraint_agm_lot_owner(self, db_session: AsyncSession):
+        """Same (general_meeting_id, lot_owner_id) pair raises IntegrityError."""
+        _, lo, agm = await self._setup(db_session, " Dup")
 
-        s1 = BallotSubmission(agm_id=agm.id, voter_email="dup@example.com")
+        s1 = BallotSubmission(general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="dup@example.com")
         db_session.add(s1)
         await db_session.flush()
 
-        s2 = BallotSubmission(agm_id=agm.id, voter_email="dup@example.com")
+        s2 = BallotSubmission(general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="dup@example.com")
         db_session.add(s2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
 
-    async def test_same_voter_different_agms_allowed(self, db_session: AsyncSession):
-        b = make_building("Same Voter Diff AGM Bldg")
+    async def test_same_lot_owner_different_agms_allowed(self, db_session: AsyncSession):
+        b = make_building("Same Voter Diff GeneralMeeting Bldg")
         db_session.add(b)
         await db_session.flush()
 
-        agm1 = make_agm(b, title="AGM Alpha")
-        agm2 = make_agm(b, title="AGM Beta")
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        agm1 = make_agm(b, title="GeneralMeeting Alpha")
+        agm2 = make_agm(b, title="GeneralMeeting Beta")
         db_session.add_all([agm1, agm2])
         await db_session.flush()
 
-        s1 = BallotSubmission(agm_id=agm1.id, voter_email="voter@example.com")
-        s2 = BallotSubmission(agm_id=agm2.id, voter_email="voter@example.com")
+        s1 = BallotSubmission(general_meeting_id=agm1.id, lot_owner_id=lo.id, voter_email="voter@example.com")
+        s2 = BallotSubmission(general_meeting_id=agm2.id, lot_owner_id=lo.id, voter_email="voter@example.com")
         db_session.add_all([s1, s2])
         await db_session.flush()  # Should NOT raise
+
+    async def test_ballot_submission_proxy_email_null_by_default(self, db_session: AsyncSession):
+        """proxy_email defaults to NULL when not supplied (direct vote)."""
+        _, lo, agm = await self._setup(db_session, " ProxyNull")
+
+        sub = BallotSubmission(general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="direct@example.com")
+        db_session.add(sub)
+        await db_session.flush()
+
+        assert sub.proxy_email is None
+
+    async def test_ballot_submission_proxy_email_stored(self, db_session: AsyncSession):
+        """proxy_email can be set when a proxy votes on behalf of a lot owner."""
+        _, lo, agm = await self._setup(db_session, " ProxySet")
+
+        sub = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email="owner@example.com",
+            proxy_email="proxy@example.com",
+        )
+        db_session.add(sub)
+        await db_session.flush()
+
+        assert sub.proxy_email == "proxy@example.com"
+
+
+# ---------------------------------------------------------------------------
+# LotProxy tests
+# ---------------------------------------------------------------------------
+
+
+class TestLotProxy:
+    """Happy path and constraint tests for LotProxy model."""
+
+    async def _setup(self, db_session: AsyncSession, suffix: str = ""):
+        b = make_building(f"Proxy Bldg{suffix}")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b)
+        db_session.add(lo)
+        await db_session.flush()
+
+        return b, lo
+
+    # --- Happy path ---
+
+    async def test_create_lot_proxy(self, db_session: AsyncSession):
+        """A LotProxy record is created with the expected fields."""
+        _, lo = await self._setup(db_session, " Create")
+
+        proxy = LotProxy(lot_owner_id=lo.id, proxy_email="proxy@example.com")
+        db_session.add(proxy)
+        await db_session.flush()
+
+        assert proxy.id is not None
+        assert isinstance(proxy.id, uuid.UUID)
+        assert proxy.lot_owner_id == lo.id
+        assert proxy.proxy_email == "proxy@example.com"
+        assert proxy.created_at is not None
+
+    async def test_lot_proxy_relationship_via_lot_owner(self, db_session: AsyncSession):
+        """LotProxy is accessible through the lot_owner relationship."""
+        _, lo = await self._setup(db_session, " Rel")
+
+        proxy = LotProxy(lot_owner_id=lo.id, proxy_email="relproxy@example.com")
+        db_session.add(proxy)
+        await db_session.flush()
+
+        # Expire the cached lo object so the relationship is reloaded
+        await db_session.refresh(lo, ["lot_proxy"])
+        assert lo.lot_proxy is not None
+        assert lo.lot_proxy.proxy_email == "relproxy@example.com"
+
+    async def test_multiple_lot_owners_can_have_different_proxies(self, db_session: AsyncSession):
+        """Different lot owners can each have their own proxy."""
+        b = make_building("Multi Proxy Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo1 = make_lot_owner(b, lot_number="P1")
+        lo2 = make_lot_owner(b, lot_number="P2")
+        db_session.add_all([lo1, lo2])
+        await db_session.flush()
+
+        p1 = LotProxy(lot_owner_id=lo1.id, proxy_email="proxyA@example.com")
+        p2 = LotProxy(lot_owner_id=lo2.id, proxy_email="proxyB@example.com")
+        db_session.add_all([p1, p2])
+        await db_session.flush()  # Should NOT raise
+
+        assert p1.id != p2.id
+
+    async def test_same_proxy_email_for_multiple_lots(self, db_session: AsyncSession):
+        """The same proxy email can represent multiple lots (no unique constraint on proxy_email)."""
+        b = make_building("Shared Proxy Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo1 = make_lot_owner(b, lot_number="S1")
+        lo2 = make_lot_owner(b, lot_number="S2")
+        db_session.add_all([lo1, lo2])
+        await db_session.flush()
+
+        p1 = LotProxy(lot_owner_id=lo1.id, proxy_email="shared@example.com")
+        p2 = LotProxy(lot_owner_id=lo2.id, proxy_email="shared@example.com")
+        db_session.add_all([p1, p2])
+        await db_session.flush()  # Should NOT raise — same email, different lots
+
+        assert p1.id != p2.id
+
+    # --- Input validation / constraints ---
+
+    async def test_unique_constraint_lot_owner_id(self, db_session: AsyncSession):
+        """Only one proxy per lot_owner_id — second insert raises IntegrityError."""
+        _, lo = await self._setup(db_session, " UniqueOwner")
+
+        p1 = LotProxy(lot_owner_id=lo.id, proxy_email="first@example.com")
+        db_session.add(p1)
+        await db_session.flush()
+
+        p2 = LotProxy(lot_owner_id=lo.id, proxy_email="second@example.com")
+        db_session.add(p2)
+        with pytest.raises(IntegrityError):
+            await db_session.flush()
+
+    async def test_cascade_delete_when_lot_owner_deleted(self, db_session: AsyncSession):
+        """Deleting a LotOwner cascades and removes its LotProxy record."""
+        _, lo = await self._setup(db_session, " Cascade")
+
+        proxy = LotProxy(lot_owner_id=lo.id, proxy_email="cascade@example.com")
+        db_session.add(proxy)
+        await db_session.flush()
+        proxy_id = proxy.id
+
+        await db_session.delete(lo)
+        await db_session.flush()
+
+        result = await db_session.get(LotProxy, proxy_id)
+        assert result is None
+
+    # --- Boundary values ---
+
+    async def test_lot_proxy_long_email(self, db_session: AsyncSession):
+        """proxy_email accepts long email-like strings."""
+        _, lo = await self._setup(db_session, " LongEmail")
+
+        long_email = "a" * 200 + "@example.com"
+        proxy = LotProxy(lot_owner_id=lo.id, proxy_email=long_email)
+        db_session.add(proxy)
+        await db_session.flush()
+        assert proxy.proxy_email == long_email
+
+    async def test_lot_proxy_tagged_email(self, db_session: AsyncSession):
+        """proxy_email accepts tagged emails (user+tag@domain)."""
+        _, lo = await self._setup(db_session, " Tagged")
+
+        proxy = LotProxy(lot_owner_id=lo.id, proxy_email="proxy+tag@domain.co.nz")
+        db_session.add(proxy)
+        await db_session.flush()
+        assert proxy.proxy_email == "proxy+tag@domain.co.nz"
 
 
 # ---------------------------------------------------------------------------
@@ -840,7 +1266,7 @@ class TestSessionRecord:
             session_token=token,
             voter_email="sess@example.com",
             building_id=b.id,
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             expires_at=expires,
         )
         db_session.add(session)
@@ -864,11 +1290,11 @@ class TestSessionRecord:
         token = "same-token-12345"
         expires = utcnow() + timedelta(hours=1)
 
-        s1 = SessionRecord(session_token=token, voter_email="a@a.com", building_id=b.id, agm_id=agm.id, expires_at=expires)
+        s1 = SessionRecord(session_token=token, voter_email="a@a.com", building_id=b.id, general_meeting_id=agm.id, expires_at=expires)
         db_session.add(s1)
         await db_session.flush()
 
-        s2 = SessionRecord(session_token=token, voter_email="b@b.com", building_id=b.id, agm_id=agm.id, expires_at=expires)
+        s2 = SessionRecord(session_token=token, voter_email="b@b.com", building_id=b.id, general_meeting_id=agm.id, expires_at=expires)
         db_session.add(s2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
@@ -890,7 +1316,7 @@ class TestSessionRecord:
             session_token="expired-token",
             voter_email="old@example.com",
             building_id=b.id,
-            agm_id=agm.id,
+            general_meeting_id=agm.id,
             expires_at=past,
         )
         db_session.add(session)
@@ -922,7 +1348,7 @@ class TestEmailDelivery:
     async def test_create_email_delivery_pending(self, db_session: AsyncSession):
         _, agm = await self._setup(db_session, " Pending")
 
-        ed = EmailDelivery(agm_id=agm.id)
+        ed = EmailDelivery(general_meeting_id=agm.id)
         db_session.add(ed)
         await db_session.flush()
 
@@ -935,7 +1361,7 @@ class TestEmailDelivery:
     async def test_email_delivery_status_transitions(self, db_session: AsyncSession):
         _, agm = await self._setup(db_session, " Transition")
 
-        ed = EmailDelivery(agm_id=agm.id)
+        ed = EmailDelivery(general_meeting_id=agm.id)
         db_session.add(ed)
         await db_session.flush()
 
@@ -947,7 +1373,7 @@ class TestEmailDelivery:
     async def test_email_delivery_failed_with_error(self, db_session: AsyncSession):
         _, agm = await self._setup(db_session, " Failed")
 
-        ed = EmailDelivery(agm_id=agm.id)
+        ed = EmailDelivery(general_meeting_id=agm.id)
         db_session.add(ed)
         await db_session.flush()
 
@@ -965,7 +1391,7 @@ class TestEmailDelivery:
         _, agm = await self._setup(db_session, " Retry")
 
         retry_time = utcnow() + timedelta(minutes=5)
-        ed = EmailDelivery(agm_id=agm.id, next_retry_at=retry_time)
+        ed = EmailDelivery(general_meeting_id=agm.id, next_retry_at=retry_time)
         db_session.add(ed)
         await db_session.flush()
         assert ed.next_retry_at is not None
@@ -973,30 +1399,30 @@ class TestEmailDelivery:
     # --- Input validation / constraints ---
 
     async def test_unique_per_agm(self, db_session: AsyncSession):
-        """Only one EmailDelivery per AGM — violating raises IntegrityError."""
+        """Only one EmailDelivery per GeneralMeeting — violating raises IntegrityError."""
         _, agm = await self._setup(db_session, " UniqueAGM")
 
-        ed1 = EmailDelivery(agm_id=agm.id)
+        ed1 = EmailDelivery(general_meeting_id=agm.id)
         db_session.add(ed1)
         await db_session.flush()
 
-        ed2 = EmailDelivery(agm_id=agm.id)
+        ed2 = EmailDelivery(general_meeting_id=agm.id)
         db_session.add(ed2)
         with pytest.raises(IntegrityError):
             await db_session.flush()
 
     async def test_different_agms_allowed(self, db_session: AsyncSession):
-        b = make_building("Two AGM Email Bldg")
+        b = make_building("Two GeneralMeeting Email Bldg")
         db_session.add(b)
         await db_session.flush()
 
-        agm1 = make_agm(b, title="AGM X")
-        agm2 = make_agm(b, title="AGM Y")
+        agm1 = make_agm(b, title="GeneralMeeting X")
+        agm2 = make_agm(b, title="GeneralMeeting Y")
         db_session.add_all([agm1, agm2])
         await db_session.flush()
 
-        ed1 = EmailDelivery(agm_id=agm1.id)
-        ed2 = EmailDelivery(agm_id=agm2.id)
+        ed1 = EmailDelivery(general_meeting_id=agm1.id)
+        ed2 = EmailDelivery(general_meeting_id=agm2.id)
         db_session.add_all([ed1, ed2])
         await db_session.flush()  # Should NOT raise
 
@@ -1004,14 +1430,14 @@ class TestEmailDelivery:
 
     async def test_email_delivery_attempt_count_zero(self, db_session: AsyncSession):
         _, agm = await self._setup(db_session, " Zero Attempts")
-        ed = EmailDelivery(agm_id=agm.id, total_attempts=0)
+        ed = EmailDelivery(general_meeting_id=agm.id, total_attempts=0)
         db_session.add(ed)
         await db_session.flush()
         assert ed.total_attempts == 0
 
     async def test_email_delivery_attempt_count_max(self, db_session: AsyncSession):
         _, agm = await self._setup(db_session, " Max Attempts")
-        ed = EmailDelivery(agm_id=agm.id, total_attempts=30)
+        ed = EmailDelivery(general_meeting_id=agm.id, total_attempts=30)
         db_session.add(ed)
         await db_session.flush()
         assert ed.total_attempts == 30

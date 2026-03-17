@@ -1,102 +1,94 @@
-import React, { useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { fetchBuildings, verifyAuth } from "../../api/voter";
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useMutation } from "@tanstack/react-query";
+import { requestOtp, verifyAuth } from "../../api/voter";
 import { AuthForm } from "../../components/vote/AuthForm";
 
 export function AuthPage() {
-  const { agmId } = useParams<{ agmId: string }>();
-  const [searchParams] = useSearchParams();
+  const { meetingId } = useParams<{ meetingId: string }>();
   const navigate = useNavigate();
   const [authError, setAuthError] = useState("");
+  const [authStep, setAuthStep] = useState<"email" | "code">("email");
+  const [otpEmail, setOtpEmail] = useState("");
 
-  const _viewMode = searchParams.get("view"); // reserved for future use
-
-  // We need building info — fetch all buildings then find the one for this AGM
-  // We get building_id from the AGM list by querying all buildings and their AGMs.
-  // For simplicity, we store building_id in the AGM list fetch.
-  // Strategy: fetch all buildings, then for each building fetch AGMs to find our AGM.
-  // Better: we load all buildings, then when user picks the AGM we already have building_id.
-  // Since we navigate here from BuildingSelectPage which has the building context in query cache,
-  // we use a query that finds the agm from all buildings.
-
-  const { data: buildings } = useQuery({
-    queryKey: ["buildings"],
-    queryFn: fetchBuildings,
+  const requestOtpMutation = useMutation({
+    mutationFn: ({ email }: { email: string }) => {
+      /* c8 ignore next */
+      if (!meetingId) return Promise.reject(new Error("Missing meeting context"));
+      return requestOtp({ email, general_meeting_id: meetingId });
+    },
+    onSuccess: () => {
+      setAuthError("");
+      setAuthStep("code");
+    },
+    onError: () => {
+      setAuthError("Failed to send code. Please try again.");
+    },
   });
 
-  // Find which building has this AGM
-  // We query all AGMs per building to find the right one
-  const [foundBuildingId, setFoundBuildingId] = React.useState<string | null>(null);
-  const [foundBuildingName, setFoundBuildingName] = React.useState<string>("");
-  const [agmTitle, setAgmTitle] = React.useState<string>("");
-
-  React.useEffect(() => {
-    if (!buildings || !agmId) return;
-
-    const findBuilding = async () => {
-      for (const building of buildings) {
-        try {
-          const { fetchAGMs: fetch } = await import("../../api/voter");
-          const agms = await fetch(building.id);
-          const found = agms.find((a) => a.id === agmId);
-          if (found) {
-            setFoundBuildingId(building.id);
-            setFoundBuildingName(building.name);
-            setAgmTitle(found.title);
-            return;
-          }
-        } catch {
-          // continue searching
-        }
-      }
-    };
-
-    void findBuilding();
-  }, [buildings, agmId]);
-
-  const mutation = useMutation({
-    mutationFn: ({ lotNumber, email }: { lotNumber: string; email: string }) => {
-      if (!foundBuildingId || !agmId) {
-        return Promise.reject(new Error("Missing building or AGM context"));
-      }
-      return verifyAuth({
-        lot_number: lotNumber,
-        email,
-        building_id: foundBuildingId,
-        agm_id: agmId,
-      });
+  const verifyMutation = useMutation({
+    mutationFn: ({ email, code }: { email: string; code: string }) => {
+      /* c8 ignore next */
+      if (!meetingId) return Promise.reject(new Error("Missing meeting context"));
+      return verifyAuth({ email, code, general_meeting_id: meetingId });
     },
     onSuccess: (data) => {
       /* c8 ignore next */
-      if (!agmId) return;
-      if (data.agm_status === "closed" || data.already_submitted) {
-        navigate(`/vote/${agmId}/confirmation`);
+      if (!meetingId) return;
+      const allSubmitted = data.lots.length > 0 && data.lots.every((l) => l.already_submitted);
+      const pendingLots = data.lots.filter((l) => !l.already_submitted);
+      const pendingLotIds = pendingLots.map((l) => l.lot_owner_id);
+      // Persist pending lot IDs in sessionStorage so VotingPage can submit on behalf of them
+      sessionStorage.setItem(`meeting_lots_${meetingId}`, JSON.stringify(pendingLotIds));
+      // Persist full lot info (including is_proxy) for the lot selection screen
+      sessionStorage.setItem(`meeting_lots_info_${meetingId}`, JSON.stringify(data.lots));
+      // Persist lot info (including financial_position) so VotingPage can enforce eligibility
+      sessionStorage.setItem(`meeting_lot_info_${meetingId}`, JSON.stringify(pendingLots));
+      // Persist building name and meeting title for the lot selection page header
+      sessionStorage.setItem(`meeting_building_name_${meetingId}`, data.building_name);
+      sessionStorage.setItem(`meeting_title_${meetingId}`, data.meeting_title);
+      if (data.agm_status === "pending") {
+        navigate("/", { state: { pendingMessage: "This meeting has not started yet. Please check back later." } });
+        return;
+      }
+      if (data.agm_status === "closed" || allSubmitted) {
+        navigate(`/vote/${meetingId}/confirmation`);
       } else {
-        navigate(`/vote/${agmId}/voting`);
+        navigate(`/vote/${meetingId}/voting`);
       }
     },
     onError: (error: Error) => {
       if (error.message.includes("401")) {
-        setAuthError("Lot number and email address do not match our records");
+        setAuthError("Invalid or expired code. Please try again.");
       } else {
         setAuthError("An error occurred. Please try again.");
       }
     },
   });
 
-  const handleSubmit = (lotNumber: string, email: string) => {
+  const handleRequestOtp = (email: string) => {
     setAuthError("");
-    mutation.mutate({ lotNumber, email });
+    setOtpEmail(email);
+    requestOtpMutation.mutate({ email });
+  };
+
+  const handleVerify = (email: string, code: string) => {
+    setAuthError("");
+    verifyMutation.mutate({ email, code });
   };
 
   return (
     <main className="voter-content">
+      <button type="button" className="btn btn--ghost back-btn" onClick={() => navigate("/")}>
+        ← Back
+      </button>
       <AuthForm
-        agmTitle={agmTitle || "Loading..."}
-        buildingName={foundBuildingName || ""}
-        onSubmit={handleSubmit}
-        isLoading={mutation.isPending}
+        onRequestOtp={handleRequestOtp}
+        onVerify={handleVerify}
+        isRequestingOtp={requestOtpMutation.isPending}
+        isVerifying={verifyMutation.isPending}
+        step={authStep}
+        otpEmail={otpEmail}
         error={authError}
       />
     </main>

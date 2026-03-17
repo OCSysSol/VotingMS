@@ -1,4 +1,3 @@
-import React from "react";
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import StatusBadge from "../StatusBadge";
@@ -12,6 +11,11 @@ describe("StatusBadge", () => {
   it("shows Closed for closed status", () => {
     render(<StatusBadge status="closed" />);
     expect(screen.getByText("Closed")).toBeInTheDocument();
+  });
+
+  it("shows Pending for pending status", () => {
+    render(<StatusBadge status="pending" />);
+    expect(screen.getByText("Pending")).toBeInTheDocument();
   });
 
   it("shows Closed for unknown status", () => {
