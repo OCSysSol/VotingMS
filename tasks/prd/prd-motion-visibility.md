@@ -149,12 +149,17 @@ Admins running a General Meeting want to control which motions are visible to vo
 **Description:** As a building manager, I want to edit the title, description, and motion type of a hidden motion so I can correct mistakes before revealing it to voters.
 
 **Acceptance Criteria:**
-- [x] An "Edit" action is available on each hidden motion row in the admin meeting detail page
-- [x] Clicking "Edit" opens a form pre-populated with the current motion fields (title/description and motion type)
-- [x] Submitting the form calls `PATCH /api/admin/motions/{id}` and updates the motion in the list immediately
-- [x] Edit is only available when the motion is hidden (`is_visible = false`) — the action is not shown for visible motions
+- [x] An "Edit" button is available on each hidden motion row in the admin meeting detail page
+- [ ] Clicking "Edit" opens a modal dialog (not an inline row form) pre-populated with the current motion fields
+- [ ] The modal contains: a Title text input (required), a Description textarea (optional), and a Motion Type select (general / special_resolution)
+- [ ] Clicking Cancel or pressing Escape or clicking the backdrop closes the modal without saving any changes
+- [ ] Clicking "Save Changes" calls `PATCH /api/admin/motions/{id}` with the updated fields
+- [ ] While the PATCH request is in flight, the Save button is disabled and shows "Saving…"
+- [ ] On success, the modal closes and the motion list refreshes immediately (query invalidated)
+- [ ] On failure, an error message is shown inside the modal using `.field__error` styling; the modal stays open
+- [x] Edit is only available when the motion is hidden (`is_visible = false`) AND the meeting is not `closed` — the button is disabled otherwise
 - [x] Typecheck/lint passes
-- [x] Verify in browser using dev-browser skill
+- [ ] Verify in browser using dev-browser skill
 
 ---
 
@@ -199,6 +204,20 @@ Admins running a General Meeting want to control which motions are visible to vo
 - [x] `POST /api/admin/general-meetings/{id}/motions` returns 409 with a clear message if the meeting status is `closed`
 - [x] Frontend edit/delete actions are hidden for visible motions (guard is backend-enforced; UI hides to avoid unnecessary errors)
 - [x] Typecheck/lint passes
+
+---
+
+### US-AM06: Edit/Delete button visual saturation on motion rows
+
+**Description:** As a building manager, I want the Edit and Delete buttons on motion rows to be visually distinct when they are enabled so I can immediately tell which motions I can act on.
+
+**Acceptance Criteria:**
+- [ ] When a motion row's Edit/Delete buttons are enabled (motion is hidden AND meeting is not closed), the Edit button uses `.btn--secondary` styling (navy outline, clearly visible) and the Delete button uses `.btn--danger` styling (red-tinted fill, clearly destructive)
+- [ ] When a motion row's Edit/Delete buttons are disabled (motion is visible OR meeting is closed), the `disabled` attribute is present on both buttons so the browser applies reduced-opacity greyed-out appearance automatically (via the existing `.btn:disabled { opacity: 0.45 }` rule)
+- [ ] Disabled buttons retain their `title="Hide this motion first to edit or delete"` tooltip so the reason is discoverable on hover
+- [ ] No additional CSS class or wrapper is needed for the disabled state — the `disabled` attribute alone is sufficient
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
 
 ---
 
