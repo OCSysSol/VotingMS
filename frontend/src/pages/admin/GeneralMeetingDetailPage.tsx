@@ -260,7 +260,7 @@ export default function GeneralMeetingDetailPage() {
               </button>
             ) : (
               <div className="admin-card" style={{ marginBottom: 16 }}>
-                <h3 className="admin-card__title" style={{ fontSize: "1rem", marginBottom: 12 }}>Add Motion</h3>
+                <h3 className="admin-card__title">Add Motion</h3>
                 <form
                   onSubmit={(e) => {
                     e.preventDefault();
@@ -275,32 +275,29 @@ export default function GeneralMeetingDetailPage() {
                     });
                   }}
                 >
-                  <div className="form-group">
-                    <label htmlFor="add-motion-title">Title *</label>
+                  <div className="field">
+                    <label className="field__label" htmlFor="add-motion-title">Title *</label>
                     <input
                       id="add-motion-title"
-                      className="form-control"
-                      aria-label="Title"
+                      className="field__input"
                       value={addMotionForm.title}
                       onChange={(e) => setAddMotionForm((f) => ({ ...f, title: e.target.value }))}
                     />
                   </div>
-                  <div className="form-group">
-                    <label htmlFor="add-motion-description">Description</label>
+                  <div className="field">
+                    <label className="field__label" htmlFor="add-motion-description">Description</label>
                     <textarea
                       id="add-motion-description"
-                      className="form-control"
-                      aria-label="Description"
+                      className="field__input"
                       value={addMotionForm.description}
                       onChange={(e) => setAddMotionForm((f) => ({ ...f, description: e.target.value }))}
                     />
                   </div>
-                  <div className="form-group">
-                    <label htmlFor="add-motion-type">Motion Type</label>
+                  <div className="field">
+                    <label className="field__label" htmlFor="add-motion-type">Motion Type</label>
                     <select
                       id="add-motion-type"
-                      className="form-control"
-                      aria-label="Motion Type"
+                      className="field__select"
                       value={addMotionForm.motion_type}
                       onChange={(e) => setAddMotionForm((f) => ({ ...f, motion_type: e.target.value as MotionType }))}
                     >
@@ -309,11 +306,11 @@ export default function GeneralMeetingDetailPage() {
                     </select>
                   </div>
                   {addMotionError && (
-                    <span role="alert" style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginBottom: 8 }}>
+                    <span role="alert" className="field__error">
                       {addMotionError}
                     </span>
                   )}
-                  <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
                     <button
                       type="submit"
                       className="btn btn--primary"
@@ -462,7 +459,7 @@ export default function GeneralMeetingDetailPage() {
                         <tr key={`edit-${motion.id}`}>
                           <td colSpan={5}>
                             <div className="admin-card" style={{ margin: "8px 0" }}>
-                              <h4 style={{ margin: "0 0 12px", fontSize: "0.9rem" }}>Edit Motion</h4>
+                              <h4 className="admin-card__title">Edit Motion</h4>
                               <form
                                 onSubmit={(e) => {
                                   e.preventDefault();
@@ -476,31 +473,31 @@ export default function GeneralMeetingDetailPage() {
                                   });
                                 }}
                               >
-                                <div className="form-group">
-                                  <label htmlFor={`edit-title-${motion.id}`}>Title</label>
+                                <div className="field">
+                                  <label className="field__label" htmlFor={`edit-title-${motion.id}`}>Title</label>
                                   <input
                                     id={`edit-title-${motion.id}`}
-                                    className="form-control"
+                                    className="field__input"
                                     aria-label="Edit Title"
                                     value={editForm.title}
                                     onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
                                   />
                                 </div>
-                                <div className="form-group">
-                                  <label htmlFor={`edit-desc-${motion.id}`}>Description</label>
+                                <div className="field">
+                                  <label className="field__label" htmlFor={`edit-desc-${motion.id}`}>Description</label>
                                   <textarea
                                     id={`edit-desc-${motion.id}`}
-                                    className="form-control"
+                                    className="field__input"
                                     aria-label="Edit Description"
                                     value={editForm.description}
                                     onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
                                   />
                                 </div>
-                                <div className="form-group">
-                                  <label htmlFor={`edit-type-${motion.id}`}>Motion Type</label>
+                                <div className="field">
+                                  <label className="field__label" htmlFor={`edit-type-${motion.id}`}>Motion Type</label>
                                   <select
                                     id={`edit-type-${motion.id}`}
-                                    className="form-control"
+                                    className="field__select"
                                     aria-label="Edit Motion Type"
                                     value={editForm.motion_type}
                                     onChange={(e) => setEditForm((f) => ({ ...f, motion_type: e.target.value as MotionType }))}
@@ -510,11 +507,11 @@ export default function GeneralMeetingDetailPage() {
                                   </select>
                                 </div>
                                 {editMotionError && (
-                                  <span role="alert" style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginBottom: 8 }}>
+                                  <span role="alert" className="field__error">
                                     {editMotionError}
                                   </span>
                                 )}
-                                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.75rem" }}>
                                   <button
                                     type="submit"
                                     className="btn btn--primary"
