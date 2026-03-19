@@ -64,7 +64,7 @@ EOF
 ```bash
 BRANCH="feat/your-branch-name"
 PROJECT_ID="prj_qrC03F0jBalhpHV5VLK3IyCRUU6L"
-VERCEL_TOKEN=$(cat ~/.config/vercel/auth.json 2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('token',''))")
+VERCEL_TOKEN=$(python3 -c "import json; print(json.load(open('/Users/stevensun/Library/Application Support/com.vercel.cli/auth.json'))['token'])")
 
 # Poll until the latest deployment for this branch is Ready or Error (not Building/Queued)
 for i in $(seq 1 20); do
