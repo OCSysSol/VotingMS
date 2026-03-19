@@ -192,6 +192,26 @@ test.describe("WF8: Edge cases", () => {
   }) => {
     test.setTimeout(60000);
 
+    // WF8.3 closed the only open meeting for this building, so the building is
+    // now excluded from GET /api/buildings (which filters to buildings with at
+    // least one open AGM). Seed a fresh open meeting so the building reappears
+    // in the dropdown before navigating to the home page.
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+    await createOpenMeeting(api, buildingId, `WF8 Open Meeting WF8.5-${RUN_SUFFIX}`, [
+      {
+        title: MOTION_TITLE,
+        description: "A test motion for WF8.5.",
+        orderIndex: 1,
+        motionType: "general",
+      },
+    ]);
+    await api.dispose();
+
     await page.goto("/");
 
     // Without selecting a building, "Enter Voting" should not appear
