@@ -254,6 +254,20 @@ test.describe("WF8: Edge cases", () => {
         },
       ]
     );
+
+    // Ensure the WF8 building appears in the dropdown by seeding an open meeting.
+    // The filter on GET /api/buildings only returns buildings with at least one
+    // open meeting; previous tests may have closed all open meetings for this
+    // building, so we seed a new one here to guarantee the building is selectable.
+    await createOpenMeeting(api, buildingId, `WF8 Open Meeting WF8.6-${RUN_SUFFIX}`, [
+      {
+        title: MOTION_TITLE,
+        description: "A test motion for WF8.6.",
+        orderIndex: 1,
+        motionType: "general",
+      },
+    ]);
+
     // Keep api alive for OTP retrieval after pending meeting navigation
     // On home page, select WF8 building — pending meeting shows disabled button
     await page.goto("/");
