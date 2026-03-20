@@ -453,8 +453,11 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     // net::ERR_NETWORK_CHANGED errors that can cause checkboxes to not yet be in the DOM)
     await page.waitForLoadState("networkidle");
 
-    // Deselect Lot B — only Lot A will be submitted
-    const lotBCheckbox = page.getByLabel(`Select Lot ${WF10_LOT_B}`).first();
+    // Deselect Lot B — only Lot A will be submitted.
+    // Two instances of the checkbox exist: the mobile drawer (display:none on desktop, DOM-first)
+    // and the sidebar (visible on desktop, DOM-last). Use .last() to target the visible sidebar
+    // instance so Playwright can interact with it on the Desktop Chrome project viewport.
+    const lotBCheckbox = page.getByLabel(`Select Lot ${WF10_LOT_B}`).last();
     await expect(lotBCheckbox).toBeVisible({ timeout: 15000 });
     await lotBCheckbox.uncheck();
 
@@ -548,8 +551,17 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
   });
 
   // ── WF10.2: mixed warning — voter goes back ────────────────────────────────
+  // This test seeds its own independent data (WF10-C / WF10-D lots) so it is
+  // not affected by WF10.1 having consumed all submission state for Lot A / Lot B.
+  //
+  // Setup (done inside the test via browser + API):
+  //   1. Seed a new building + two lots (WF10-C, WF10-D) with the same email
+  //   2. Voter authenticates, deselects Lot D, votes on motion 1 for Lot C only, submits
+  //   3. Admin reveals motion 2 via API
+  //   4. Voter re-authenticates — both lots selected, mixed state → warning dialog appears
+  //   5. Click "Go back" — warning dismissed, still on voting page
   test("WF10.2: voter clicks Go back from warning — returns to voting page without submitting", async ({ page }) => {
-    test.setTimeout(120000);
+    test.setTimeout(180000);
 
     const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
     const api = await playwrightRequest.newContext({
@@ -558,14 +570,81 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
       storageState: ADMIN_AUTH_PATH,
     });
 
+    // ── Seed independent data for WF10.2 ──────────────────────────────────
+    const wf102Email = `wf10b-voter-${RUN_SUFFIX}@test.com`;
+    const wf102LotC = "WF10-C";
+    const wf102LotD = "WF10-D";
+    const wf102Motion1 = "WF10B Motion 1 — Budget";
+    const wf102Motion2 = "WF10B Motion 2 — Bylaws";
+    const wf102Building = `WF10B Mixed Warning Building-${RUN_SUFFIX}`;
+
+    const buildingId = await seedBuilding(api, wf102Building, `wf10b-mgr-${RUN_SUFFIX}@test.com`);
+
+    await seedLotOwner(api, buildingId, {
+      lotNumber: wf102LotC,
+      emails: [wf102Email],
+      unitEntitlement: 10,
+      financialPosition: "normal",
+    });
+    await seedLotOwner(api, buildingId, {
+      lotNumber: wf102LotD,
+      emails: [wf102Email],
+      unitEntitlement: 20,
+      financialPosition: "normal",
+    });
+
+    const wf102MeetingId = await createOpenMeeting(api, buildingId, `WF10B Meeting-${RUN_SUFFIX}`, [
+      { title: wf102Motion1, description: "Approve the budget.", orderIndex: 0, motionType: "general" },
+    ]);
+
+    await clearBallots(api, wf102MeetingId);
+
+    // ── Step 1: authenticate and submit Lot C only (deselect Lot D) via browser ──
+    await goToAuthPage(page, wf102Building);
+    await authenticateVoter(page, wf102Email, () => getTestOtp(api, wf102Email, wf102MeetingId));
+    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
+    await page.waitForLoadState("networkidle");
+
+    // Deselect Lot D so only Lot C is submitted
+    const lotDCheckbox = page.getByLabel(`Select Lot ${wf102LotD}`).last();
+    await expect(lotDCheckbox).toBeVisible({ timeout: 15000 });
+    await lotDCheckbox.uncheck();
+
+    // Vote on motion 1 for Lot C only and submit
+    const motionCardStep1 = page.locator(".motion-card").first();
+    await expect(motionCardStep1).toBeVisible({ timeout: 15000 });
+    await motionCardStep1.getByRole("button", { name: "For" }).click();
+
+    await page.getByRole("button", { name: "Submit ballot" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("button", { name: "Submit ballot" }).last().click();
+
+    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
+    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
+
+    // ── Step 2: admin reveals motion 2 via API ─────────────────────────────
+    const addRes = await api.post(`/api/admin/general-meetings/${wf102MeetingId}/motions`, {
+      data: { title: wf102Motion2, description: "Approve the bylaws.", motion_type: "general" },
+    });
+    expect(addRes.ok(), `add motion: ${addRes.status()} ${await addRes.text()}`).toBe(true);
+    const newMotion = (await addRes.json()) as { id: string };
+
+    const visRes = await api.patch(`/api/admin/motions/${newMotion.id}/visibility`, {
+      data: { is_visible: true },
+    });
+    expect(visRes.ok(), `visibility patch: ${visRes.status()} ${await visRes.text()}`).toBe(true);
+
+    // ── Step 3: voter re-authenticates — mixed state → warning shown ───────
     await page.goto("/");
-    await goToAuthPage(page, WF10_BUILDING);
-    await authenticateVoter(page, WF10_EMAIL, () => getTestOtp(api, WF10_EMAIL, wf10MeetingId));
+    await goToAuthPage(page, wf102Building);
+    await authenticateVoter(page, wf102Email, () => getTestOtp(api, wf102Email, wf102MeetingId));
     await api.dispose();
 
+    // Both lots are selected; Lot C has voted on motion 1 but Lot D has not
+    // → mixed state → voter lands on voting page
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
-    // Vote on motions
+    // Vote on both motions
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2, { timeout: 15000 });
     await motionCards.first().getByRole("button", { name: "For" }).click();
@@ -575,7 +654,7 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     await page.getByRole("button", { name: "Submit ballot" }).click();
     await expect(page.getByRole("heading", { name: "Mixed voting history" })).toBeVisible({ timeout: 10000 });
 
-    // Click Go back
+    // ── Step 4: click Go back — warning dismissed, still on voting page ────
     await page.getByRole("button", { name: "Go back to lot selection" }).click();
 
     // Warning should be dismissed; still on voting page
