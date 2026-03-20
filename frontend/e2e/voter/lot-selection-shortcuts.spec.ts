@@ -122,7 +122,8 @@ test.describe("Lot-selection shortcut buttons", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
 
     // Deselect all first so we start from a known state
-    await page.getByRole("button", { name: "Deselect all lots" }).click();
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    await sidebar.getByRole("button", { name: "Deselect all lots", exact: true }).click();
 
     const lotACheckbox = sidebar.getByLabel(`Select Lot ${LOT_A}`);
     const lotBCheckbox = sidebar.getByLabel(`Select Lot ${LOT_B}`);
@@ -133,7 +134,7 @@ test.describe("Lot-selection shortcut buttons", () => {
     await expect(lotCCheckbox).not.toBeChecked({ timeout: 5000 });
 
     // Click "Select All"
-    await page.getByRole("button", { name: "Select all lots" }).click();
+    await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
 
     // All three lots must now be checked
     await expect(lotACheckbox).toBeChecked({ timeout: 5000 });
@@ -158,7 +159,8 @@ test.describe("Lot-selection shortcut buttons", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
 
     // Ensure all are checked first (Select All)
-    await page.getByRole("button", { name: "Select all lots" }).click();
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
 
     const lotACheckbox = sidebar.getByLabel(`Select Lot ${LOT_A}`);
     const lotBCheckbox = sidebar.getByLabel(`Select Lot ${LOT_B}`);
@@ -169,7 +171,7 @@ test.describe("Lot-selection shortcut buttons", () => {
     await expect(lotCCheckbox).toBeChecked({ timeout: 5000 });
 
     // Click "Deselect All"
-    await page.getByRole("button", { name: "Deselect all lots" }).click();
+    await sidebar.getByRole("button", { name: "Deselect all lots", exact: true }).click();
 
     // All three lots must now be unchecked
     await expect(lotACheckbox).not.toBeChecked({ timeout: 5000 });
@@ -194,14 +196,16 @@ test.describe("Lot-selection shortcut buttons", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
 
     // Start with all selected, then apply "Select Proxy Lots"
-    await page.getByRole("button", { name: "Select all lots" }).click();
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
 
     const lotACheckbox = sidebar.getByLabel(`Select Lot ${LOT_A}`);
     const lotBCheckbox = sidebar.getByLabel(`Select Lot ${LOT_B}`);
     const lotCCheckbox = sidebar.getByLabel(`Select Lot ${LOT_C}`);
 
     // "Select Proxy Lots" button is only shown when proxies exist
-    const selectProxyBtn = page.getByRole("button", { name: "Select proxy lots only" });
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    const selectProxyBtn = sidebar.getByRole("button", { name: "Select proxy lots only" });
     await expect(selectProxyBtn).toBeVisible({ timeout: 10000 });
     await selectProxyBtn.click();
 
@@ -228,14 +232,16 @@ test.describe("Lot-selection shortcut buttons", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
 
     // Start from all selected
-    await page.getByRole("button", { name: "Select all lots" }).click();
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
 
     const lotACheckbox = sidebar.getByLabel(`Select Lot ${LOT_A}`);
     const lotBCheckbox = sidebar.getByLabel(`Select Lot ${LOT_B}`);
     const lotCCheckbox = sidebar.getByLabel(`Select Lot ${LOT_C}`);
 
     // "Select Owned Lots" button is only shown when proxies exist
-    const selectOwnedBtn = page.getByRole("button", { name: "Select owned lots only" });
+    // Scope to sidebar to avoid matching the duplicate button in the hidden mobile drawer
+    const selectOwnedBtn = sidebar.getByRole("button", { name: "Select owned lots only" });
     await expect(selectOwnedBtn).toBeVisible({ timeout: 10000 });
     await selectOwnedBtn.click();
 
