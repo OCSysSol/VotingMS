@@ -26,6 +26,7 @@ import {
   authenticateVoter,
   getTestOtp,
   submitBallot,
+  submitBallotViaApi,
 } from "../workflows/helpers";
 
 const BUILDING = `RV01 Revote Building-${RUN_SUFFIX}`;
@@ -485,17 +486,32 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
       storageState: ADMIN_AUTH_PATH,
     });
 
-    const addRes = await api.post(`/api/admin/general-meetings/${wf10MeetingId}/motions`, {
-      data: {
-        title: WF10_MOTION2,
-        description: "Approve the bylaws.",
-        motion_type: "general",
-      },
-    });
-    expect(addRes.ok(), `add motion: ${addRes.status()} ${await addRes.text()}`).toBe(true);
-    const newMotion = (await addRes.json()) as { id: string; is_visible: boolean };
+    // Idempotent: check whether Motion 2 already exists on this meeting (e.g. from
+    // a previous retry that partially succeeded). If it already exists, just ensure
+    // it is visible. If it does not exist, add it then make it visible.
+    const meetingRes = await api.get(`/api/admin/general-meetings/${wf10MeetingId}`);
+    expect(meetingRes.ok(), `get meeting: ${meetingRes.status()} ${await meetingRes.text()}`).toBe(true);
+    const meetingDetail = (await meetingRes.json()) as { motions?: { id: string; title: string; is_visible: boolean }[] };
+    const existingM2 = meetingDetail.motions?.find((m) => m.title === WF10_MOTION2);
 
-    const visRes = await api.patch(`/api/admin/motions/${newMotion.id}/visibility`, {
+    let motionId: string;
+    if (existingM2) {
+      // Motion 2 already exists — reuse its ID
+      motionId = existingM2.id;
+    } else {
+      const addRes = await api.post(`/api/admin/general-meetings/${wf10MeetingId}/motions`, {
+        data: {
+          title: WF10_MOTION2,
+          description: "Approve the bylaws.",
+          motion_type: "general",
+        },
+      });
+      expect(addRes.ok(), `add motion: ${addRes.status()} ${await addRes.text()}`).toBe(true);
+      motionId = ((await addRes.json()) as { id: string }).id;
+    }
+
+    // Ensure the motion is visible (idempotent — PATCH to true is safe even if already true)
+    const visRes = await api.patch(`/api/admin/motions/${motionId}/visibility`, {
       data: { is_visible: true },
     });
     expect(visRes.ok(), `visibility patch: ${visRes.status()} ${await visRes.text()}`).toBe(true);
@@ -513,6 +529,39 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
       ignoreHTTPSErrors: true,
       storageState: ADMIN_AUTH_PATH,
     });
+
+    // ── Reset to the exact prerequisite state: LotA voted M1, LotB has not voted ──
+    // This makes WF10.1 idempotent across retries. If a previous attempt of WF10.1
+    // (or WF10.0) already submitted both lots, we clear ballots and re-seed LotA's
+    // M1 vote so the mixed-selection precondition is always guaranteed.
+    //
+    // Step 1: clear all ballots for this meeting
+    await clearBallots(api, wf10MeetingId);
+
+    // Step 2: fetch the meeting motions to find Motion 1's ID
+    const meetingRes = await api.get(`/api/admin/general-meetings/${wf10MeetingId}`);
+    expect(meetingRes.ok(), `get meeting: ${meetingRes.status()} ${await meetingRes.text()}`).toBe(true);
+    const meetingDetail = (await meetingRes.json()) as {
+      motions?: { id: string; title: string }[];
+    };
+    const motion1 = meetingDetail.motions?.find((m) => m.title === WF10_MOTION1);
+    expect(motion1, `Motion 1 ("${WF10_MOTION1}") not found on meeting`).toBeTruthy();
+    const motion1Id = motion1!.id;
+
+    // Step 3: fetch lot owners to find Lot A's ID
+    const buildingsRes = await api.get("/api/admin/buildings");
+    const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+    const wf10Building = buildings.find((b) => b.name === WF10_BUILDING);
+    expect(wf10Building, `WF10 building not found`).toBeTruthy();
+    const lotsRes = await api.get(`/api/admin/buildings/${wf10Building!.id}/lot-owners`);
+    const lots = (await lotsRes.json()) as { id: string; lot_number: string }[];
+    const lotA = lots.find((l) => l.lot_number === WF10_LOT_A);
+    expect(lotA, `Lot A (${WF10_LOT_A}) not found`).toBeTruthy();
+
+    // Step 4: submit LotA's "yes" vote on M1 via API (re-creates WF10.0's outcome)
+    await submitBallotViaApi(api, WF10_EMAIL, wf10MeetingId, [lotA!.id], [
+      { motion_id: motion1Id, choice: "yes" },
+    ]);
 
     await page.goto("/");
     await goToAuthPage(page, WF10_BUILDING);
