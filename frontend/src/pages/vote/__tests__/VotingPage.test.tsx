@@ -399,14 +399,17 @@ describe("VotingPage", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
-      JSON.stringify([{ lot_owner_id: "lo1", lot_number: "99", financial_position: "normal", already_submitted: true, is_proxy: true }])
+      JSON.stringify([{ lot_owner_id: "lo1", lot_number: "99", financial_position: "normal", already_submitted: true, is_proxy: true, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] }])
     );
     renderPage();
     await waitFor(() => {
       expect(screen.getAllByText("Already submitted")[0]).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "View Submission" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "View Submission" }));
+    // Both the inline lot panel and the submit-section show "View Submission" when all motions
+    // are already voted on (isLotSubmitted=true → readOnly → unvotedMotions=[]).
+    const viewSubmissionBtns = screen.getAllByRole("button", { name: "View Submission" });
+    expect(viewSubmissionBtns.length).toBeGreaterThanOrEqual(1);
+    await user.click(viewSubmissionBtns[0]);
     expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/confirmation`);
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
@@ -527,8 +530,8 @@ describe("VotingPage", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
       ])
     );
     renderPage();
@@ -543,8 +546,8 @@ describe("VotingPage", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
       ])
     );
     renderPage();
@@ -560,8 +563,8 @@ describe("VotingPage", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
       ])
     );
     renderPage();
@@ -1043,9 +1046,9 @@ describe("VotingPage", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: true },
-        { lot_owner_id: "lo3", lot_number: "3", financial_position: "normal", already_submitted: false, is_proxy: true },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: true, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo3", lot_number: "3", financial_position: "normal", already_submitted: false, is_proxy: true, voted_motion_ids: [] },
       ])
     );
     renderPage();
@@ -1061,9 +1064,9 @@ describe("VotingPage", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false },
-        { lot_owner_id: "lo3", lot_number: "3", financial_position: "normal", already_submitted: false, is_proxy: true },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+        { lot_owner_id: "lo3", lot_number: "3", financial_position: "normal", already_submitted: false, is_proxy: true, voted_motion_ids: [] },
       ])
     );
     renderPage();
@@ -1499,13 +1502,14 @@ describe("VotingPage", () => {
   });
 
   it("back navigation with updated sessionStorage: submitted lots render as disabled (regression)", async () => {
-    // Simulate the post-fix state: sessionStorage already has already_submitted: true
-    // (as if a submit already happened and the user navigated back)
+    // Simulate the post-fix state: sessionStorage has already_submitted: true AND voted_motion_ids
+    // covering all current motions (as written by onSuccess after a submit).
+    // Under the BUG-NM-01-B fix, isLotSubmitted derives from voted_motion_ids + motions.
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
       JSON.stringify([
-        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false },
-        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false },
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
       ])
     );
     renderPage();
@@ -1806,6 +1810,330 @@ describe("VotingPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     // Submit ballot button still visible (still on voting page)
     expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  // --- BUG-NM-01-B: Dynamic already_submitted derivation (Option C fix) ---
+
+  // --- Happy path ---
+
+  it("isLotSubmitted: lot unlocks when motions array is empty (no motions loaded yet)", async () => {
+    // When motions have not yet loaded, isLotSubmitted returns false — lots stay selectable.
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        // Simulate slow server — motions load after a delay; use empty for this test
+        HttpResponse.json([])
+      )
+    );
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+      ])
+    );
+    renderPage();
+    // With empty motions, no-motions message shown; lot panel is not multi-lot (single lot), no sidebar
+    await waitFor(() => {
+      expect(screen.getByTestId("no-motions-message")).toBeInTheDocument();
+    });
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("isLotSubmitted: lot is locked when all motions are in voted_motion_ids", async () => {
+    // Both motions are in voted_motion_ids → isLotSubmitted returns true → disabled checkbox
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
+    // Wait for motions to load so isLotSubmitted can evaluate
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    // lo1 has both motions in voted_motion_ids → checkbox disabled
+    const lo1Checkboxes = screen.getAllByLabelText("Select Lot 1");
+    lo1Checkboxes.forEach((cb) => expect(cb).toBeDisabled());
+    // lo2 has no voted_motion_ids → checkbox enabled
+    const lo2Checkboxes = screen.getAllByLabelText("Select Lot 2");
+    lo2Checkboxes.forEach((cb) => expect(cb).not.toBeDisabled());
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("isLotSubmitted: lot stays unlocked when only partial voted_motion_ids (new motion added)", async () => {
+    // Simulates BUG-NM-01-B: lot was previously fully submitted (voted_motion_ids=[MOTION_ID_1]),
+    // but admin now reveals MOTION_ID_2. isLotSubmitted returns false — lot should be unlocked.
+    // The [motions, allLots] effect should add lo1 back to selectedIds.
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
+    // After motions load: MOTION_ID_2 is NOT in lo1's voted_motion_ids
+    // isLotSubmitted(lo1) = false → checkbox should be enabled
+    await waitFor(() => {
+      const lo1Checkboxes = screen.getAllByLabelText("Select Lot 1");
+      lo1Checkboxes.forEach((cb) => expect(cb).not.toBeDisabled());
+    });
+    // No "Already submitted" badge for lo1
+    const allBadges = screen.queryAllByText("Already submitted");
+    expect(allBadges).toHaveLength(0);
+    // Submit ballot button visible (unvotedMotions > 0)
+    expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("BUG-NM-01-B regression: lot unlocks on re-mount when new motion exists", async () => {
+    // Simulates voter returning to VotingPage after unmount (e.g. navigated to confirmation then back).
+    // sessionStorage has already_submitted: true (stale), voted_motion_ids=[MOTION_ID_1] (partial).
+    // A new MOTION_ID_2 was revealed by admin. The re-mount should show the lot as unlocked.
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          { id: MOTION_ID_1, title: "Motion 1", description: null, order_index: 0, motion_type: "general", is_visible: true, already_voted: true, submitted_choice: "yes" },
+          { id: MOTION_ID_2, title: "New Motion", description: null, order_index: 1, motion_type: "special", is_visible: true, already_voted: false, submitted_choice: null },
+        ])
+      )
+    );
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        // Stale state from a previous submit: already_submitted=true but only MOTION_ID_1 in voted_motion_ids
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1] },
+      ])
+    );
+    renderPage();
+    // isLotSubmitted(lo1) = motions.every(m => [MOTION_ID_1].includes(m.id))
+    // = [MOTION_ID_1, MOTION_ID_2].every(...) = false (MOTION_ID_2 not in voted_motion_ids)
+    // → lot should NOT show "Already submitted" badge
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    expect(screen.queryByText("Already submitted")).not.toBeInTheDocument();
+    // Submit ballot button must be present
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
+    });
+    // Motion 1 should be pre-filled (already_voted=true, submitted_choice="yes")
+    await waitFor(() => {
+      const forButtons = screen.getAllByRole("button", { name: "For" });
+      expect(forButtons[0]).toHaveAttribute("aria-pressed", "true");
+    });
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("after submit: voted_motion_ids is merged in sessionStorage for submitted lots", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    sessionStorage.setItem(`meeting_lots_${AGM_ID}`, JSON.stringify(["lo1", "lo2"]));
+    renderPage();
+    await waitFor(() => screen.getAllByRole("checkbox"));
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/confirmation`);
+    });
+
+    // sessionStorage voted_motion_ids for submitted lots must include current motion IDs
+    const stored = JSON.parse(
+      sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`) ?? "[]"
+    ) as { lot_owner_id: string; voted_motion_ids: string[] }[];
+    const lo1 = stored.find((l) => l.lot_owner_id === "lo1");
+    const lo2 = stored.find((l) => l.lot_owner_id === "lo2");
+    expect(lo1?.voted_motion_ids).toContain(MOTION_ID_1);
+    expect(lo1?.voted_motion_ids).toContain(MOTION_ID_2);
+    expect(lo2?.voted_motion_ids).toContain(MOTION_ID_1);
+    expect(lo2?.voted_motion_ids).toContain(MOTION_ID_2);
+
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+    sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+  });
+
+  it("after partial submit: voted_motion_ids only merged for submitted lots, not unsubmitted", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    // Only lo1 is being submitted
+    sessionStorage.setItem(`meeting_lots_${AGM_ID}`, JSON.stringify(["lo1"]));
+    renderPage();
+    await waitFor(() => screen.getAllByRole("checkbox"));
+
+    // Deselect lo2 (checkbox 1) before submitting
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[1]);
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/confirmation`);
+    });
+
+    const stored = JSON.parse(
+      sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`) ?? "[]"
+    ) as { lot_owner_id: string; voted_motion_ids: string[] }[];
+    const lo1 = stored.find((l) => l.lot_owner_id === "lo1");
+    const lo2 = stored.find((l) => l.lot_owner_id === "lo2");
+    // lo1 (submitted) should have voted_motion_ids updated
+    expect(lo1?.voted_motion_ids).toContain(MOTION_ID_1);
+    // lo2 (not submitted) should have empty voted_motion_ids
+    expect(lo2?.voted_motion_ids).toHaveLength(0);
+
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+    sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+  });
+
+  // --- restoreSession on mount ---
+
+  it("restoreSession called on mount if session token present in localStorage", async () => {
+    const restoreSessionSpy = vi.spyOn(voterApi, "restoreSession").mockResolvedValue({
+      lots: [
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ],
+      voter_email: "owner@example.com",
+      agm_status: "open",
+      building_name: "Sunset Towers",
+      meeting_title: "2024 AGM",
+      unvoted_visible_count: 2,
+      session_token: "refreshed-token",
+    });
+    localStorage.setItem(`agm_session_${AGM_ID}`, "valid-token-abc");
+    renderPage();
+    await waitFor(() => {
+      expect(restoreSessionSpy).toHaveBeenCalledWith({
+        session_token: "valid-token-abc",
+        general_meeting_id: AGM_ID,
+      });
+    });
+    restoreSessionSpy.mockRestore();
+    localStorage.removeItem(`agm_session_${AGM_ID}`);
+  });
+
+  it("restoreSession NOT called on mount if no session token in localStorage", async () => {
+    const restoreSessionSpy = vi.spyOn(voterApi, "restoreSession");
+    localStorage.removeItem(`agm_session_${AGM_ID}`);
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    expect(restoreSessionSpy).not.toHaveBeenCalled();
+    restoreSessionSpy.mockRestore();
+  });
+
+  it("restoreSession failure is handled gracefully: page still renders", async () => {
+    const restoreSessionSpy = vi.spyOn(voterApi, "restoreSession").mockRejectedValue(
+      new Error("Session expired")
+    );
+    localStorage.setItem(`agm_session_${AGM_ID}`, "expired-token");
+    renderPage();
+    // Page should still render motions normally after the rejection
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Motion 1" })).toBeInTheDocument();
+    });
+    restoreSessionSpy.mockRestore();
+    localStorage.removeItem(`agm_session_${AGM_ID}`);
+  });
+
+  it("restoreSession updates allLots and sessionStorage with fresh voted_motion_ids", async () => {
+    // Simulate: sessionStorage has stale lots with voted_motion_ids=[MOTION_ID_1] (partial),
+    // but server returns fresh lots with voted_motion_ids=[] (new motion added by admin).
+    // restoreSession should update allLots so isLotSubmitted can re-evaluate correctly.
+    const freshLots = [
+      { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+    ];
+    vi.spyOn(voterApi, "restoreSession").mockResolvedValue({
+      lots: freshLots,
+      voter_email: "owner@example.com",
+      agm_status: "open",
+      building_name: "Sunset Towers",
+      meeting_title: "2024 AGM",
+      unvoted_visible_count: 2,
+      session_token: "refreshed-token",
+    });
+    localStorage.setItem(`agm_session_${AGM_ID}`, "valid-token");
+    // Stale sessionStorage: both lots marked as already_submitted with old voted_motion_ids
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1] },
+      ])
+    );
+    renderPage();
+    // After restoreSession: fresh lots have voted_motion_ids=[] → isLotSubmitted returns false
+    // → lots should be unlocked (Submit ballot button visible)
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
+    });
+    // sessionStorage should be updated with fresh data
+    await waitFor(() => {
+      const stored = JSON.parse(
+        sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`) ?? "[]"
+      ) as { lot_owner_id: string; voted_motion_ids: string[] }[];
+      expect(stored[0]?.voted_motion_ids).toHaveLength(0);
+      expect(stored[1]?.voted_motion_ids).toHaveLength(0);
+    });
+    vi.restoreAllMocks();
+    localStorage.removeItem(`agm_session_${AGM_ID}`);
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  // --- Edge cases ---
+
+  it("isLotSubmitted: no voted_motion_ids property (undefined) treated as empty", async () => {
+    // LotInfo without voted_motion_ids — should default to [] via ?? [] fallback
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
+    // Without voted_motion_ids, isLotSubmitted returns false — all checkboxes enabled
+    const checkboxes = screen.getAllByRole("checkbox");
+    checkboxes.forEach((cb) => expect(cb).not.toBeDisabled());
+    expect(screen.queryByText("Already submitted")).not.toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("selectedIds re-seeded: fully-submitted lots excluded after [motions, allLots] effect fires", async () => {
+    // Start with all lots appearing unsubmitted (empty voted_motion_ids), then
+    // simulate a re-render where one lot has voted_motion_ids covering all motions.
+    // After the effect: that lot is removed from selectedIds.
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
+    // After motions load and effect fires:
+    // - lo1: voted_motion_ids covers all motions → removed from selectedIds → checkbox disabled
+    // - lo2: voted_motion_ids empty → stays in selectedIds → checkbox enabled
+    await waitFor(() => {
+      expect(screen.getAllByText("You are voting for 1 lot.")[0]).toBeInTheDocument();
+    });
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 });
