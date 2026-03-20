@@ -240,6 +240,53 @@ A set of UI improvements and correctness fixes for the voting application:
 
 ---
 
+### US-FIX-BB01: Fix blank page when navigating back from VotingPage
+
+**Description:** As a voter, I should never see a blank page when I click the "Back" button on the voting page or use the browser's native back button.
+
+**Acceptance Criteria:**
+- [ ] The in-page "← Back" button on `VotingPage` navigates to `/vote/:meetingId/auth` (the auth page), not `/vote/:meetingId`
+- [ ] Clicking Back lands on a fully rendered page (the auth email-entry form is visible)
+- [ ] The browser native back button from `/vote/:meetingId/voting` also returns to a rendered page (the auth page)
+- [ ] No blank or empty page is shown at any point during backward navigation in the voter flow
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-AS01: Lots and motions show correct submitted state after returning via "View my votes"
+
+**Description:** As a voter who has submitted their ballot and then navigated back to the voting page via the "View my votes" button on the confirmation page, I should see my lots correctly labelled "Already submitted" and my motions locked as read-only — not as if I have not voted yet.
+
+**Acceptance Criteria:**
+- [ ] After submitting a ballot and clicking "View my votes" on the confirmation page, the voting page shows each submitted lot with an "Already submitted" badge and the checkbox disabled
+- [ ] After submitting a ballot and clicking "View my votes", all motions that were voted on are shown as read-only (locked), not as interactive
+- [ ] The above behaviour is correct even when the user has a single lot
+- [ ] The above behaviour is correct when the user has multiple lots and submits a subset of them: submitted lots show the badge; unsubmitted lots remain interactive
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-NM01: Previously-submitted lots unlock when admin reveals new motions
+
+**Description:** As a voter whose lots were all locked ("Already submitted") after voting on all prior motions, I want my lots to automatically become selectable again when the admin reveals a new motion — because I have not yet voted on it.
+
+**Acceptance Criteria:**
+- [ ] After voting on all visible motions (all lots show "Already submitted"), if the admin makes an additional motion visible, refreshing or returning to the VotingPage shows those lots as unlocked (checkbox enabled, no "Already submitted" badge)
+- [ ] The new motion is shown as interactive (not read-only) on the VotingPage
+- [ ] Previously answered motions remain read-only once a lot has voted on them
+- [ ] The "Submit ballot" button is visible when there is at least one unsubmitted lot selected
+- [ ] Lots that had NOT yet submitted when the new motion was revealed remain unsubmitted and interactive (no regression)
+- [ ] The fix works for single-lot and multi-lot voters
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
 ## Functional Requirements
 
 - FR-1: Back button appears on voter verification, lot selection, and voting pages; navigates to the previous step
@@ -256,6 +303,8 @@ A set of UI improvements and correctness fixes for the voting application:
 - FR-12: The General Meetings list page has a single-select building filter dropdown; filter state is persisted as a `?building=<id>` URL search param; filtering is client-side
 - FR-13: Vercel Analytics and Speed Insights are mounted in the frontend app
 - FR-14: `index.html` is served with no-cache headers; hashed assets served with immutable cache headers
+- FR-15: When `submitMutation.onSuccess` fires in `VotingPage`, the `meeting_lots_info_<meetingId>` sessionStorage key is updated synchronously (outside of React state updaters) before navigation, so that re-mounting the voting page reads the correct `already_submitted: true` state for submitted lots
+- FR-16: When the motions list changes (new motion becomes visible), `VotingPage` re-fetches `already_submitted` per lot from the server and updates `allLots` state, so previously-locked lots that have not voted on the new motion become selectable again
 
 ---
 
@@ -276,6 +325,7 @@ A set of UI improvements and correctness fixes for the voting application:
 - **Entitlement total:** Use `SUM(GeneralMeetingLotWeight.unit_entitlement)` per meeting — this is the snapshot total, not the live lot owner table.
 - **Frontend route rename:** React Router `<Route>` paths and `useParams` param names must both be updated. Any `useNavigate` hard-coded paths must also be updated. Playwright E2E tests reference URLs and must be updated.
 - **SessionStorage keys:** Voter flow uses `agm_lots_${agmId}`, `agm_lots_info_${agmId}`, `agm_lot_info_${agmId}` — rename to `meeting_lots_${meetingId}` etc.
+- **New motion unlock:** `already_submitted` is not a field that can be derived purely from `MotionOut.already_voted` because `already_voted` is aggregated across all of the voter's lots. The correct approach is to call `POST /api/auth/session` (session restore) whenever the motions list changes to get a fresh per-lot `already_submitted` flag from the server.
 
 ---
 
