@@ -535,20 +535,34 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     // (or WF10.0) already submitted both lots, we clear ballots and re-seed LotA's
     // M1 vote so the mixed-selection precondition is always guaranteed.
     //
+    // The backend records abstain for ALL visible motions not supplied in the submission
+    // request. To avoid LotA inadvertently being recorded as having voted M2, we
+    // temporarily hide M2, submit LotA's M1 vote, then re-show M2.
+    //
     // Step 1: clear all ballots for this meeting
     await clearBallots(api, wf10MeetingId);
 
-    // Step 2: fetch the meeting motions to find Motion 1's ID
+    // Step 2: fetch the meeting motions to find Motion 1 and Motion 2 IDs
     const meetingRes = await api.get(`/api/admin/general-meetings/${wf10MeetingId}`);
     expect(meetingRes.ok(), `get meeting: ${meetingRes.status()} ${await meetingRes.text()}`).toBe(true);
     const meetingDetail = (await meetingRes.json()) as {
-      motions?: { id: string; title: string }[];
+      motions?: { id: string; title: string; is_visible: boolean }[];
     };
     const motion1 = meetingDetail.motions?.find((m) => m.title === WF10_MOTION1);
     expect(motion1, `Motion 1 ("${WF10_MOTION1}") not found on meeting`).toBeTruthy();
     const motion1Id = motion1!.id;
+    const motion2 = meetingDetail.motions?.find((m) => m.title === WF10_MOTION2);
+    expect(motion2, `Motion 2 ("${WF10_MOTION2}") not found on meeting`).toBeTruthy();
+    const motion2Id = motion2!.id;
 
-    // Step 3: fetch lot owners to find Lot A's ID
+    // Step 3: temporarily hide Motion 2 so the backend does not record an abstain for it
+    // when we submit LotA's M1 vote
+    const hideRes = await api.patch(`/api/admin/motions/${motion2Id}/visibility`, {
+      data: { is_visible: false },
+    });
+    expect(hideRes.ok(), `hide motion 2: ${hideRes.status()} ${await hideRes.text()}`).toBe(true);
+
+    // Step 4: fetch lot owners to find Lot A's ID
     const buildingsRes = await api.get("/api/admin/buildings");
     const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
     const wf10Building = buildings.find((b) => b.name === WF10_BUILDING);
@@ -558,10 +572,17 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     const lotA = lots.find((l) => l.lot_number === WF10_LOT_A);
     expect(lotA, `Lot A (${WF10_LOT_A}) not found`).toBeTruthy();
 
-    // Step 4: submit LotA's "yes" vote on M1 via API (re-creates WF10.0's outcome)
+    // Step 5: submit LotA's "yes" vote on M1 via API (re-creates WF10.0's outcome)
+    // With M2 hidden, only M1 is recorded — no abstain for M2
     await submitBallotViaApi(api, WF10_EMAIL, wf10MeetingId, [lotA!.id], [
       { motion_id: motion1Id, choice: "yes" },
     ]);
+
+    // Step 6: re-show Motion 2 so the voter sees both motions on the voting page
+    const showRes = await api.patch(`/api/admin/motions/${motion2Id}/visibility`, {
+      data: { is_visible: true },
+    });
+    expect(showRes.ok(), `re-show motion 2: ${showRes.status()} ${await showRes.text()}`).toBe(true);
 
     await page.goto("/");
     await goToAuthPage(page, WF10_BUILDING);
@@ -575,8 +596,16 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2, { timeout: 15000 });
 
-    // Vote on both motions
-    await motionCards.filter({ hasText: WF10_MOTION1 }).getByRole("button", { name: "For" }).click();
+    // LotA previously voted "yes" on Motion 1 — the UI pre-seeds choices[M1] = "yes" from
+    // already_voted data. Clicking "For" when it is already selected would deselect it, so we
+    // only click "For" on Motion 1 if it is not already in the pressed state.
+    const m1ForBtn = motionCards.filter({ hasText: WF10_MOTION1 }).getByRole("button", { name: "For" });
+    await expect(m1ForBtn).toBeVisible({ timeout: 10000 });
+    const m1Pressed = await m1ForBtn.getAttribute("aria-pressed");
+    if (m1Pressed !== "true") {
+      await m1ForBtn.click();
+    }
+    // Vote "For" on Motion 2 (neither lot has voted on it)
     await motionCards.filter({ hasText: WF10_MOTION2 }).getByRole("button", { name: "For" }).click();
 
     // Click Submit ballot
