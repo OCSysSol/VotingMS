@@ -195,8 +195,8 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
     expect(motion1!.voter_lists.absent.some((v) => v.lot_number === VOTER3_LOT && v.entitlement === 75)).toBe(true);
   });
 
-  // WF3.7: Assert tallies via admin UI
-  test("WF3.7: admin UI shows correct tally for Motion 1", async ({ browser }) => {
+  // WF3.7: Assert tallies via admin UI — including entitlement percentage display
+  test("WF3.7: admin UI shows correct tally and entitlement percentages for Motion 1", async ({ browser }) => {
     test.setTimeout(60000);
     const adminCtx = await browser.newContext({ storageState: ADMIN_AUTH_PATH });
     const adminPage = await adminCtx.newPage();
@@ -208,6 +208,21 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
       // Spot-check: the results section renders voter_count and entitlement_sum
       await expect(adminPage.getByText("100").first()).toBeVisible({ timeout: 10000 });
       await expect(adminPage.getByText("150").first()).toBeVisible({ timeout: 10000 });
+
+      // US-UI04: entitlement percentage display
+      // Total building entitlement = 100 + 50 + 75 = 225
+      //   Motion 1 For:     100 / 225 = 44.4%  → displayed as "100 (44.4%)"
+      //   Motion 1 Against:  50 / 225 = 22.2%  → displayed as "50 (22.2%)"
+      //   Motion 2 For:     150 / 225 = 66.7%  → displayed as "150 (66.7%)"
+      // At least one tally cell must match the N (X.X%) pattern to confirm
+      // the percentage feature is rendered in the admin report.
+      await expect(
+        adminPage.getByText(/\d+\s*\(\d+\.\d+%\)/).first()
+      ).toBeVisible({ timeout: 10000 });
+
+      // Verify the specific percentages for Motion 1
+      await expect(adminPage.getByText("100 (44.4%)")).toBeVisible({ timeout: 10000 });
+      await expect(adminPage.getByText("50 (22.2%)")).toBeVisible({ timeout: 10000 });
     } finally {
       await adminCtx.close();
     }
