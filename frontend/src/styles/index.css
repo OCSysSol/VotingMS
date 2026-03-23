@@ -17,14 +17,14 @@
   --text-primary:  #0C1B2E;
   --text-secondary:#4A5568;
   --text-muted:    #718096;
-  --green:         #1B7A40;
+  --green:         #155F32;
   --green-bg:      #EBF5EF;
   --red:           #A3220E;
   --red-bg:        #FDF0EE;
-  --amber:         #C05621;
-  --amber-bg:      #FFF8F0;
+  --amber:         #8B3A0F;
+  --amber-bg:      #FDE8D8;
   --color-primary: #005f73;
-  --border:        #D5CCB8;
+  --border:        #9E9484;
   --border-subtle: #E8E2D5;
   --shadow-sm:     0 1px 3px rgba(12,27,46,.08);
   --shadow-md:     0 4px 16px rgba(12,27,46,.12);
@@ -354,7 +354,7 @@ button, input, select, textarea {
 /* Admin link — linen bg, subtle navy border */
 .btn--admin {
   background: var(--linen-200);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   border-color: var(--border);
   letter-spacing: 0.04em;
   text-transform: none;
@@ -492,7 +492,7 @@ button, input, select, textarea {
 /* ABSTAIN */
 .vote-btn--abstained {
   background: rgba(113,128,150,.05);
-  color: var(--text-muted);
+  color: var(--text-secondary);
   border-color: rgba(113,128,150,.22);
 }
 
@@ -574,7 +574,7 @@ button, input, select, textarea {
 
 .motion-type-badge--general {
   background: var(--neutral-100, #f1f5f9);
-  color: var(--text-muted, #64748b);
+  color: var(--text-secondary);
   border: 1px solid var(--border, #e2e8f0);
 }
 
@@ -593,7 +593,7 @@ button, input, select, textarea {
   padding: 2px 8px;
   border-radius: 999px;
   background: #F0EFEE;
-  color: var(--text-muted);
+  color: var(--text-primary);
   border: 1px solid var(--border);
 }
 
@@ -872,7 +872,7 @@ button, input, select, textarea {
 
 .status-badge--closed {
   background: #F0EFEE;
-  color: var(--text-muted);
+  color: var(--text-primary);
 }
 
 /* === AGM LIST ITEM === */
@@ -1158,7 +1158,7 @@ button, input, select, textarea {
 
 .vote-item__choice--yes       { background: var(--green-bg); color: var(--green); }
 .vote-item__choice--no        { background: var(--red-bg);   color: var(--red);   }
-.vote-item__choice--abstained { background: #F0EFEE;         color: var(--text-muted); }
+.vote-item__choice--abstained { background: #F0EFEE;         color: var(--text-primary); }
 
 /* === AUTH CARD === */
 .auth-card {
@@ -1178,7 +1178,7 @@ button, input, select, textarea {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.14em;
-  color: var(--gold);
+  color: var(--text-secondary);
   margin-bottom: 8px;
 }
 
@@ -1574,7 +1574,7 @@ button, input, select, textarea {
   width: 36px;
   height: 20px;
   border-radius: 10px;
-  background: var(--border);
+  background: var(--text-muted);
   transition: background 0.2s ease;
   flex-shrink: 0;
 }
@@ -1992,7 +1992,7 @@ button, input, select, textarea {
 
 .lot-selection__badge--submitted {
   background: #F0EFEE;
-  color: var(--text-muted);
+  color: var(--text-primary);
 }
 
 /* === IN-ARREAR WARNING BANNER (VotingPage) === */
