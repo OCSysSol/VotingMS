@@ -16,7 +16,7 @@
   --white:         #FFFFFF;
   --text-primary:  #0C1B2E;
   --text-secondary:#4A5568;
-  --text-muted:    #718096;
+  --text-muted:    #595E6B;
   --green:         #155F32;
   --green-bg:      #EBF5EF;
   --red:           #A3220E;
@@ -261,7 +261,7 @@ button, input, select, textarea {
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.45; /* WCAG exempt: disabled/inactive UI component per SC 1.4.3 */
   cursor: not-allowed;
 }
 
@@ -580,7 +580,7 @@ button, input, select, textarea {
 
 .motion-type-badge--special {
   background: #fef3c7;
-  color: #92400e;
+  color: #7C3410;
   border: 1px solid #fcd34d;
 }
 
@@ -598,7 +598,7 @@ button, input, select, textarea {
 }
 
 .motion-type-badge--hidden {
-  background: var(--text-muted, #888);
+  background: #646E80;
   color: #fff;
   padding: 2px 8px;
   border-radius: 999px;
@@ -768,12 +768,12 @@ button, input, select, textarea {
   flex-wrap: wrap;
   gap: 14px;
   font-size: 0.8125rem;
-  color: rgba(255,255,255,.55);
+  color: rgba(255,255,255,.85);
   margin-bottom: 14px;
 }
 
 .agm-header__meta strong {
-  color: rgba(255,255,255,.75);
+  color: #FFFFFF;
   font-weight: 600;
 }
 
@@ -788,7 +788,7 @@ button, input, select, textarea {
   font-weight: 700;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: rgba(255,255,255,.38);
+  color: rgba(255,255,255,.75);
   display: block;
   margin-bottom: 3px;
 }
@@ -807,7 +807,7 @@ button, input, select, textarea {
 }
 
 .agm-header__timer--expired {
-  color: #FC8181;
+  color: #E53E3E;
   font-size: 1rem;
   font-family: 'Outfit', sans-serif;
   font-weight: 600;
@@ -1247,7 +1247,7 @@ button, input, select, textarea {
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  color: rgba(255,255,255,.3);
+  color: rgba(255,255,255,.85);
 }
 
 .admin-nav {
@@ -1264,7 +1264,7 @@ button, input, select, textarea {
   display: block;
   padding: 9px 12px;
   border-radius: var(--r-md);
-  color: rgba(255,255,255,.5);
+  color: rgba(255,255,255,.85);
   text-decoration: none;
   font-size: 0.875rem;
   font-weight: 500;
@@ -1273,7 +1273,7 @@ button, input, select, textarea {
 
 .admin-nav__link:hover {
   background: rgba(255,255,255,.06);
-  color: rgba(255,255,255,.85);
+  color: #FFFFFF;
 }
 
 .admin-nav__link--active {
@@ -1345,7 +1345,7 @@ button, input, select, textarea {
     border: none;
     font-size: 1.25rem;
     cursor: pointer;
-    color: rgba(255,255,255,0.7);
+    color: rgba(255,255,255,0.9);
     line-height: 1;
     padding: 4px;
   }
