@@ -77,6 +77,11 @@ export default function SettingsPage() {
     }
   }
 
+  // type="color" requires exactly #rrggbb. If the text input holds a partial
+  // or invalid hex, fall back to the default so the picker remains functional.
+  const COLOUR_RE = /^#[0-9a-fA-F]{6}$/;
+  const pickerValue = COLOUR_RE.test(primaryColour) ? primaryColour : "#005f73";
+
   if (isLoading) {
     return <p className="state-message">Loading settings…</p>;
   }
@@ -142,10 +147,10 @@ export default function SettingsPage() {
                 <input
                   id="primary-colour-picker"
                   type="color"
-                  value={primaryColour}
+                  value={pickerValue}
                   onChange={(e) => setPrimaryColour(e.target.value)}
                   aria-label="Primary colour picker"
-                  style={{ width: 40, height: 36, padding: 2, border: "1px solid var(--border)", borderRadius: "var(--r-md)", cursor: "pointer" }}
+                  style={{ width: 40, height: 36, padding: 0, border: "1px solid var(--border)", borderRadius: "var(--r-md)", cursor: "pointer" }}
                 />
                 <input
                   id="primary-colour-text"

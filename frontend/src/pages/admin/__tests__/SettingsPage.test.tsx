@@ -225,6 +225,20 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("Primary colour")).toHaveValue("#123456");
   });
 
+  it("colour picker falls back to default when text input holds an invalid hex", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Primary colour")).toBeInTheDocument());
+    const textInput = screen.getByLabelText("Primary colour");
+    // Type a partial/invalid hex into the text field — this would be rejected by type="color"
+    await user.clear(textInput);
+    await user.type(textInput, "#abc");
+    // Picker must fall back to the safe default so browsers don't ignore the value prop
+    expect(screen.getByLabelText("Primary colour picker")).toHaveValue("#005f73");
+    // Text input still shows what the user typed
+    expect(textInput).toHaveValue("#abc");
+  });
+
   // --- Logo file upload ---
 
   it("renders the Upload logo image file input", async () => {
