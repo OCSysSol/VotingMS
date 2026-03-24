@@ -346,4 +346,182 @@ describe("SettingsPage", () => {
     // No uploading state, no error
     expect(screen.queryByText("Uploading…")).not.toBeInTheDocument();
   });
+
+  // --- Favicon URL field ---
+
+  it("renders the favicon URL field after loading", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
+  });
+
+  it("populates favicon URL field with loaded config value", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
+  });
+
+  it("shows favicon preview image when favicon_url is set", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByAltText("Favicon preview")).toBeInTheDocument());
+  });
+
+  it("does not show favicon preview when favicon_url is null", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: null, primary_colour: "#005f73", support_email: "" })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
+    expect(screen.queryByAltText("Favicon preview")).not.toBeInTheDocument();
+  });
+
+  it("updates favicon URL field on user input", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Favicon URL"), "https://cdn.example.com/fav.ico");
+    expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://cdn.example.com/fav.ico");
+  });
+
+  it("clears favicon_url to null when field is cleared", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
+    await user.clear(screen.getByLabelText("Favicon URL"));
+    // Preview should disappear once field is empty
+    expect(screen.queryByAltText("Favicon preview")).not.toBeInTheDocument();
+  });
+
+  it("includes favicon_url in save payload", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(configApi, "updateAdminConfig");
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Favicon URL"), "https://cdn.example.com/fav.ico");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ favicon_url: "https://cdn.example.com/fav.ico" })
+    );
+  });
+
+  // --- Favicon file upload ---
+
+  it("renders the Upload favicon image file input", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+  });
+
+  it("uploading a valid favicon file populates the favicon URL field with the returned URL", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const blobUrl = "https://public.blob.vercel-storage.com/favicon-test.png";
+    const file = new File(["fake-png"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Favicon URL")).toHaveValue(blobUrl)
+    );
+  });
+
+  it("shows Uploading message during favicon upload then hides it on success", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/favicon", async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({ url: "https://public.blob.vercel-storage.com/favicon.png" });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    // At least one "Uploading…" text visible (logo or favicon)
+    expect(screen.getAllByText("Uploading…").length).toBeGreaterThan(0);
+
+    await waitFor(() =>
+      expect(screen.getByLabelText("Upload favicon image")).not.toBeDisabled()
+    );
+  });
+
+  it("disables favicon file input during upload", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/favicon", async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({ url: "https://public.blob.vercel-storage.com/favicon.png" });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    expect(screen.getByLabelText("Upload favicon image")).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Upload favicon image")).not.toBeDisabled()
+    );
+  });
+
+  it("shows upload error when favicon server returns an error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/favicon", () =>
+        HttpResponse.json({ detail: "Favicon upload failed" }, { status: 502 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText(/HTTP 502/)).toBeInTheDocument()
+    );
+  });
+
+  it("shows fallback favicon upload error for non-Error thrown value", async () => {
+    vi.spyOn(configApi, "uploadFavicon").mockRejectedValueOnce("plain string error");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Failed to upload favicon.")).toBeInTheDocument()
+    );
+  });
+
+  it("no-ops when favicon file input changes with no file selected", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText("Upload favicon image"), { target: { files: [] } });
+
+    expect(screen.queryByText("Failed to upload favicon.")).not.toBeInTheDocument();
+  });
+
 });

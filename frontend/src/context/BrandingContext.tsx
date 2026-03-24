@@ -6,6 +6,7 @@ import { getPublicConfig } from "../api/config";
 export const DEFAULT_CONFIG: TenantConfig = {
   app_name: "AGM Voting",
   logo_url: "",
+  favicon_url: null,
   primary_colour: "#005f73",
   support_email: "",
 };
@@ -43,7 +44,14 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
       document.title = data.app_name;
       const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
       if (link) {
-        link.href = data.logo_url || "/favicon.ico";
+        // favicon_url takes priority; fall back to logo_url; then default favicon.ico
+        if (data.favicon_url) {
+          link.href = data.favicon_url;
+        } else if (data.logo_url) {
+          link.href = data.logo_url;
+        } else {
+          link.href = "/favicon.ico";
+        }
       }
     }
   }, [data]);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getAdminConfig, updateAdminConfig, uploadLogo } from "../../api/config";
+import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon } from "../../api/config";
 import type { TenantConfig } from "../../api/config";
 
 export default function SettingsPage() {
@@ -8,6 +8,7 @@ export default function SettingsPage() {
 
   const [appName, setAppName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
+  const [faviconUrl, setFaviconUrl] = useState<string | null>(null);
   const [primaryColour, setPrimaryColour] = useState("#005f73");
   const [supportEmail, setSupportEmail] = useState("");
 
@@ -17,12 +18,15 @@ export default function SettingsPage() {
   const [saveError, setSaveError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
+  const [uploadFaviconError, setUploadFaviconError] = useState("");
 
   useEffect(() => {
     getAdminConfig()
       .then((data: TenantConfig) => {
         setAppName(data.app_name);
         setLogoUrl(data.logo_url);
+        setFaviconUrl(data.favicon_url);
         setPrimaryColour(data.primary_colour);
         setSupportEmail(data.support_email);
       })
@@ -50,6 +54,22 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleFaviconFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadFaviconError("");
+    setIsUploadingFavicon(true);
+    try {
+      const result = await uploadFavicon(file);
+      setFaviconUrl(result.url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to upload favicon.";
+      setUploadFaviconError(message);
+    } finally {
+      setIsUploadingFavicon(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaveError("");
@@ -59,6 +79,7 @@ export default function SettingsPage() {
       const updated: TenantConfig = {
         app_name: appName,
         logo_url: logoUrl,
+        favicon_url: faviconUrl,
         primary_colour: primaryColour,
         support_email: supportEmail,
       };
@@ -139,6 +160,48 @@ export default function SettingsPage() {
                 />
               </div>
               {uploadError && <span className="field__error">{uploadError}</span>}
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="favicon-url">Favicon URL</label>
+              <input
+                id="favicon-url"
+                className="field__input"
+                type="text"
+                value={faviconUrl ?? ""}
+                onChange={(e) => setFaviconUrl(e.target.value || null)}
+                placeholder="https://example.com/favicon.ico"
+              />
+            </div>
+
+            {faviconUrl && (
+              <div className="field">
+                <label className="field__label">Favicon preview</label>
+                <img
+                  src={faviconUrl}
+                  alt="Favicon preview"
+                  style={{ width: 32, height: 32, objectFit: "contain", border: "1px solid var(--border)", borderRadius: "var(--r-sm)" }}
+                />
+              </div>
+            )}
+
+            <div className="field">
+              <label className="field__label" htmlFor="favicon-file">Upload favicon image</label>
+              <div style={{ position: "relative", display: "inline-block", overflow: "hidden" }}>
+                <label htmlFor="favicon-file" className="btn btn--secondary">
+                  {isUploadingFavicon ? "Uploading…" : "Choose file"}
+                </label>
+                <input
+                  id="favicon-file"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon"
+                  onChange={(e) => { void handleFaviconFileChange(e); }}
+                  disabled={isUploadingFavicon}
+                  data-testid="favicon-file-input"
+                  style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
+                />
+              </div>
+              {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
             </div>
 
             <div className="field">
