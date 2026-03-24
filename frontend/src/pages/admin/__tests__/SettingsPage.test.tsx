@@ -364,16 +364,6 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
   });
 
-  it("shows favicon preview image when favicon_url is set", async () => {
-    server.use(
-      http.get(`${BASE}/api/admin/config`, () =>
-        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
-      )
-    );
-    renderPage();
-    await waitFor(() => expect(screen.getByAltText("Favicon preview")).toBeInTheDocument());
-  });
-
   it("does not show favicon preview when favicon_url is null", async () => {
     server.use(
       http.get(`${BASE}/api/admin/config`, () =>
@@ -382,7 +372,6 @@ describe("SettingsPage", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
-    expect(screen.queryByAltText("Favicon preview")).not.toBeInTheDocument();
   });
 
   it("updates favicon URL field on user input", async () => {
@@ -403,8 +392,7 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
     await user.clear(screen.getByLabelText("Favicon URL"));
-    // Preview should disappear once field is empty
-    expect(screen.queryByAltText("Favicon preview")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Favicon URL")).toHaveValue("");
   });
 
   it("includes favicon_url in save payload", async () => {

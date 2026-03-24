@@ -185,13 +185,6 @@ export default function SettingsPage() {
                   data-testid="favicon-file-input"
                   style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
                 />
-                {faviconUrl && (
-                  <img
-                    src={faviconUrl}
-                    alt="Favicon preview"
-                    style={{ width: 32, height: 32, objectFit: "contain", border: "1px solid var(--border)", borderRadius: "var(--r-sm)" }}
-                  />
-                )}
               </div>
               {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
             </div>
