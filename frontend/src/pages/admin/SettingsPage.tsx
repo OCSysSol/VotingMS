@@ -133,25 +133,23 @@ export default function SettingsPage() {
 
             <div className="field">
               <label className="field__label" htmlFor="logo-url">Logo URL</label>
-              <input
-                id="logo-url"
-                className="field__input"
-                type="text"
-                value={logoUrl}
-                onChange={(e) => setLogoUrl(e.target.value)}
-                placeholder="https://example.com/logo.png"
-              />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="logo-file">Upload logo image</label>
-              <div style={{ position: "relative", display: "inline-block", overflow: "hidden" }}>
-                <label htmlFor="logo-file" className="btn btn--secondary">
-                  {isUploading ? "Uploading…" : "Choose file"}
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  id="logo-url"
+                  className="field__input"
+                  type="text"
+                  value={logoUrl}
+                  onChange={(e) => setLogoUrl(e.target.value)}
+                  placeholder="https://example.com/logo.png"
+                  style={{ flex: 1 }}
+                />
+                <label htmlFor="logo-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
+                  {isUploading ? "Uploading…" : "Upload"}
                 </label>
                 <input
                   id="logo-file"
                   type="file"
+                  aria-label="Upload logo image"
                   accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
                   onChange={(e) => { void handleLogoFileChange(e); }}
                   disabled={isUploading}
