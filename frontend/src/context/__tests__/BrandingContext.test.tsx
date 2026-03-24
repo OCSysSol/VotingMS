@@ -202,16 +202,17 @@ describe("BrandingContext", () => {
   it("DEFAULT_CONFIG has expected shape", () => {
     expect(DEFAULT_CONFIG.app_name).toBe("AGM Voting");
     expect(DEFAULT_CONFIG.logo_url).toBe("");
+    expect(DEFAULT_CONFIG.favicon_url).toBeNull();
     expect(DEFAULT_CONFIG.primary_colour).toBe("#005f73");
     expect(DEFAULT_CONFIG.support_email).toBe("");
   });
 
   // --- Favicon dynamic update ---
 
-  it("sets link[rel=icon] href to logo_url when logo_url is set", async () => {
+  it("sets link[rel=icon] href to logo_url when logo_url is set and favicon_url is null", async () => {
     server.use(
       http.get(`${BASE}/api/config`, () =>
-        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", primary_colour: "#000000", support_email: "" })
+        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", favicon_url: null, primary_colour: "#000000", support_email: "" })
       )
     );
     renderProvider();
@@ -222,10 +223,10 @@ describe("BrandingContext", () => {
     expect(link?.href).toContain("https://cdn.example.com/logo.png");
   });
 
-  it("sets link[rel=icon] href to /favicon.ico when logo_url is empty", async () => {
+  it("sets link[rel=icon] href to /favicon.ico when both logo_url and favicon_url are empty", async () => {
     server.use(
       http.get(`${BASE}/api/config`, () =>
-        HttpResponse.json({ app_name: "Test", logo_url: "", primary_colour: "#000000", support_email: "" })
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: null, primary_colour: "#000000", support_email: "" })
       )
     );
     renderProvider();
@@ -243,7 +244,7 @@ describe("BrandingContext", () => {
 
     server.use(
       http.get(`${BASE}/api/config`, () =>
-        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", primary_colour: "#000000", support_email: "" })
+        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", favicon_url: "https://cdn.example.com/fav.png", primary_colour: "#000000", support_email: "" })
       )
     );
     // Should not throw even without a link element
@@ -259,4 +260,65 @@ describe("BrandingContext", () => {
   it("configFixture reflects fixture value from handlers", () => {
     expect(configFixture.app_name).toBe("AGM Voting");
   });
+
+  // --- favicon_url takes priority over logo_url ---
+
+  it("sets link[rel=icon] href to favicon_url when favicon_url is set", async () => {
+    server.use(
+      http.get(`${BASE}/api/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", favicon_url: "https://cdn.example.com/fav.ico", primary_colour: "#000000", support_email: "" })
+      )
+    );
+    renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId("is-loading").textContent).toBe("ready")
+    );
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    expect(link?.href).toContain("https://cdn.example.com/fav.ico");
+  });
+
+  it("uses logo_url as favicon fallback when favicon_url is null and logo_url is set", async () => {
+    server.use(
+      http.get(`${BASE}/api/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", favicon_url: null, primary_colour: "#000000", support_email: "" })
+      )
+    );
+    renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId("is-loading").textContent).toBe("ready")
+    );
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    expect(link?.href).toContain("https://cdn.example.com/logo.png");
+  });
+
+  it("uses /favicon.ico when both favicon_url and logo_url are absent", async () => {
+    server.use(
+      http.get(`${BASE}/api/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: null, primary_colour: "#000000", support_email: "" })
+      )
+    );
+    renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId("is-loading").textContent).toBe("ready")
+    );
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    expect(link?.href).toContain("/favicon.ico");
+  });
+
+  it("favicon_url takes priority even when logo_url is also set", async () => {
+    server.use(
+      http.get(`${BASE}/api/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "https://cdn.example.com/logo.png", favicon_url: "https://cdn.example.com/custom-fav.png", primary_colour: "#000000", support_email: "" })
+      )
+    );
+    renderProvider();
+    await waitFor(() =>
+      expect(screen.getByTestId("is-loading").textContent).toBe("ready")
+    );
+    const link = document.querySelector<HTMLLinkElement>("link[rel='icon']");
+    // Should use favicon_url, not logo_url
+    expect(link?.href).toContain("custom-fav.png");
+    expect(link?.href).not.toContain("logo.png");
+  });
+
 });

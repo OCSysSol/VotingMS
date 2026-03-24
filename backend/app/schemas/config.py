@@ -4,6 +4,7 @@ Pydantic schemas for tenant configuration.
 from __future__ import annotations
 
 import re
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -14,9 +15,14 @@ class LogoUploadOut(BaseModel):
     url: str
 
 
+class FaviconUploadOut(BaseModel):
+    url: str
+
+
 class TenantConfigOut(BaseModel):
     app_name: str
     logo_url: str
+    favicon_url: Optional[str]
     primary_colour: str
     support_email: str
 
@@ -26,6 +32,7 @@ class TenantConfigOut(BaseModel):
 class TenantConfigUpdate(BaseModel):
     app_name: str
     logo_url: str = ""
+    favicon_url: Optional[str] = None
     primary_colour: str
     support_email: str = ""
 
@@ -49,3 +56,11 @@ class TenantConfigUpdate(BaseModel):
     @classmethod
     def strip_optional(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator("favicon_url")
+    @classmethod
+    def strip_favicon_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped if stripped else None

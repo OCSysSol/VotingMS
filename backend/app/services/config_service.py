@@ -26,6 +26,7 @@ async def get_config(db: AsyncSession) -> TenantConfig:
             id=1,
             app_name=_DEFAULT_APP_NAME,
             logo_url="",
+            favicon_url=None,
             primary_colour=_DEFAULT_PRIMARY_COLOUR,
             support_email="",
         )
@@ -46,6 +47,7 @@ async def update_config(data: TenantConfigUpdate, db: AsyncSession) -> TenantCon
 
     config.app_name = data.app_name
     config.logo_url = data.logo_url
+    config.favicon_url = data.favicon_url
     config.primary_colour = data.primary_colour
     config.support_email = data.support_email
 

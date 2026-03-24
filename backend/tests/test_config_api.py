@@ -46,6 +46,7 @@ async def _seed_config(
     *,
     app_name: str = "AGM Voting",
     logo_url: str = "",
+    favicon_url: str | None = None,
     primary_colour: str = "#005f73",
     support_email: str = "",
 ) -> TenantConfig:
@@ -54,6 +55,7 @@ async def _seed_config(
         id=1,
         app_name=app_name,
         logo_url=logo_url,
+        favicon_url=favicon_url,
         primary_colour=primary_colour,
         support_email=support_email,
     )
@@ -80,6 +82,7 @@ class TestPublicGetConfig:
         body = resp.json()
         assert body["app_name"] == "AGM Voting"
         assert body["logo_url"] == ""
+        assert body["favicon_url"] is None
         assert body["primary_colour"] == "#005f73"
         assert body["support_email"] == ""
 
@@ -89,6 +92,7 @@ class TestPublicGetConfig:
             db_session,
             app_name="Corp Vote",
             logo_url="https://example.com/logo.png",
+            favicon_url="https://example.com/favicon.png",
             primary_colour="#ff0000",
             support_email="help@corp.com",
         )
@@ -98,6 +102,7 @@ class TestPublicGetConfig:
         body = resp.json()
         assert body["app_name"] == "Corp Vote"
         assert body["logo_url"] == "https://example.com/logo.png"
+        assert body["favicon_url"] == "https://example.com/favicon.png"
         assert body["primary_colour"] == "#ff0000"
         assert body["support_email"] == "help@corp.com"
 
@@ -147,7 +152,7 @@ class TestAdminGetConfig:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             resp = await client.get("/api/admin/config")
         body = resp.json()
-        assert set(body.keys()) == {"app_name", "logo_url", "primary_colour", "support_email"}
+        assert set(body.keys()) == {"app_name", "logo_url", "favicon_url", "primary_colour", "support_email"}
 
     # --- Edge cases ---
 
@@ -175,6 +180,7 @@ class TestAdminUpdateConfig:
         payload = {
             "app_name": "New Name",
             "logo_url": "https://cdn.example.com/logo.png",
+            "favicon_url": "https://cdn.example.com/favicon.png",
             "primary_colour": "#1a73e8",
             "support_email": "support@example.com",
         }
@@ -184,6 +190,7 @@ class TestAdminUpdateConfig:
         body = resp.json()
         assert body["app_name"] == "New Name"
         assert body["logo_url"] == "https://cdn.example.com/logo.png"
+        assert body["favicon_url"] == "https://cdn.example.com/favicon.png"
         assert body["primary_colour"] == "#1a73e8"
         assert body["support_email"] == "support@example.com"
 
@@ -196,6 +203,7 @@ class TestAdminUpdateConfig:
         assert resp.status_code == 200
         body = resp.json()
         assert body["logo_url"] == ""
+        assert body["favicon_url"] is None
         assert body["support_email"] == ""
 
     @pytest.mark.asyncio(loop_scope="session")
@@ -361,12 +369,14 @@ class TestConfigService:
         data = TenantConfigUpdate(
             app_name="Updated",
             logo_url="https://cdn.example.com/logo.png",
+            favicon_url="https://cdn.example.com/favicon.png",
             primary_colour="#ffffff",
             support_email="support@example.com",
         )
         config = await config_service.update_config(data, db_session)
         assert config.app_name == "Updated"
         assert config.logo_url == "https://cdn.example.com/logo.png"
+        assert config.favicon_url == "https://cdn.example.com/favicon.png"
         assert config.primary_colour == "#ffffff"
         assert config.support_email == "support@example.com"
 
@@ -585,3 +595,304 @@ class TestAdminUploadLogo:
                     files={"file": ("logo.png", b"fake-png", "application/octet-stream")},
                 )
         assert resp.status_code == 200
+
+
+# ===========================================================================
+# POST /api/admin/config/favicon — favicon upload endpoint
+# ===========================================================================
+
+
+def _make_mock_favicon_blob_success(url: str = "https://public.blob.vercel-storage.com/favicon-abc.png"):
+    return AsyncMock(return_value=url)
+
+
+class TestAdminUploadFavicon:
+    # --- Happy path ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_returns_url_on_valid_png_upload(self, app):
+        blob_url = "https://public.blob.vercel-storage.com/favicon-test.png"
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success(blob_url)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", b"\x89PNG\r\nfake", "image/png")},
+                )
+        assert resp.status_code == 200
+        assert resp.json() == {"url": blob_url}
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_jpeg_by_extension(self, app):
+        blob_url = "https://public.blob.vercel-storage.com/favicon-test.jpg"
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success(blob_url)):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.jpg", b"fake-jpeg", "image/jpeg")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_webp_by_extension(self, app):
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.webp", b"fake-webp", "image/webp")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_svg_by_extension(self, app):
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("icon.svg", b"<svg/>", "image/svg+xml")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_gif_by_extension(self, app):
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("anim.gif", b"GIF89a", "image/gif")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepted_by_content_type_when_no_extension(self, app):
+        """When filename has no extension, content-type is used for detection."""
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon", b"fake-png", "image/png")},
+                )
+        assert resp.status_code == 200
+
+    # --- Input validation ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_rejects_file_over_5mb(self, app):
+        big_content = b"x" * (5 * 1024 * 1024 + 1)
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", big_content, "image/png")},
+                )
+        assert resp.status_code == 400
+        assert "5 MB" in resp.json()["detail"]
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_rejects_txt_file(self, app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/api/admin/config/favicon",
+                files={"file": ("notes.txt", b"hello", "text/plain")},
+            )
+        assert resp.status_code == 415
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_rejects_pdf_file(self, app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/api/admin/config/favicon",
+                files={"file": ("doc.pdf", b"%PDF", "application/pdf")},
+            )
+        assert resp.status_code == 415
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_rejects_csv_file(self, app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.post(
+                "/api/admin/config/favicon",
+                files={"file": ("data.csv", b"a,b,c", "text/csv")},
+            )
+        assert resp.status_code == 415
+
+    # --- Boundary values ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_file_exactly_at_5mb_limit(self, app):
+        exactly_5mb = b"x" * (5 * 1024 * 1024)
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", exactly_5mb, "image/png")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_empty_file(self, app):
+        """An empty file is technically valid at the endpoint level."""
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", b"", "image/png")},
+                )
+        assert resp.status_code == 200
+
+    # --- State / precondition errors ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_propagates_502_from_blob_service(self, app):
+        from fastapi import HTTPException as FHE
+        async def raise_502(*args, **kwargs):
+            raise FHE(status_code=502, detail="Logo upload failed")
+
+        with patch("app.routers.admin.blob_service.upload_to_blob", raise_502):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", b"bytes", "image/png")},
+                )
+        assert resp.status_code == 502
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_propagates_500_from_blob_service_when_token_missing(self, app):
+        from fastapi import HTTPException as FHE
+        async def raise_500(*args, **kwargs):
+            raise FHE(status_code=500, detail="Blob storage not configured")
+
+        with patch("app.routers.admin.blob_service.upload_to_blob", raise_500):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", b"bytes", "image/png")},
+                )
+        assert resp.status_code == 500
+
+    # --- Edge cases ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_accepts_jpeg_with_jpeg_extension(self, app):
+        """Both .jpg and .jpeg extensions must map to image/jpeg."""
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.jpeg", b"fake-jpeg", "application/octet-stream")},
+                )
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_extension_takes_precedence_over_content_type(self, app):
+        """A .png file sent with wrong content-type must still be accepted."""
+        with patch("app.routers.admin.blob_service.upload_to_blob", _make_mock_favicon_blob_success()):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/favicon",
+                    files={"file": ("favicon.png", b"fake-png", "application/octet-stream")},
+                )
+        assert resp.status_code == 200
+
+
+# ===========================================================================
+# favicon_url in config read/write (integration)
+# ===========================================================================
+
+
+class TestFaviconUrlInConfig:
+    # --- Happy path ---
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_public_config_includes_favicon_url(self, app, db_session):
+        await _seed_config(db_session, favicon_url="https://example.com/fav.png")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/config")
+        assert resp.status_code == 200
+        assert resp.json()["favicon_url"] == "https://example.com/fav.png"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_admin_config_includes_favicon_url(self, app, db_session):
+        await _seed_config(db_session, favicon_url="https://example.com/fav.ico")
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.get("/api/admin/config")
+        assert resp.status_code == 200
+        assert resp.json()["favicon_url"] == "https://example.com/fav.ico"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_put_config_saves_favicon_url(self, app, db_session):
+        await _seed_config(db_session)
+        payload = {
+            "app_name": "Test",
+            "logo_url": "",
+            "favicon_url": "https://cdn.example.com/fav.png",
+            "primary_colour": "#005f73",
+            "support_email": "",
+        }
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.put("/api/admin/config", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["favicon_url"] == "https://cdn.example.com/fav.png"
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_put_config_clears_favicon_url_when_null(self, app, db_session):
+        await _seed_config(db_session, favicon_url="https://example.com/fav.png")
+        payload = {
+            "app_name": "Test",
+            "logo_url": "",
+            "favicon_url": None,
+            "primary_colour": "#005f73",
+            "support_email": "",
+        }
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.put("/api/admin/config", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["favicon_url"] is None
+
+    @pytest.mark.asyncio(loop_scope="session")
+    async def test_put_config_clears_favicon_url_when_empty_string(self, app, db_session):
+        """Empty string favicon_url should be normalised to null."""
+        await _seed_config(db_session, favicon_url="https://example.com/fav.png")
+        payload = {
+            "app_name": "Test",
+            "logo_url": "",
+            "favicon_url": "   ",
+            "primary_colour": "#005f73",
+            "support_email": "",
+        }
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.put("/api/admin/config", json=payload)
+        assert resp.status_code == 200
+        assert resp.json()["favicon_url"] is None
+
+    # --- Schema unit tests ---
+
+    def test_tenant_config_update_strips_favicon_url(self):
+        data = TenantConfigUpdate(
+            app_name="Test",
+            favicon_url="  https://cdn.example.com/fav.png  ",
+            primary_colour="#005f73",
+        )
+        assert data.favicon_url == "https://cdn.example.com/fav.png"
+
+    def test_tenant_config_update_favicon_url_empty_string_becomes_none(self):
+        data = TenantConfigUpdate(
+            app_name="Test",
+            favicon_url="",
+            primary_colour="#005f73",
+        )
+        assert data.favicon_url is None
+
+    def test_tenant_config_update_favicon_url_whitespace_becomes_none(self):
+        data = TenantConfigUpdate(
+            app_name="Test",
+            favicon_url="   ",
+            primary_colour="#005f73",
+        )
+        assert data.favicon_url is None
+
+    def test_tenant_config_update_favicon_url_none_stays_none(self):
+        data = TenantConfigUpdate(
+            app_name="Test",
+            favicon_url=None,
+            primary_colour="#005f73",
+        )
+        assert data.favicon_url is None

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -12,6 +13,7 @@ class TenantConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
     app_name: Mapped[str] = mapped_column(String(200), nullable=False)
     logo_url: Mapped[str] = mapped_column(String(2048), nullable=False, default="")
+    favicon_url: Mapped[Optional[str]] = mapped_column(String(2048), nullable=True, default=None)
     primary_colour: Mapped[str] = mapped_column(String(7), nullable=False)
     support_email: Mapped[str] = mapped_column(String(254), nullable=False, default="")
     updated_at: Mapped[datetime] = mapped_column(

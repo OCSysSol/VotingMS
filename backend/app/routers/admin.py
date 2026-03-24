@@ -44,7 +44,7 @@ from app.schemas.admin import (
     ResendReportOut,
     SetProxyRequest,
 )
-from app.schemas.config import LogoUploadOut, TenantConfigOut, TenantConfigUpdate
+from app.schemas.config import FaviconUploadOut, LogoUploadOut, TenantConfigOut, TenantConfigUpdate
 from app.services import admin_service
 from app.services import config_service
 from app.services import blob_service
@@ -596,6 +596,35 @@ async def upload_logo(
     url = await blob_service.upload_to_blob(filename, content, mime_type)
     return LogoUploadOut(url=url)
 
+
+
+@router.post(
+    "/config/favicon",
+    response_model=FaviconUploadOut,
+    status_code=status.HTTP_200_OK,
+)
+async def upload_favicon(
+    file: UploadFile = File(...),
+) -> FaviconUploadOut:
+    """Upload a favicon image to Vercel Blob and return its public URL.
+
+    The caller is responsible for then saving the URL via PUT /api/admin/config.
+
+    Returns 400 if the file exceeds 5 MB.
+    Returns 415 if the file is not a recognised image type.
+    Returns 500 if BLOB_READ_WRITE_TOKEN is not configured.
+    Returns 502 if the Vercel Blob upload fails.
+    """
+    mime_type = _detect_image_format(file)
+    content = await file.read()
+    if len(content) > _MAX_LOGO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File exceeds maximum size of 5 MB",
+        )
+    filename = file.filename or "favicon"
+    url = await blob_service.upload_to_blob(filename, content, mime_type)
+    return FaviconUploadOut(url=url)
 
 @router.get("/config", response_model=TenantConfigOut)
 async def get_admin_config(db: AsyncSession = Depends(get_db)) -> TenantConfigOut:

@@ -20,6 +20,7 @@ const BASE = "http://localhost:8000";
 export let configFixture: TenantConfig = {
   app_name: "AGM Voting",
   logo_url: "",
+  favicon_url: null,
   primary_colour: "#005f73",
   support_email: "",
 };
@@ -28,6 +29,7 @@ export function resetConfigFixture() {
   configFixture = {
     app_name: "AGM Voting",
     logo_url: "",
+    favicon_url: null,
     primary_colour: "#005f73",
     support_email: "",
   };
@@ -639,6 +641,10 @@ export const adminHandlers = [
     return HttpResponse.json({ url: "https://public.blob.vercel-storage.com/logo-test.png" });
   }),
 
+  http.post(`${BASE}/api/admin/config/favicon`, () => {
+    return HttpResponse.json({ url: "https://public.blob.vercel-storage.com/favicon-test.png" });
+  }),
+
   http.put(`${BASE}/api/admin/config`, async ({ request }) => {
     const body = await request.json() as Partial<TenantConfig>;
     if (!body?.app_name || !body.app_name.trim()) {
@@ -650,6 +656,7 @@ export const adminHandlers = [
     configFixture = {
       app_name: body.app_name,
       logo_url: body.logo_url ?? "",
+      favicon_url: (body as Partial<TenantConfig>).favicon_url ?? null,
       primary_colour: body.primary_colour,
       support_email: body.support_email ?? "",
     };
