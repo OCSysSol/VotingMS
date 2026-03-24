@@ -162,14 +162,31 @@ export default function SettingsPage() {
 
             <div className="field">
               <label className="field__label" htmlFor="favicon-url">Favicon URL</label>
-              <input
-                id="favicon-url"
-                className="field__input"
-                type="text"
-                value={faviconUrl ?? ""}
-                onChange={(e) => setFaviconUrl(e.target.value || null)}
-                placeholder="https://example.com/favicon.ico"
-              />
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  id="favicon-url"
+                  className="field__input"
+                  type="text"
+                  value={faviconUrl ?? ""}
+                  onChange={(e) => setFaviconUrl(e.target.value || null)}
+                  placeholder="https://example.com/favicon.ico"
+                  style={{ flex: 1 }}
+                />
+                <label htmlFor="favicon-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
+                  {isUploadingFavicon ? "Uploading…" : "Choose file"}
+                </label>
+                <input
+                  id="favicon-file"
+                  type="file"
+                  aria-label="Upload favicon image"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon"
+                  onChange={(e) => { void handleFaviconFileChange(e); }}
+                  disabled={isUploadingFavicon}
+                  data-testid="favicon-file-input"
+                  style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
+                />
+              </div>
+              {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
             </div>
 
             {faviconUrl && (
@@ -182,25 +199,6 @@ export default function SettingsPage() {
                 />
               </div>
             )}
-
-            <div className="field">
-              <label className="field__label" htmlFor="favicon-file">Upload favicon image</label>
-              <div style={{ position: "relative", display: "inline-block", overflow: "hidden" }}>
-                <label htmlFor="favicon-file" className="btn btn--secondary">
-                  {isUploadingFavicon ? "Uploading…" : "Choose file"}
-                </label>
-                <input
-                  id="favicon-file"
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon"
-                  onChange={(e) => { void handleFaviconFileChange(e); }}
-                  disabled={isUploadingFavicon}
-                  data-testid="favicon-file-input"
-                  style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
-                />
-              </div>
-              {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
-            </div>
 
             <div className="field">
               <label className="field__label" htmlFor="primary-colour-text">Primary colour</label>
