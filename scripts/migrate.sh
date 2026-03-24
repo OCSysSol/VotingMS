@@ -15,7 +15,8 @@ url = sys.argv[1]
 p = urlparse(url)
 qs = {k: v[0] for k, v in parse_qs(p.query, keep_blank_values=True).items()}
 qs.pop('channel_binding', None)
-qs['sslmode'] = 'require'
+qs.pop('sslmode', None)
+qs['ssl'] = 'require'
 print(urlunparse(p._replace(scheme='postgresql+asyncpg', query=urlencode(qs))))
 PYEOF_INNER
 )
