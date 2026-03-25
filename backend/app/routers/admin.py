@@ -190,6 +190,15 @@ async def archive_building(
     return BuildingArchiveOut.model_validate(building)
 
 
+@router.get("/buildings/{building_id}", response_model=BuildingOut)
+async def get_building(
+    building_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> BuildingOut:
+    building = await admin_service.get_building_or_404(building_id, db)
+    return BuildingOut.model_validate(building)
+
+
 @router.patch("/buildings/{building_id}", response_model=BuildingOut)
 async def update_building(
     building_id: uuid.UUID,

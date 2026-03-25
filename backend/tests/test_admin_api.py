@@ -363,6 +363,34 @@ class TestListBuildings:
 
 
 # ---------------------------------------------------------------------------
+# GET /api/admin/buildings/{building_id}
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestGetBuilding:
+    # --- Happy path ---
+
+    async def test_returns_building_by_id(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.get(f"/api/admin/buildings/{building.id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(building.id)
+        assert data["name"] == building.name
+        assert data["manager_email"] == building.manager_email
+        assert "is_archived" in data
+        assert "created_at" in data
+
+    # --- State / precondition errors ---
+
+    async def test_returns_404_for_unknown_id(self, client: AsyncClient):
+        response = await client.get(f"/api/admin/buildings/{uuid.uuid4()}")
+        assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # GET /api/admin/buildings/{building_id}/lot-owners
 # ---------------------------------------------------------------------------
 
