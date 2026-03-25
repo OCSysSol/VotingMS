@@ -24,20 +24,38 @@ def upgrade() -> None:
     # 2. Shift display_order from 0-based to 1-based
     op.execute("UPDATE motions SET display_order = display_order + 1")
 
-    # 3. Drop old unique constraint
+    # 3. Resequence display_order to eliminate any duplicate values within a meeting.
+    #    Existing data may have duplicate order_index values; assigning sequential 1-based
+    #    numbers (ordered by display_order then id as tiebreaker) ensures the unique
+    #    constraint added in step 4 can be created without a UniqueViolationError.
+    op.execute("""
+        UPDATE motions m
+        SET display_order = sub.new_order
+        FROM (
+            SELECT id,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY general_meeting_id
+                       ORDER BY display_order, id
+                   ) AS new_order
+            FROM motions
+        ) sub
+        WHERE m.id = sub.id
+    """)
+
+    # 4. Drop old unique constraint
     op.drop_constraint("uq_motions_general_meeting_order", "motions", type_="unique")
 
-    # 4. Add new unique constraint on (general_meeting_id, display_order)
+    # 5. Add new unique constraint on (general_meeting_id, display_order)
     op.create_unique_constraint(
         "uq_motions_general_meeting_display_order",
         "motions",
         ["general_meeting_id", "display_order"],
     )
 
-    # 5. Add motion_number column (VARCHAR NULL)
+    # 6. Add motion_number column (VARCHAR NULL)
     op.add_column("motions", sa.Column("motion_number", sa.String(), nullable=True))
 
-    # 6. Add partial unique index on motion_number (excluding NULLs)
+    # 7. Add partial unique index on motion_number (excluding NULLs)
     op.execute(
         """
         CREATE UNIQUE INDEX uq_motions_general_meeting_motion_number
