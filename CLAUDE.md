@@ -130,18 +130,7 @@ Agents live in `.claude/agents/`. The orchestrator (`agm-orchestrate`) coordinat
 
 ### Worktree-first rule
 
-**Before any design, implementation, or test work begins on a new feature or fix, create a git worktree for the branch.** All agent work — reading source files, writing design docs, writing code, running tests — must happen inside that worktree. Never read source files from the main repo root (`/Users/stevensun/personal/agm_survey`) when targeting a feature branch, because the main repo may be on a different branch (e.g. `preview`) with different code.
-
-```bash
-# Create worktree from the correct base branch (usually master or preview)
-git worktree add .claude/worktree/<branch-slug> -b <branch-name> <base-branch>
-# Example:
-git worktree add .claude/worktree/my-feature -b feat/my-feature master
-```
-
-Worktree path pattern: `/Users/stevensun/personal/agm_survey/.claude/worktree/<branch-slug>`
-
-The design doc and PRD edits for the feature must be written into the worktree (not the main repo root), so they are committed on the feature branch and included in the PR.
+A branch worktree must be created before any design, implementation, or test work begins. All agents work exclusively inside that worktree — never the main repo root, which may be on a different branch. See the orchestrator agent (`.claude/agents/agm-orchestrate.md` Step a) for the full protocol and commands.
 
 ---
 
