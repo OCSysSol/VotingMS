@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMyBallot } from "../../api/voter";
+import { useBranding } from "../../context/BrandingContext";
 
 const CHOICE_LABELS: Record<string, string> = {
   yes: "For",
@@ -12,6 +13,7 @@ const CHOICE_LABELS: Record<string, string> = {
 export function ConfirmationPage() {
   const { meetingId } = useParams<{ meetingId: string }>();
   const navigate = useNavigate();
+  const { config } = useBranding();
 
   const { data, isLoading, isError, error } = useQuery({
     queryKey: ["my-ballot", meetingId],
@@ -99,7 +101,7 @@ export function ConfirmationPage() {
                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                       {[...lot.votes].sort((a, b) => a.display_order - b.display_order).map((v) => (
                         <li className="vote-item" key={v.motion_id}>
-                          <span className="vote-item__motion">{v.motion_title}</span>
+                          <span className="vote-item__motion">{v.order_index + 1}. {v.motion_title}</span>
                           <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
                             {CHOICE_LABELS[v.choice] ?? v.choice}
                           </span>
@@ -110,7 +112,7 @@ export function ConfirmationPage() {
                 ))
               : sortedVotes.map((v) => (
                   <li className="vote-item" key={v.motion_id}>
-                    <span className="vote-item__motion">{v.motion_title}</span>
+                    <span className="vote-item__motion">{v.order_index + 1}. {v.motion_title}</span>
                     <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
                       {CHOICE_LABELS[v.choice] ?? v.choice}
                     </span>
@@ -120,10 +122,30 @@ export function ConfirmationPage() {
         </div>
 
         <div className="submit-section" style={{ borderTop: "none", marginTop: "24px", paddingTop: "0" }}>
+          <button
+            className="btn btn--secondary"
+            onClick={() => {
+              if (data.remaining_lot_owner_ids.length > 0) {
+                sessionStorage.setItem(
+                  `meeting_lots_${meetingId}`,
+                  JSON.stringify(data.remaining_lot_owner_ids)
+                );
+              }
+              navigate(`/vote/${meetingId}/voting`);
+            }}
+          >
+            {data.remaining_lot_owner_ids.length > 0 ? "Vote for remaining lots" : "View my votes"}
+          </button>
           <button className="btn btn--ghost" onClick={() => navigate("/")}>
             ← Back to home
           </button>
         </div>
+        {config.support_email && (
+          <p className="support-contact">
+            Need help? Contact{" "}
+            <a href={`mailto:${config.support_email}`}>{config.support_email}</a>
+          </p>
+        )}
       </div>
     </main>
   );

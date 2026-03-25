@@ -118,7 +118,7 @@ A set of UI improvements and correctness fixes for the voting application:
 - [x] All TypeScript type names and interface names updated (e.g. `AGMOut` → `GeneralMeetingOut`)
 - [x] React component filenames and component function names updated where they contain "AGM" or "Agm"
 - [x] Typecheck/lint passes
-- [ ] Verify in browser using dev-browser skill
+- [x] Verify in browser using dev-browser skill
 
 ---
 
@@ -154,15 +154,15 @@ A set of UI improvements and correctness fixes for the voting application:
 **Description:** As a building manager, I want to filter the General Meetings list by building so I can quickly find meetings for a specific building when managing multiple buildings.
 
 **Acceptance Criteria:**
-- [ ] A single-select dropdown labelled "All buildings" appears above the General Meetings table
-- [ ] Selecting a building from the dropdown filters the table to show only meetings for that building
-- [ ] Selecting "All buildings" (the default/empty option) removes the filter and shows all meetings
-- [ ] The selected building is stored in the URL as a `?building=<id>` search param
-- [ ] On page load, if `?building=<id>` is present in the URL, the matching building is pre-selected and the table is filtered
-- [ ] Changing the filter updates the URL without triggering a full page navigation
-- [ ] Filtering is client-side — no additional API call is made when the filter changes
-- [ ] The table, pagination, and loading states are unchanged; only the data passed to the table is filtered
-- [ ] Typecheck/lint passes
+- [x] A single-select dropdown labelled "All buildings" appears above the General Meetings table
+- [x] Selecting a building from the dropdown filters the table to show only meetings for that building
+- [x] Selecting "All buildings" (the default/empty option) removes the filter and shows all meetings
+- [x] The selected building is stored in the URL as a `?building=<id>` search param
+- [x] On page load, if `?building=<id>` is present in the URL, the matching building is pre-selected and the table is filtered
+- [x] Changing the filter updates the URL without triggering a full page navigation
+- [x] Filtering is client-side — no additional API call is made when the filter changes
+- [x] The table, pagination, and loading states are unchanged; only the data passed to the table is filtered
+- [x] Typecheck/lint passes
 
 ---
 
@@ -184,16 +184,210 @@ A set of UI improvements and correctness fixes for the voting application:
 **Description:** As a building manager, I want to delete a meeting that is in a closed or pending state so I can remove test meetings or incorrectly created meetings without leaving clutter.
 
 **Acceptance Criteria:**
-- [ ] A "Delete Meeting" button is visible on the General Meeting detail page when the meeting status is `closed` or `pending`
-- [ ] The button is not shown for meetings with status `open` — open meetings cannot be deleted
-- [ ] Clicking "Delete Meeting" shows a browser confirmation dialog before proceeding
-- [ ] On confirmation, `DELETE /api/admin/general-meetings/{id}` is called
-  - [ ] Returns 204 on success; the meeting and all associated data (ballot submissions, lot weights, motions, OTP records) are cascade-deleted
-  - [ ] Returns 404 if the meeting does not exist
-  - [ ] Returns 409 if the meeting status is `open`
-- [ ] On successful deletion, the admin is navigated to the General Meetings list page
-- [ ] The button is disabled and shows "Deleting…" while the request is in flight
+- [x] A "Delete Meeting" button is visible on the General Meeting detail page when the meeting status is `closed` or `pending`
+- [x] The button is not shown for meetings with status `open` — open meetings cannot be deleted
+- [x] Clicking "Delete Meeting" shows a browser confirmation dialog before proceeding
+- [x] On confirmation, `DELETE /api/admin/general-meetings/{id}` is called
+  - [x] Returns 204 on success; the meeting and all associated data (ballot submissions, lot weights, motions, OTP records) are cascade-deleted
+  - [x] Returns 404 if the meeting does not exist
+  - [x] Returns 409 if the meeting status is `open`
+- [x] On successful deletion, the admin is navigated to the General Meetings list page
+- [x] The button is disabled and shows "Deleting…" while the request is in flight
+- [x] Typecheck/lint passes
+
+---
+
+### US-TECH01: Vercel Analytics and Speed Insights
+
+**Description:** As a product owner, I want Vercel Analytics and Speed Insights instrumented in the frontend so I can monitor real-user performance and usage patterns.
+
+**Acceptance Criteria:**
+- [x] `@vercel/analytics` package added to frontend dependencies
+- [x] `@vercel/speed-insights` package added to frontend dependencies
+- [x] `<Analytics />` component from `@vercel/analytics/react` mounted in `App.tsx`
+- [x] `<SpeedInsights />` component from `@vercel/speed-insights/react` mounted in `App.tsx`
+- [x] Both components are mocked in frontend unit tests so they don't interfere with test rendering
+- [x] Typecheck/lint passes
+
+---
+
+### US-BUG-AS01: Fix already-submitted state lost on return from confirmation page
+
+**Description:** As a voter who has submitted a ballot and clicks "View my votes" to return to the voting page, I should see my submitted lots correctly marked as "Already submitted" with disabled checkboxes and read-only motions — not an editable form that makes it appear I have not voted.
+
+**Root cause:** In `VotingPage.tsx`, `submitMutation.onSuccess`, the `sessionStorage.setItem` call that persists `already_submitted: true` for submitted lots was placed inside the functional updater passed to `setAllLots`. Under React 18 concurrent rendering, `navigate()` (React Router v6) internally uses `startTransition`, which can cause the component to unmount before the functional updater runs. This means the sessionStorage write is skipped, and on re-mount the page reads stale pre-submission data.
+
+**Fix:** Move the `sessionStorage.setItem` call to synchronous code in `onSuccess`, before the `navigate()` call, so it always executes regardless of React's rendering schedule.
+
+**Acceptance Criteria:**
+- [x] After submitting a ballot and returning to the voting page via "View my votes", submitted lots show "Already submitted" badge with disabled checkboxes
+- [x] After submitting all lots and returning via "View my votes", all motion cards are read-only
+- [x] The synchronous sessionStorage write in `onSuccess` is wrapped in a try/catch so corrupt sessionStorage data cannot prevent navigation
+- [x] All existing voting page tests continue to pass at 100% coverage
+- [x] Typecheck/lint passes
+
+---
+
+### US-TECH02: Fix browser caching of index.html
+
+**Description:** As a user, I should not need to force-refresh my browser after a deployment to see the latest version of the app.
+
+**Acceptance Criteria:**
+- [x] `index.html` is served with `Cache-Control: no-cache, no-store, must-revalidate` so browsers always revalidate on the next visit
+- [x] Hashed asset files (JS/CSS bundles under `/assets/`) are served with `Cache-Control: public, max-age=31536000, immutable` for optimal caching
+- [x] Implementation uses a `_ImmutableStaticFiles` subclass in `api/index.py` to inject immutable cache headers on the `/assets` mount
+- [x] Typecheck/lint passes
+
+---
+
+### US-FIX-BB01: Fix blank page when navigating back from VotingPage
+
+**Description:** As a voter, I should never see a blank page when I click the "Back" button on the voting page or use the browser's native back button.
+
+**Acceptance Criteria:**
+- [ ] The in-page "← Back" button on `VotingPage` navigates to `/vote/:meetingId/auth` (the auth page), not `/vote/:meetingId`
+- [ ] Clicking Back lands on a fully rendered page (the auth email-entry form is visible)
+- [ ] The browser native back button from `/vote/:meetingId/voting` also returns to a rendered page (the auth page)
+- [ ] No blank or empty page is shown at any point during backward navigation in the voter flow
 - [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-AS01: Lots and motions show correct submitted state after returning via "View my votes"
+
+**Description:** As a voter who has submitted their ballot and then navigated back to the voting page via the "View my votes" button on the confirmation page, I should see my lots correctly labelled "Already submitted" and my motions locked as read-only — not as if I have not voted yet.
+
+**Acceptance Criteria:**
+- [ ] After submitting a ballot and clicking "View my votes" on the confirmation page, the voting page shows each submitted lot with an "Already submitted" badge and the checkbox disabled
+- [ ] After submitting a ballot and clicking "View my votes", all motions that were voted on are shown as read-only (locked), not as interactive
+- [ ] The above behaviour is correct even when the user has a single lot
+- [ ] The above behaviour is correct when the user has multiple lots and submits a subset of them: submitted lots show the badge; unsubmitted lots remain interactive
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-NM01: Previously-submitted lots unlock when admin reveals new motions
+
+**Description:** As a voter whose lots were all locked ("Already submitted") after voting on all prior motions, I want my lots to automatically become selectable again when the admin reveals a new motion — because I have not yet voted on it.
+
+**Acceptance Criteria:**
+- [ ] After voting on all visible motions (all lots show "Already submitted"), if the admin makes an additional motion visible, refreshing or returning to the VotingPage shows those lots as unlocked (checkbox enabled, no "Already submitted" badge)
+- [ ] The new motion is shown as interactive (not read-only) on the VotingPage
+- [ ] Previously answered motions remain read-only once a lot has voted on them
+- [ ] The "Submit ballot" button is visible when there is at least one unsubmitted lot selected
+- [ ] Lots that had NOT yet submitted when the new motion was revealed remain unsubmitted and interactive (no regression)
+- [ ] The fix works for single-lot and multi-lot voters
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-NM01-B: Lots remain unlocked after multiple batch-vote cycles (follow-up to US-FIX-NM01)
+
+**Description:** As a voter who has completed multiple rounds of batch voting (vote batch 1, navigate away, admin reveals batch 2, return, vote batch 2, navigate away, admin reveals batch 3, return), I want my lots to correctly unlock on every return to the VotingPage — not just on the first round.
+
+**Root cause (BUG-NM-01-B):** The original BUG-NM-01 fix tracked motions count via `prevMotionCountRef` initialised to `-1` as a sentinel. On every VotingPage re-mount the ref resets to `-1`, causing the first motions-load to be treated as "set baseline, do not unlock" rather than "motions may have grown since last visit, unlock if needed." The fix therefore works on the first batch but fails on all subsequent batches because the voter must navigate away (unmounting the component) between batches.
+
+**Fix approach:** Replace the stale `already_submitted` boolean with a derived computation based on `lot.voted_motion_ids` (which already exists on `LotInfo` in the current codebase). A lot is considered submitted when every currently-visible motion ID is present in its `voted_motion_ids` array. This is evaluated at render time from data already in memory — no extra API call required. `prevMotionCountRef` and its associated `useEffect` are removed.
+
+**Acceptance Criteria:**
+- [ ] After voting all motions in batch 1, navigating to confirmation, then returning to VotingPage after admin reveals batch 2, lots are unlocked — same as US-FIX-NM01
+- [ ] After voting all motions in batch 2, navigating to confirmation (VotingPage unmounts), then returning after admin reveals batch 3, lots are still correctly unlocked (the re-mount does not re-lock them)
+- [ ] This correct unlock-on-return behaviour holds for any number of batch cycles
+- [ ] `submitMutation.onSuccess` updates `voted_motion_ids` (not only `already_submitted`) for submitted lots in both React state and sessionStorage, so the derived computation remains accurate after each submission
+- [ ] Previously answered motions (whose IDs are in `voted_motion_ids`) remain read-only; only motions not yet in `voted_motion_ids` are interactive
+- [ ] The fix works for single-lot and multi-lot voters
+- [ ] Typecheck/lint passes
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-UI06: Motion card typography improvements
+
+**Description:** As a voter, I want the motion title on each voting card to be clearly legible at a glance and the card content to have consistent spacing, so I can read and respond to each motion without visual effort.
+
+**Acceptance Criteria:**
+- [ ] Motion card title renders at `1.375rem`, `font-weight: 700` — visibly larger and bolder than the current `1.1875rem / 600`
+- [ ] Description text has `margin-top: 10px` (from 7px) and `line-height: 1.65` (aligned with global body copy)
+- [ ] The "Already voted" badge (shown when `readOnly={true}`) renders as a styled grey pill — not unstyled inline text
+- [ ] No functional changes — props, component logic, and DOM structure are unchanged
+- [ ] All existing `MotionCard` tests continue to pass at 100% coverage
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-UI07: Admin label typography consistency
+
+**Description:** As a product owner, I want all "uppercase label" style text in the admin UI to use a consistent font family, size, weight, and letter-spacing so the app looks professionally polished and internally consistent.
+
+**Acceptance Criteria:**
+- [ ] All occurrences of `<h3 className="admin-card__title">` render in Outfit sans-serif (not Cormorant Garamond serif), matching table column headers
+- [ ] Letter-spacing for admin label classes (`.admin-card__title`, `.admin-stats__label`, `.section-label`, `.motion-entry__header`) is uniformly `0.09em`
+- [ ] The voter-facing `.vote-summary__heading` on the confirmation page also uses `0.09em` letter-spacing
+- [ ] Dark-background labels (`.agm-header__building`, `.auth-card__building`, `.hero__badge`, `.admin-sidebar__role`) are NOT changed — their higher tracking is intentional
+- [ ] No `.tsx` files are modified — all changes are CSS-only
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-FIX-PF01: No pre-fill for unlocked motions on revote
+
+**Description:** As a voter returning to the voting page to vote for remaining lots, I should not see motion cards pre-populated with a prior vote choice unless that motion is already locked (read-only) for my current selection — so that I am never misled into thinking a vote has been cast on my behalf.
+
+**Root cause:** The `choices` seeding effect in `VotingPage.tsx` carries forward `submitted_choice` for any motion where `already_voted === true && submitted_choice !== null`, regardless of whether the motion is actually read-only for the voter's current lot selection. When a voter returns to vote for a remaining lot, motions that all other lots have voted on (but not the remaining lot) are unlocked — yet they still appear pre-filled with the prior choice. This can cause a stale choice to be submitted silently if the voter does not notice the pre-fill.
+
+**Fix:** In the seeding effect, only carry forward `submitted_choice` when `isMotionReadOnly(motion)` is `true` for that motion. Unlocked motions must start with `null` (no pre-fill), regardless of `submitted_choice`.
+
+**Acceptance Criteria:**
+- [ ] A motion that is NOT locked (`isMotionReadOnly` returns `false`) always starts with no pre-filled choice — all vote buttons render as `aria-pressed="false"` on page load
+- [ ] A motion that IS locked (`isMotionReadOnly` returns `true`) may show the prior choice (`submitted_choice`) as a display aid; the card is read-only and cannot be changed
+- [ ] For a voter returning after a partial submit (some lots submitted, some pending): unlocked motions start blank; locked motions (all selected lots voted) show the prior choice
+- [ ] For a first-time voter (no prior submissions): all motions start blank
+- [ ] For a voter whose single lot is fully submitted: all motions are locked and may show prior choices
+- [ ] The existing guard `!(m.id in seeded)` is preserved — user interactions made in the current session are never overwritten by the seeding effect
+- [ ] `isMotionReadOnly` is wrapped in `useCallback` and included in the seeding effect's dependency array
+- [ ] Typecheck/lint passes
+- [ ] All existing voting page tests continue to pass at 100% coverage
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-UI08: Show motion numbers in the submit dialog
+
+**Description:** As a voter reviewing my ballot before submission, I want to see the motion number alongside each motion title in the unanswered-motions list in the submit dialog, so I can easily locate the correct card on the voting page and answer it.
+
+**Acceptance Criteria:**
+- [ ] When the submit dialog shows the "Unanswered motions" list, each item displays "Motion N — [title]" (where N = `order_index + 1`), not just the bare title
+- [ ] The clean "Confirm submission" path (no unanswered motions) is unchanged
+- [ ] The `SubmitDialog` component accepts `unansweredMotions` (array of `{ order_index: number; title: string }`) instead of the current `unansweredTitles: string[]`
+- [ ] The `VotingPage` call-site passes `unansweredMotions.map(m => ({ order_index: m.order_index, title: m.title }))` instead of mapping to a plain string
+- [ ] All existing `SubmitDialog` unit tests are updated to pass the new prop shape; no test assertions are removed
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-UI09: Fix motion description left padding
+
+**Description:** As a voter, I want the motion description text to be padded consistently with the rest of the card content (title and vote buttons), so the card looks visually coherent and the description does not appear to sit flush against the left border.
+
+**Acceptance Criteria:**
+- [ ] `.motion-card__description` has left and right padding that matches the card's existing horizontal content padding (`22px 24px 18px` on `.motion-card`)
+- [ ] The description text is visually aligned with the card title above it and the vote buttons below it
+- [ ] No other motion card layout properties (margins, line-height, colours) are changed
+- [ ] No `.tsx` files are modified — CSS-only change
+- [ ] All existing tests continue to pass at 100% coverage
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
 
 ---
 
@@ -211,6 +405,15 @@ A set of UI improvements and correctness fixes for the voting application:
 - FR-10: On Lambda cold start, meetings with `close_date < now()` and `status = 'open'` are automatically set to `closed` and absent ballot submissions are generated for all non-voting lots
 - FR-11: Voters cannot reach the voting page for a meeting that is past its close date; they are routed to the read-only confirmation screen
 - FR-12: The General Meetings list page has a single-select building filter dropdown; filter state is persisted as a `?building=<id>` URL search param; filtering is client-side
+- FR-13: Vercel Analytics and Speed Insights are mounted in the frontend app
+- FR-14: `index.html` is served with no-cache headers; hashed assets served with immutable cache headers
+- FR-15: When `submitMutation.onSuccess` fires in `VotingPage`, the `meeting_lots_info_<meetingId>` sessionStorage key is updated synchronously (outside of React state updaters) before navigation, so that re-mounting the voting page reads the correct `already_submitted: true` state for submitted lots
+- FR-16: `VotingPage` derives lot-submitted status dynamically: a lot is considered submitted when every currently-visible motion ID appears in `lot.voted_motion_ids`. This replaces reliance on the cached `already_submitted` boolean from sessionStorage. `submitMutation.onSuccess` must update `voted_motion_ids` (merging current motion IDs) for submitted lots in both React state and sessionStorage so the derived computation is accurate after each submission. Previously-introduced `prevMotionCountRef` logic is removed.
+- FR-17: The `choices` seeding effect in `VotingPage` only carries forward `submitted_choice` for a motion when `isMotionReadOnly` is `true` for that motion.
+- FR-18: The motion card title renders at `font-size: 1.375rem` and `font-weight: 700`; description renders at `margin-top: 10px` and `line-height: 1.65`; the "Already voted" badge renders as a grey pill (`background: #F0EFEE`, `color: var(--text-muted)`, pill border-radius).
+- FR-19: All admin card section headings (`h3.admin-card__title`) render in `'Outfit', system-ui, sans-serif` and `letter-spacing: 0.09em`. The classes `.admin-stats__label`, `.section-label`, `.motion-entry__header`, and `.vote-summary__heading` also use `letter-spacing: 0.09em`. No dark-background label classes are changed. Unlocked (interactive) motions always start with `null` — no pre-fill — regardless of the `submitted_choice` value returned by the API. `isMotionReadOnly` is memoised with `useCallback` and included in the seeding effect's dependency array.
+- FR-20: The `SubmitDialog` component accepts `unansweredMotions: { order_index: number; title: string }[]` in place of `unansweredTitles: string[]`. Each list item in the dialog renders as "Motion N — [title]". `VotingPage` passes the new prop shape.
+- FR-21: `.motion-card__description` has `padding-left: 0` removed in favour of explicit horizontal padding matching the card's content padding (`24px` left and right), aligning the description with the card title and vote buttons.
 
 ---
 
@@ -231,6 +434,9 @@ A set of UI improvements and correctness fixes for the voting application:
 - **Entitlement total:** Use `SUM(GeneralMeetingLotWeight.unit_entitlement)` per meeting — this is the snapshot total, not the live lot owner table.
 - **Frontend route rename:** React Router `<Route>` paths and `useParams` param names must both be updated. Any `useNavigate` hard-coded paths must also be updated. Playwright E2E tests reference URLs and must be updated.
 - **SessionStorage keys:** Voter flow uses `agm_lots_${agmId}`, `agm_lots_info_${agmId}`, `agm_lot_info_${agmId}` — rename to `meeting_lots_${meetingId}` etc.
+- **New motion unlock:** `already_submitted` is not a field that can be derived purely from `MotionOut.already_voted` because `already_voted` is aggregated across all of the voter's lots. The correct approach is to call `POST /api/auth/session` (session restore) whenever the motions list changes to get a fresh per-lot `already_submitted` flag from the server.
+- **SubmitDialog prop refactor (US-UI08):** The prop rename from `unansweredTitles: string[]` to `unansweredMotions: { order_index: number; title: string }[]` is a breaking change to the component interface. The single call-site in `VotingPage.tsx` must be updated in the same commit. All `SubmitDialog` unit tests must be updated to pass the new shape — existing test coverage must be maintained.
+- **Motion description padding (US-UI09):** The `.motion-card__description` rule in `index.css` needs explicit `padding-left` and `padding-right` values. The `.motion-card` itself uses `padding: 22px 24px 18px`, which means content inside the card already has `24px` of left/right space from the card border. The description `<p>` element is a direct child of `.motion-card` and inherits no additional horizontal padding today — it simply renders at full width inside the card's padded box, which is correct. Investigation of the actual rendering is needed to confirm whether the issue is a missing padding rule on `.motion-card__description` itself or a structural issue with the card layout.
 
 ---
 

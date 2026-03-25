@@ -7,6 +7,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import { ConfirmationPage } from "../ConfirmationPage";
 import { AGM_ID } from "../../../../tests/msw/handlers";
+import { BrandingContext, DEFAULT_CONFIG } from "../../../context/BrandingContext";
 
 const BASE = "http://localhost:8000";
 
@@ -16,16 +17,18 @@ vi.mock("react-router-dom", async () => {
   return { ...actual, useNavigate: () => mockNavigate };
 });
 
-function renderPage(meetingId = AGM_ID) {
+function renderPage(meetingId = AGM_ID, supportEmail = "") {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[`/vote/${meetingId}/confirmation`]}>
-        <Routes>
-          <Route path="/vote/:meetingId/confirmation" element={<ConfirmationPage />} />
-        </Routes>
-      </MemoryRouter>
-    </QueryClientProvider>
+    <BrandingContext.Provider value={{ config: { ...DEFAULT_CONFIG, support_email: supportEmail }, isLoading: false }}>
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[`/vote/${meetingId}/confirmation`]}>
+          <Routes>
+            <Route path="/vote/:meetingId/confirmation" element={<ConfirmationPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    </BrandingContext.Provider>
   );
 }
 
@@ -53,9 +56,9 @@ describe("ConfirmationPage", () => {
   it("renders each motion with vote", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/Motion 1/)).toBeInTheDocument();
+      expect(screen.getByText("1. Motion 1")).toBeInTheDocument();
       expect(screen.getByText("For")).toBeInTheDocument();
-      expect(screen.getByText(/Motion 2/)).toBeInTheDocument();
+      expect(screen.getByText("2. Motion 2")).toBeInTheDocument();
       expect(screen.getByText("Against")).toBeInTheDocument();
     });
   });
@@ -111,8 +114,8 @@ describe("ConfirmationPage", () => {
     renderPage();
     await waitFor(() => {
       const items = screen.getAllByRole("listitem");
-      expect(items[0]).toHaveTextContent("First Motion");
-      expect(items[1]).toHaveTextContent("Second Motion");
+      expect(items[0]).toHaveTextContent("1. First Motion");
+      expect(items[1]).toHaveTextContent("2. Second Motion");
     });
   });
 
@@ -215,6 +218,119 @@ describe("ConfirmationPage", () => {
       expect(screen.getByText("Lot 1A")).toBeInTheDocument();
       expect(screen.getByText("Lot 2B")).toBeInTheDocument();
     });
+  });
+
+  it("always shows a back-to-voting button regardless of remaining lots (BUG-RV-02)", async () => {
+    // Default fixture has remaining_lot_owner_ids: [] — back button should still show as "View my votes"
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /view my votes/i })).toBeInTheDocument();
+    });
+  });
+
+  it("back-to-voting button label is 'View my votes' when no remaining lots", async () => {
+    // remaining_lot_owner_ids is empty → label is "View my votes"
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /view my votes/i })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /vote for remaining lots/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("clicking 'View my votes' navigates to voting page without writing sessionStorage", async () => {
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /view my votes/i })).toBeInTheDocument();
+    });
+    // Remove any prior sessionStorage for this key
+    sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+    await user.click(screen.getByRole("button", { name: /view my votes/i }));
+    expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/voting`);
+    // sessionStorage NOT written because no remaining lots
+    expect(sessionStorage.getItem(`meeting_lots_${AGM_ID}`)).toBeNull();
+  });
+
+  it("does not show 'Vote for remaining lots' button when remaining_lot_owner_ids is empty (legacy check)", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /vote for remaining lots/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Vote for remaining lots' button when remaining_lot_owner_ids is non-empty", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "owner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: ["lo2", "lo3"],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /vote for remaining lots/i })).toBeInTheDocument();
+    });
+  });
+
+  it("clicking 'Vote for remaining lots' writes remaining IDs to sessionStorage and navigates to voting", async () => {
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "owner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: ["lo2", "lo3"],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /vote for remaining lots/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /vote for remaining lots/i }));
+    expect(sessionStorage.getItem(`meeting_lots_${AGM_ID}`)).toBe(JSON.stringify(["lo2", "lo3"]));
+    expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/voting`);
+  });
+
+  // --- Support email (branding) ---
+
+  it("shows support email link when support_email is set in branding config", async () => {
+    renderPage(AGM_ID, "support@corp.com");
+    await waitFor(() => expect(screen.getByText(/Ballot submitted/)).toBeInTheDocument());
+    expect(screen.getByRole("link", { name: "support@corp.com" })).toBeInTheDocument();
+    expect(screen.getByText(/Need help/)).toBeInTheDocument();
+  });
+
+  it("does not show support email block when support_email is empty", async () => {
+    renderPage(AGM_ID, "");
+    await waitFor(() => expect(screen.getByText(/Ballot submitted/)).toBeInTheDocument());
+    expect(screen.queryByText(/Need help/)).not.toBeInTheDocument();
   });
 
   it("shows 'Not eligible' label for not_eligible votes in multi-lot ballot", async () => {

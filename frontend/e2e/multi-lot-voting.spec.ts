@@ -52,7 +52,7 @@ test.describe("Multi-lot voter journey", () => {
     });
 
     // ── Building ────────────────────────────────────────────────────────────
-    const buildingsRes = await api.get("/api/admin/buildings");
+    const buildingsRes = await api.get("/api/admin/buildings?limit=1000");
     const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
     let building = buildings.find((b) => b.name === BUILDING_NAME);
     if (!building) {
@@ -113,7 +113,7 @@ test.describe("Multi-lot voter journey", () => {
     }
 
     // ── Close any existing open/pending AGMs for this building ───────────────
-    const agmsRes = await api.get("/api/admin/general-meetings");
+    const agmsRes = await api.get("/api/admin/general-meetings?limit=1000");
     const agms = (await agmsRes.json()) as {
       id: string;
       status: string;
@@ -165,6 +165,15 @@ test.describe("Multi-lot voter journey", () => {
 
   // ── Helper: navigate to the auth page for this AGM ──────────────────────────
   async function goToAuthPage(page: import("@playwright/test").Page) {
+    await page.evaluate(() => {
+      try {
+        Object.keys(localStorage)
+          .filter(k => k.startsWith('agm_session_'))
+          .forEach(k => localStorage.removeItem(k))
+      } catch (_) {
+        // page not yet on target origin — no session token to clear
+      }
+    })
     await page.goto("/");
     const select = page.getByLabel("Select your building");
     await expect(select).toBeVisible();

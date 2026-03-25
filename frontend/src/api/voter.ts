@@ -35,6 +35,7 @@ export interface LotInfo {
   financial_position: string;
   already_submitted: boolean;
   is_proxy: boolean;
+  voted_motion_ids: string[];  // motion IDs with submitted votes for this lot
 }
 
 export interface AuthVerifyResponse {
@@ -43,6 +44,13 @@ export interface AuthVerifyResponse {
   agm_status: string;
   building_name: string;
   meeting_title: string;
+  unvoted_visible_count: number;
+  session_token: string;
+}
+
+export interface SessionRestoreRequest {
+  session_token: string;
+  general_meeting_id: string;
 }
 
 export interface MotionOut {
@@ -52,6 +60,9 @@ export interface MotionOut {
   display_order: number;
   motion_number: string | null;
   motion_type: MotionType;
+  is_visible: boolean;
+  already_voted: boolean;
+  submitted_choice: VoteChoice | null;
 }
 
 export interface DraftSaveRequest {
@@ -106,7 +117,7 @@ export interface MyBallotResponse {
 
 export interface SubmitBallotRequest {
   lot_owner_ids: string[];
-  votes: Array<{ motion_id: string; choice: string }>;
+  votes: Array<{ motion_id: string; choice: VoteChoice }>;
 }
 
 export interface ServerTimeResponse {
@@ -159,4 +170,11 @@ export function submitBallot(meetingId: string, request: SubmitBallotRequest): P
 
 export function fetchMyBallot(meetingId: string): Promise<MyBallotResponse> {
   return apiFetch<MyBallotResponse>(`/api/general-meeting/${meetingId}/my-ballot`);
+}
+
+export function restoreSession(req: SessionRestoreRequest): Promise<AuthVerifyResponse> {
+  return apiFetch<AuthVerifyResponse>("/api/auth/session", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
 }

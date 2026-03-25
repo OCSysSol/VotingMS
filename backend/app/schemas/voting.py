@@ -14,6 +14,9 @@ class MotionOut(BaseModel):
     display_order: int
     motion_number: Optional[str]
     motion_type: MotionType
+    is_visible: bool = True
+    already_voted: bool = False
+    submitted_choice: Optional[VoteChoice] = None
 
     model_config = {"from_attributes": True}
 

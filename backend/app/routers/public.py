@@ -9,17 +9,26 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models.general_meeting import GeneralMeeting, get_effective_status
+from app.models.general_meeting import GeneralMeeting, GeneralMeetingStatus, get_effective_status
 from app.models.building import Building
 from app.models.motion import Motion
 from app.schemas.agm import GeneralMeetingOut, GeneralMeetingSummaryOut, MotionSummaryOut
 from app.schemas.building import BuildingOut
+from app.schemas.config import TenantConfigOut
+from app.services import config_service
 
 router = APIRouter()
+
+
+@router.get("/config", response_model=TenantConfigOut)
+async def get_public_config(db: AsyncSession = Depends(get_db)) -> TenantConfigOut:
+    """Return current branding config — public, no auth required."""
+    config = await config_service.get_config(db)
+    return TenantConfigOut.model_validate(config)
 
 
 @router.get("/server-time")
@@ -31,10 +40,19 @@ async def server_time() -> dict:
 
 @router.get("/buildings", response_model=list[BuildingOut])
 async def list_buildings(db: AsyncSession = Depends(get_db)) -> list[BuildingOut]:
-    """List all active (non-archived) buildings."""
+    """List active (non-archived) buildings that have at least one open meeting."""
     result = await db.execute(
         select(Building)
         .where(Building.is_archived == False)  # noqa: E712
+        .where(
+            exists(
+                select(GeneralMeeting.id)
+                .where(GeneralMeeting.building_id == Building.id)
+                .where(GeneralMeeting.status != GeneralMeetingStatus.closed)
+                .where(GeneralMeeting.voting_closes_at > func.now())
+                .where(GeneralMeeting.meeting_at <= func.now())
+            )
+        )
         .order_by(Building.name)
     )
     buildings = result.scalars().all()

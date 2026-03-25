@@ -16,7 +16,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test.describe("Admin General Meetings", () => {
   test("open General Meeting shows Close Voting button", async ({ page, request }) => {
-    const meetingsRes = await request.get("/api/admin/general-meetings");
+    const meetingsRes = await request.get("/api/admin/general-meetings?limit=1000");
     const meetings = await meetingsRes.json() as { id: string; status: string }[];
     const openMeeting = meetings.find((a) => a.status === "open");
 
@@ -31,7 +31,7 @@ test.describe("Admin General Meetings", () => {
   });
 
   test("Close Voting shows confirmation dialog", async ({ page, request }) => {
-    const meetingsRes = await request.get("/api/admin/general-meetings");
+    const meetingsRes = await request.get("/api/admin/general-meetings?limit=1000");
     const meetings = await meetingsRes.json() as { id: string; status: string }[];
     const openMeeting = meetings.find((a) => a.status === "open");
 
@@ -48,7 +48,7 @@ test.describe("Admin General Meetings", () => {
   });
 
   test("closed General Meeting does not show Close Voting button", async ({ page, request }) => {
-    const meetingsRes = await request.get("/api/admin/general-meetings");
+    const meetingsRes = await request.get("/api/admin/general-meetings?limit=1000");
     const meetings = await meetingsRes.json() as { id: string; status: string }[];
     const closedMeeting = meetings.find((a) => a.status === "closed");
 
@@ -63,7 +63,7 @@ test.describe("Admin General Meetings", () => {
   });
 
   test("General Meeting detail page shows Results Report section", async ({ page, request }) => {
-    const meetingsRes = await request.get("/api/admin/general-meetings");
+    const meetingsRes = await request.get("/api/admin/general-meetings?limit=1000");
     const meetings = await meetingsRes.json() as { id: string }[];
     const meeting = meetings[0];
 
@@ -235,9 +235,12 @@ test.describe("Admin General Meetings — delete meeting button", () => {
     // Delete Meeting button is visible for pending meetings
     await expect(page.getByRole("button", { name: "Delete Meeting" })).toBeVisible({ timeout: 10000 });
 
-    // Accept the confirm dialog and click delete
-    page.on("dialog", (dialog) => dialog.accept());
+    // Click Delete Meeting — this opens the custom confirmation modal (not a native dialog)
     await page.getByRole("button", { name: "Delete Meeting" }).click();
+
+    // Confirm deletion in the modal — the modal contains a "Delete Meeting" button in the footer
+    await expect(page.getByRole("dialog", { name: "Delete Meeting" })).toBeVisible({ timeout: 5000 });
+    await page.getByRole("dialog", { name: "Delete Meeting" }).getByRole("button", { name: "Delete Meeting" }).click();
 
     // Should be redirected to the meetings list
     await expect(page).toHaveURL(/\/admin\/general-meetings$/, { timeout: 15000 });
@@ -341,7 +344,12 @@ test.describe("Admin General Meetings — absent count", () => {
 
     // The Absent row should show voter count 0 for an open meeting
     // (backend returns absent_ids = empty set for non-closed meetings)
-    const absentRow = page.getByRole("row").filter({ hasText: "Absent" });
+    // Scope to the tally table (identified by its "Category" column header) to avoid
+    // matching motion title rows that also contain the word "Absent".
+    const tallyTable = page.locator("table").filter({
+      has: page.getByRole("columnheader", { name: "Category" }),
+    });
+    const absentRow = tallyTable.getByRole("row").filter({ hasText: "Absent" });
     await expect(absentRow).toBeVisible({ timeout: 10000 });
     // Voter count cell: second td in the Absent row
     const absentCountCell = absentRow.getByRole("cell").nth(1);
@@ -362,7 +370,10 @@ test.describe("Admin General Meetings — absent count", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
     // After close, both lots have no ballots → they are absent
-    const absentRowAfterClose = page.getByRole("row").filter({ hasText: "Absent" });
+    const tallyTableAfterClose = page.locator("table").filter({
+      has: page.getByRole("columnheader", { name: "Category" }),
+    });
+    const absentRowAfterClose = tallyTableAfterClose.getByRole("row").filter({ hasText: "Absent" });
     await expect(absentRowAfterClose).toBeVisible({ timeout: 10000 });
     const absentCountAfterClose = absentRowAfterClose.getByRole("cell").nth(1);
     // 2 lots, neither voted → absent count should be 2

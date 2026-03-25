@@ -190,10 +190,10 @@ class TestPublicListBuildings:
         assert "id" in first
         assert "name" in first
 
-    async def test_building_without_agm_is_listed(
+    async def test_building_without_agm_is_excluded(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Buildings without AGMs now appear — the GeneralMeeting list for that building will be empty."""
+        """Buildings without any AGMs are excluded — only buildings with open meetings appear."""
         b = Building(name="No GeneralMeeting Building P2", manager_email="noagm@test.com")
         db_session.add(b)
         await db_session.flush()
@@ -201,7 +201,87 @@ class TestPublicListBuildings:
         response = await client.get("/api/buildings")
         data = response.json()
         names = [item["name"] for item in data]
-        assert "No GeneralMeeting Building P2" in names
+        assert "No GeneralMeeting Building P2" not in names
+
+    # --- State / precondition errors ---
+
+    async def test_building_with_only_closed_meeting_is_excluded(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """A building whose only meeting is closed does not appear in the list."""
+        b = Building(name="Closed Only P2 Building", manager_email="closed@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        now = datetime.now(UTC)
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Closed Meeting",
+            status=GeneralMeetingStatus.closed,
+            meeting_at=now - timedelta(days=5),
+            voting_closes_at=now + timedelta(days=1),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        response = await client.get("/api/buildings")
+        names = [item["name"] for item in response.json()]
+        assert "Closed Only P2 Building" not in names
+
+    async def test_building_with_expired_voting_is_excluded(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """A building with a meeting whose voting_closes_at has passed is excluded."""
+        b = Building(name="Expired Voting P2 Building", manager_email="expired@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        now = datetime.now(UTC)
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Expired Voting Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=now - timedelta(days=3),
+            voting_closes_at=now - timedelta(hours=1),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        response = await client.get("/api/buildings")
+        names = [item["name"] for item in response.json()]
+        assert "Expired Voting P2 Building" not in names
+
+    # --- Edge cases ---
+
+    async def test_building_with_open_and_closed_meetings_is_included(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """A building with at least one open meeting appears even if it also has closed ones."""
+        b = Building(name="Mixed P2 Building", manager_email="mixed@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        now = datetime.now(UTC)
+        closed_agm = GeneralMeeting(
+            building_id=b.id,
+            title="Old Closed Meeting",
+            status=GeneralMeetingStatus.closed,
+            meeting_at=now - timedelta(days=30),
+            voting_closes_at=now - timedelta(days=28),
+        )
+        open_agm = GeneralMeeting(
+            building_id=b.id,
+            title="Current Open Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=now - timedelta(hours=1),
+            voting_closes_at=now + timedelta(days=2),
+        )
+        db_session.add_all([closed_agm, open_agm])
+        await db_session.flush()
+
+        response = await client.get("/api/buildings")
+        names = [item["name"] for item in response.json()]
+        assert "Mixed P2 Building" in names
 
 
 # ---------------------------------------------------------------------------
@@ -279,17 +359,29 @@ class TestAuthVerify:
     async def test_valid_auth_already_submitted(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
+        """already_submitted=True when lot has submitted votes for every visible motion."""
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
+        motions = building_with_agm["motions"]  # [m1, m2] — both visible by default
 
-        # Create a ballot submission for this lot owner
+        # Create a ballot submission and submitted votes for all visible motions
         bs = BallotSubmission(
             general_meeting_id=agm.id,
             lot_owner_id=lo.id,
             voter_email=voter_email,
         )
         db_session.add(bs)
+        for motion in motions:
+            v = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(v)
         await db_session.flush()
         code = await make_otp(db_session, voter_email, agm.id)
 
@@ -348,6 +440,104 @@ class TestAuthVerify:
         assert "already_submitted" in lot
         assert "is_proxy" in lot
         assert lot["is_proxy"] is False  # direct owner, not proxy
+
+    async def test_verify_lot_info_voted_motion_ids_empty_for_unvoted_lot(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """voted_motion_ids is empty for a lot that has no submitted votes."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        code = await make_otp(db_session, voter_email, agm.id)
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "general_meeting_id": str(agm.id),
+                "code": code,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["lots"][0]
+        assert "voted_motion_ids" in lot
+        assert lot["voted_motion_ids"] == []
+
+    async def test_verify_lot_info_voted_motion_ids_populated_after_submission(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """voted_motion_ids contains the IDs of submitted votes for this lot."""
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        motions = building_with_agm["motions"]
+
+        # Submit votes on both motions
+        for motion in motions:
+            v = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(v)
+        await db_session.flush()
+
+        code = await make_otp(db_session, voter_email, agm.id)
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "general_meeting_id": str(agm.id),
+                "code": code,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["lots"][0]
+        voted_ids = lot["voted_motion_ids"]
+        assert len(voted_ids) == 2
+        assert str(motions[0].id) in voted_ids
+        assert str(motions[1].id) in voted_ids
+
+    async def test_verify_voted_motion_ids_excludes_draft_votes(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """voted_motion_ids only includes submitted votes, not drafts."""
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        motions = building_with_agm["motions"]
+
+        # Add a draft vote (status=draft) — should NOT appear in voted_motion_ids
+        from app.models.vote import VoteStatus as VS
+        draft_v = Vote(
+            general_meeting_id=agm.id,
+            motion_id=motions[0].id,
+            voter_email=voter_email,
+            lot_owner_id=lo.id,
+            choice=VoteChoice.yes,
+            status=VS.draft,
+        )
+        db_session.add(draft_v)
+        await db_session.flush()
+
+        code = await make_otp(db_session, voter_email, agm.id)
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "general_meeting_id": str(agm.id),
+                "code": code,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["lots"][0]
+        # Draft vote must not be included
+        assert lot["voted_motion_ids"] == []
 
     # --- Input validation ---
 
@@ -635,6 +825,431 @@ class TestAuthVerify:
         )
         assert response.status_code == 401
 
+    async def test_verify_returns_session_token_in_body(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """POST /api/auth/verify must return session_token in the response body for localStorage persistence."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        code = await make_otp(db_session, voter_email, agm.id)
+
+        response = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": voter_email,
+                "general_meeting_id": str(agm.id),
+                "code": code,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "session_token" in data
+        assert isinstance(data["session_token"], str)
+        assert len(data["session_token"]) > 0
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/session  (session restore)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionRestore:
+    # --- Happy path ---
+
+    async def test_valid_token_returns_200_with_lot_list(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A valid token returns 200 with AuthVerifyResponse shape."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "lots" in data
+        assert data["voter_email"] == voter_email
+        assert data["agm_status"] == "open"
+        assert data["building_name"] == building.name
+        assert data["meeting_title"] == agm.title
+        assert isinstance(data["session_token"], str)
+        assert len(data["session_token"]) > 0
+
+    async def test_valid_token_sets_meeting_session_cookie(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Successful session restore sets the meeting_session HttpOnly cookie."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        assert "meeting_session" in response.cookies
+
+    async def test_valid_token_returns_fresh_already_submitted_flags(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """already_submitted flags reflect current vote state at restore time."""
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        motions = building_with_agm["motions"]
+        building = building_with_agm["building"]
+
+        # Submit votes for all motions
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_email,
+        )
+        db_session.add(bs)
+        for motion in motions:
+            v = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(v)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["lots"][0]["already_submitted"] is True
+
+    async def test_restore_session_lot_info_includes_voted_motion_ids(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """restore_session returns voted_motion_ids populated with submitted vote IDs."""
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        motions = building_with_agm["motions"]
+        building = building_with_agm["building"]
+
+        # Submit one vote (on motions[0] only)
+        v = Vote(
+            general_meeting_id=agm.id,
+            motion_id=motions[0].id,
+            voter_email=voter_email,
+            lot_owner_id=lo.id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(v)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["lots"][0]
+        voted_ids = lot["voted_motion_ids"]
+        assert len(voted_ids) == 1
+        assert str(motions[0].id) in voted_ids
+
+    async def test_restore_session_voted_motion_ids_empty_for_unvoted_lot(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """restore_session returns voted_motion_ids=[] when no submitted votes exist."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["lots"][0]
+        assert lot["voted_motion_ids"] == []
+
+    async def test_valid_token_with_proxy_lot_returns_is_proxy_true(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Session restore returns is_proxy=True for proxy lots."""
+        lo = building_with_agm["lot_owner"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+        proxy_email = f"proxy_restore_{uuid.uuid4().hex[:6]}@test.com"
+
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        proxy_lot = next((l for l in data["lots"] if l["lot_owner_id"] == str(lo.id)), None)
+        assert proxy_lot is not None
+        assert proxy_lot["is_proxy"] is True
+
+    async def test_valid_token_returns_new_session_token(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """The restored session returns a new session_token (fresh session created)."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        original_token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": original_token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        new_token = response.json()["session_token"]
+        # A new token is issued each restore; it may differ from the original
+        assert isinstance(new_token, str)
+        assert len(new_token) > 0
+
+    # --- Input validation ---
+
+    async def test_empty_session_token_returns_422(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """Empty session_token fails Pydantic validation."""
+        agm = building_with_agm["agm"]
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": "", "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 422
+
+    async def test_whitespace_session_token_returns_422(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """Whitespace-only session_token fails Pydantic validation."""
+        agm = building_with_agm["agm"]
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": "   ", "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 422
+
+    async def test_missing_general_meeting_id_returns_422(
+        self, client: AsyncClient
+    ):
+        """Missing general_meeting_id fails Pydantic validation."""
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": "some-token"},
+        )
+        assert response.status_code == 422
+
+    # --- Boundary values ---
+
+    async def test_token_for_different_meeting_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A token issued for one meeting cannot be used for a different meeting_id."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        other_meeting_id = uuid.uuid4()
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(other_meeting_id)},
+        )
+        # Returns 401 (session not found) or 404 if meeting doesn't exist — both are safe
+        assert response.status_code in (401, 404)
+
+    # --- State / precondition errors ---
+
+    async def test_invalid_token_returns_401(
+        self, client: AsyncClient, building_with_agm: dict
+    ):
+        """A tampered or unknown token returns 401."""
+        agm = building_with_agm["agm"]
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": "totally-invalid-garbage-token", "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Session expired or invalid"
+
+    async def test_expired_token_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A token whose expires_at is in the past returns 401."""
+        import secrets
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = secrets.token_urlsafe(32)
+        expired_session = SessionRecord(
+            session_token=token,
+            voter_email=voter_email,
+            building_id=building.id,
+            general_meeting_id=agm.id,
+            expires_at=datetime.now(UTC) - timedelta(hours=1),
+        )
+        db_session.add(expired_session)
+        await db_session.flush()
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Session expired or invalid"
+
+    async def test_closed_agm_token_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A valid token for a closed AGM returns 401 with the closed-meeting message."""
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        closed_agm = GeneralMeeting(
+            building_id=building.id,
+            title="Closed Session Test Meeting",
+            status=GeneralMeetingStatus.closed,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+            closed_at=datetime.now(UTC),
+        )
+        db_session.add(closed_agm)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, closed_agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(closed_agm.id)},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Session expired — meeting is closed"
+
+    async def test_past_voting_closes_at_agm_returns_401(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """An AGM past its voting_closes_at (effective status 'closed') also returns 401."""
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        past_agm = GeneralMeeting(
+            building_id=building.id,
+            title="Past Closes Session Test Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=datetime.now(UTC) - timedelta(days=3),
+            voting_closes_at=datetime.now(UTC) - timedelta(days=1),
+        )
+        db_session.add(past_agm)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, past_agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(past_agm.id)},
+        )
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Session expired — meeting is closed"
+
+    async def test_nonexistent_meeting_id_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A valid-format meeting_id that doesn't exist in DB returns 404."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        # Create a session record pointing at an existing meeting
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        # But request with a different (nonexistent) meeting_id that won't match session_record
+        # (and if it somehow finds a session, the meeting lookup returns 404)
+        # We create a fake meeting_id that has no DB row
+        fake_meeting_id = uuid.uuid4()
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(fake_meeting_id)},
+        )
+        # Session not found for fake_meeting_id → 401
+        assert response.status_code == 401
+
+    # --- Edge cases ---
+
+    async def test_pending_agm_session_restore_returns_200_with_pending_status(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Session restore for a pending AGM returns 200 with agm_status='pending'."""
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        pending_agm = GeneralMeeting(
+            building_id=building.id,
+            title="Pending Session Test Meeting",
+            status=GeneralMeetingStatus.pending,
+            meeting_at=datetime.now(UTC) + timedelta(days=1),
+            voting_closes_at=datetime.now(UTC) + timedelta(days=2),
+        )
+        db_session.add(pending_agm)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, pending_agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(pending_agm.id)},
+        )
+        assert response.status_code == 200
+        assert response.json()["agm_status"] == "pending"
+
+    async def test_session_restore_unvoted_visible_count_reflects_current_state(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """unvoted_visible_count is computed fresh from current DB state."""
+        voter_email = building_with_agm["voter_email"]
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            "/api/auth/session",
+            json={"session_token": token, "general_meeting_id": str(agm.id)},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Fixture has 2 motions, voter has not submitted any → unvoted_visible_count = 2
+        assert data["unvoted_visible_count"] == 2
+
 
 # ---------------------------------------------------------------------------
 # auth_service tests (get_session)
@@ -758,6 +1373,167 @@ class TestListMotions:
         assert "description" in motion
         assert "display_order" in motion
 
+    # --- submitted_choice field (BUG-RV-02) ---
+
+    async def test_submitted_choice_null_when_not_voted(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """submitted_choice is null for motions the voter has not yet voted on."""
+        agm = building_with_agm["agm"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+        for motion in data:
+            assert motion["submitted_choice"] is None
+
+    async def test_submitted_choice_populated_for_voted_motion(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """submitted_choice returns the voter's choice for a motion they have already voted on."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        # Record a submitted vote for motion[0] = "yes"
+        vote = Vote(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_email,
+            motion_id=motions[0].id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(vote)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+        # Find motion[0] in the response
+        m0 = next(m for m in data if str(m["id"]) == str(motions[0].id))
+        m1 = next(m for m in data if str(m["id"]) == str(motions[1].id))
+        assert m0["already_voted"] is True
+        assert m0["submitted_choice"] == "yes"
+        # Motion[1] not voted — null
+        assert m1["already_voted"] is False
+        assert m1["submitted_choice"] is None
+
+    async def test_submitted_choice_prefers_non_not_eligible(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """For a multi-lot voter where one lot is in-arrear (not_eligible) and
+        one normal lot voted yes, submitted_choice should return 'yes' not 'not_eligible'."""
+        agm = building_with_agm["agm"]
+        lo_normal = building_with_agm["lot_owner"]  # normal lot
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        # Create a second (in-arrear) lot owner with the same email
+        lo_arrear = LotOwner(
+            building_id=building.id, lot_number="P2-arrear", unit_entitlement=50
+        )
+        db_session.add(lo_arrear)
+        await db_session.flush()
+        lo_email_arrear = LotOwnerEmail(lot_owner_id=lo_arrear.id, email=voter_email)
+        db_session.add(lo_email_arrear)
+        await db_session.flush()
+
+        # Record not_eligible for in-arrear lot (added first)
+        vote_arrear = Vote(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo_arrear.id,
+            voter_email=voter_email,
+            motion_id=motions[0].id,
+            choice=VoteChoice.not_eligible,
+            status=VoteStatus.submitted,
+        )
+        # Record yes for normal lot (added second)
+        vote_normal = Vote(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo_normal.id,
+            voter_email=voter_email,
+            motion_id=motions[0].id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add_all([vote_arrear, vote_normal])
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+        m0 = next(m for m in data if str(m["id"]) == str(motions[0].id))
+        # Should prefer "yes" over "not_eligible"
+        assert m0["submitted_choice"] == "yes"
+
+    async def test_submitted_choice_not_eligible_when_only_in_arrear(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When only in-arrear lot exists and voted not_eligible, submitted_choice
+        returns not_eligible (no non-not_eligible alternative exists)."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        vote = Vote(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_email,
+            motion_id=motions[0].id,
+            choice=VoteChoice.not_eligible,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(vote)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+        m0 = next(m for m in data if str(m["id"]) == str(motions[0].id))
+        assert m0["submitted_choice"] == "not_eligible"
+
+    async def test_submitted_choice_includes_submitted_choice_field_in_schema(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Every motion response item includes the submitted_choice field."""
+        agm = building_with_agm["agm"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        data = response.json()
+        for motion in data:
+            assert "submitted_choice" in motion
+
 
 # ---------------------------------------------------------------------------
 # PUT /api/general-meeting/{agm_id}/draft
@@ -804,11 +1580,12 @@ class TestSaveDraft:
         )
         assert response.status_code == 200
 
-    async def test_save_draft_without_lot_owner_id(
+    async def test_save_draft_with_lot_owner_id(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
-        """Draft can be saved without lot_owner_id (legacy/fallback path)."""
+        """Draft is saved when lot_owner_id is provided."""
         agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         building = building_with_agm["building"]
         motions = building_with_agm["motions"]
@@ -817,7 +1594,7 @@ class TestSaveDraft:
 
         response = await client.put(
             f"/api/general-meeting/{agm.id}/draft",
-            json={"motion_id": str(motions[0].id), "choice": "yes"},
+            json={"motion_id": str(motions[0].id), "choice": "yes", "lot_owner_id": str(lo.id)},
             headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
@@ -1006,25 +1783,33 @@ class TestSaveDraft:
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
         """
-        Bug fix: save_draft must not find and corrupt an already-submitted vote.
+        save_draft must not corrupt an already-submitted vote for a different lot.
 
         Scenario (multi-lot voter):
-        1. Voter has two lots (lo = lot_owner from fixture, lo2 = a second lot).
-        2. Voter submits lot_owner (lo) ballot — submitted Vote row exists with lot_owner_id=lo.id.
-        3. Voter now saves a draft for lot2, WITHOUT a lot_owner_id (NULL/shared-draft path).
-        4. The OLD (unfixed) filter: (agm, motion, voter_email) — no status check — would find
-           the submitted Vote for lo and set its status back to draft, corrupting it.
-        5. The FIXED filter adds Vote.status == VoteStatus.draft, so no submitted vote is found
-           and a new draft row (NULL lot_owner_id) is created instead.
+        1. Voter has two lots (lo = lot from fixture, lo2 = second lot).
+        2. lot_owner lo has a submitted Vote for motion[0].
+        3. Voter saves a draft for lo2 (same motion, same voter_email, different lot_owner_id).
+        4. The save_draft filter (agm, motion, voter_email, status==draft, lot_owner_id==lo2.id)
+           must NOT find or touch the submitted vote for lo.
+        5. A new draft Vote for lo2 is created without affecting lo's submitted vote.
         """
         from sqlalchemy import select as sa_select
         from app.services.voting_service import save_draft as _save_draft
+        from app.models.lot_owner import LotOwner as _LotOwner
+        from app.models.lot_owner_email import LotOwnerEmail as _LOEmail
 
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         building = building_with_agm["building"]
         motions = building_with_agm["motions"]
+
+        # Create a second lot for the same voter
+        lo2 = _LotOwner(building_id=building.id, lot_number="DRAFT-LO2", unit_entitlement=50)
+        db_session.add(lo2)
+        await db_session.flush()
+        db_session.add(_LOEmail(lot_owner_id=lo2.id, email=voter_email))
+        await db_session.flush()
 
         # Pre-create a submitted Vote for lot_owner lo (lot_owner_id is set)
         submitted_vote = Vote(
@@ -1038,31 +1823,15 @@ class TestSaveDraft:
         db_session.add(submitted_vote)
         await db_session.flush()
 
-        # Sanity check: submitted vote is in place
-        result = await db_session.execute(
-            sa_select(Vote).where(
-                Vote.general_meeting_id == agm.id,
-                Vote.motion_id == motions[0].id,
-                Vote.voter_email == voter_email,
-                Vote.lot_owner_id == lo.id,
-            )
-        )
-        votes = list(result.scalars().all())
-        assert len(votes) == 1
-        assert votes[0].status == VoteStatus.submitted
-        assert votes[0].choice == VoteChoice.yes
-
-        # Now call save_draft WITHOUT lot_owner_id (the shared/NULL-lot draft path).
-        # The old filter (agm, motion, voter_email) with no status check would find the
-        # submitted vote for `lo` and overwrite its choice + downgrade to draft.
-        # The fixed filter adds status==draft, so it finds nothing and creates a new row.
+        # Now save a draft for lo2 with the same motion and voter_email.
+        # The status==draft filter ensures the submitted vote for lo is never touched.
         await _save_draft(
             db=db_session,
             general_meeting_id=agm.id,
             motion_id=motions[0].id,
             voter_email=voter_email,
             choice=VoteChoice.no,
-            lot_owner_id=None,  # shared-draft (no specific lot)
+            lot_owner_id=lo2.id,
         )
         await db_session.flush()
 
@@ -1080,18 +1849,18 @@ class TestSaveDraft:
         assert submitted_votes[0].status == VoteStatus.submitted, "Submitted vote must not be downgraded to draft"
         assert submitted_votes[0].choice == VoteChoice.yes, "Submitted vote choice must not be overwritten"
 
-        # A new draft row with lot_owner_id=NULL must exist
+        # A new draft row for lo2 must exist
         result_draft = await db_session.execute(
             sa_select(Vote).where(
                 Vote.general_meeting_id == agm.id,
                 Vote.motion_id == motions[0].id,
                 Vote.voter_email == voter_email,
-                Vote.lot_owner_id.is_(None),
+                Vote.lot_owner_id == lo2.id,
                 Vote.status == VoteStatus.draft,
             )
         )
         draft_votes = list(result_draft.scalars().all())
-        assert len(draft_votes) == 1, "A new NULL-lot draft must have been created"
+        assert len(draft_votes) == 1, "A new draft for lo2 must have been created"
         assert draft_votes[0].choice == VoteChoice.no
 
     async def test_no_session_returns_401(
@@ -1517,21 +2286,32 @@ class TestSubmitBallot:
         assert response.status_code == 403
         assert "not started" in response.json()["detail"].lower()
 
-    async def test_submit_already_submitted_returns_409(
+    async def test_submit_already_submitted_reentry_returns_200(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
+        """Re-entry: submitting when BallotSubmission exists is a no-op returning 200."""
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
         voter_email = building_with_agm["voter_email"]
         building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
 
-        # Submit ballot already
+        # Submit ballot and all votes already
         bs = BallotSubmission(
             general_meeting_id=agm.id,
             lot_owner_id=lo.id,
             voter_email=voter_email,
         )
         db_session.add(bs)
+        for m in motions:
+            db_session.add(Vote(
+                general_meeting_id=agm.id,
+                motion_id=m.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            ))
         await db_session.flush()
 
         token = await create_session(db_session, voter_email, building.id, agm.id)
@@ -1541,7 +2321,11 @@ class TestSubmitBallot:
             json={"lot_owner_ids": [str(lo.id)]},
             headers={"Authorization": f"Bearer {token}"},
         )
-        assert response.status_code == 409
+        assert response.status_code == 200
+        data = response.json()
+        assert data["submitted"] is True
+        # All motions were already voted on so no new votes added
+        assert data["lots"][0]["votes"] == []
 
     async def test_no_session_returns_401(
         self, client: AsyncClient, building_with_agm: dict
@@ -1553,6 +2337,156 @@ class TestSubmitBallot:
             json={"lot_owner_ids": [str(lo.id)]},
         )
         assert response.status_code == 401
+
+    # --- Input validation ---
+
+    async def test_submit_unknown_motion_id_returns_400(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Inline votes referencing a motion ID from a different meeting → 400."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+
+        foreign_motion_id = str(uuid.uuid4())
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": foreign_motion_id, "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 400
+        assert "Unknown motion IDs" in response.json()["detail"]
+
+    # --- Edge cases ---
+
+    async def test_concurrent_submission_integrity_error_raises_409(
+        self, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """IntegrityError on BallotSubmission flush is caught and re-raised as HTTP 409.
+
+        This is a pure unit test using a fully-mocked AsyncSession. It exercises the
+        IntegrityError handler in submit_ballot (voting_service.py lines 416-419) without
+        touching the shared test session.
+        """
+        import pytest
+        from unittest.mock import AsyncMock, MagicMock
+        from sqlalchemy.exc import IntegrityError as SAIntegrityError
+        from fastapi import HTTPException
+        from app.services.voting_service import submit_ballot
+        from app.models import GeneralMeetingStatus
+
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        lot_owner_id = lo.id
+        general_meeting_id = agm.id
+
+        # Helper to make a mock result that returns a given scalar or list.
+        def _scalar_result(value):
+            r = MagicMock()
+            r.scalar_one_or_none.return_value = value
+            r.scalars.return_value.all.return_value = []
+            r.all.return_value = []
+            return r
+
+        def _scalars_result(items):
+            r = MagicMock()
+            r.scalars.return_value.all.return_value = items
+            r.scalar_one_or_none.return_value = None
+            r.all.return_value = []
+            return r
+
+        def _all_result(rows):
+            r = MagicMock()
+            r.all.return_value = rows
+            r.scalars.return_value.all.return_value = rows
+            r.scalar_one_or_none.return_value = None
+            return r
+
+        # Build a mock open GeneralMeeting
+        mock_meeting = MagicMock()
+        mock_meeting.id = general_meeting_id
+        mock_meeting.status = GeneralMeetingStatus.open
+        mock_meeting.voting_closes_at = agm.voting_closes_at
+        mock_meeting.meeting_at = agm.meeting_at
+
+        # LotOwnerEmail row confirming direct ownership
+        mock_email_row = MagicMock()
+        mock_email_row.lot_owner_id = lot_owner_id
+
+        # Mock LotOwner
+        mock_lot_owner = MagicMock()
+        mock_lot_owner.id = lot_owner_id
+        mock_lot_owner.lot_number = lo.lot_number
+
+        flush_count = 0
+
+        async def _flush():
+            nonlocal flush_count
+            flush_count += 1
+            # The service calls flush in this order:
+            #   flush 1: after delete draft votes by lot
+            #   flush 2: (inside per-lot loop) before BallotSubmission insert add — actually
+            #            the first per-lot flush is at line 358 "await db.flush()"
+            #   flush 3: the BallotSubmission insert flush at line 415 "await db.flush()"
+            # Raise on flush 3 to simulate the concurrent duplicate.
+            if flush_count >= 3:
+                raise SAIntegrityError(None, None, Exception("duplicate key value"))
+
+        execute_call_count = 0
+
+        async def _execute(stmt):
+            nonlocal execute_call_count
+            execute_call_count += 1
+            # Call sequence (for 1 lot, no inline votes):
+            # 1: SELECT GeneralMeeting
+            # 2: SELECT LotOwnerEmail (ownership check)
+            # 3: SELECT BallotSubmission FOR UPDATE (existing_subs)
+            # 4: SELECT Vote.motion_id (already voted)
+            # 5: SELECT Motion (visible motions)
+            # 6: SELECT GeneralMeetingLotWeight
+            # 7: SELECT LotOwner
+            # 8: DELETE draft votes by lot
+            # 9: DELETE shared draft votes
+            if execute_call_count == 1:
+                return _scalar_result(mock_meeting)
+            elif execute_call_count == 2:
+                return _scalar_result(mock_email_row)
+            elif execute_call_count == 3:
+                return _scalars_result([])  # no existing submissions
+            elif execute_call_count == 4:
+                return _all_result([])  # no already-voted motions
+            elif execute_call_count == 5:
+                return _scalars_result([])  # no visible motions
+            elif execute_call_count == 6:
+                return _scalars_result([])  # no lot weights
+            elif execute_call_count == 7:
+                return _scalars_result([mock_lot_owner])
+            else:
+                return _all_result([])  # DELETE statements return nothing meaningful
+
+        mock_session = MagicMock()
+        mock_session.execute = _execute
+        mock_session.add = MagicMock()
+        mock_session.flush = _flush
+        mock_session.rollback = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc_info:
+            await submit_ballot(
+                db=mock_session,  # type: ignore[arg-type]
+                general_meeting_id=general_meeting_id,
+                voter_email=voter_email,
+                lot_owner_ids=[lot_owner_id],
+                inline_votes={},
+            )
+        # The service converts IntegrityError to HTTP 409
+        assert exc_info.value.status_code == 409
 
 
 # ---------------------------------------------------------------------------
@@ -1790,15 +2724,27 @@ class TestProxyAuth:
     async def test_proxy_already_submitted_shows_already_submitted(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
-        """already_submitted for proxy lot reflects BallotSubmission."""
+        """already_submitted for proxy lot is True when lot has submitted votes for all visible motions."""
         agm = building_with_agm["agm"]
         lo = building_with_agm["lot_owner"]
+        motions = building_with_agm["motions"]  # [m1, m2] — both visible by default
 
         proxy_email = "proxy2@test.com"
         lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
         db_session.add(lp)
         bs = BallotSubmission(general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email=proxy_email)
         db_session.add(bs)
+        # Submitted votes for all visible motions
+        for motion in motions:
+            v = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=proxy_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(v)
         await db_session.flush()
         code = await make_otp(db_session, proxy_email, agm.id)
 

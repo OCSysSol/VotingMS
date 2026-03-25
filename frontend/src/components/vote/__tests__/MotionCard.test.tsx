@@ -10,6 +10,8 @@ const motion = {
   display_order: 1,
   motion_number: null,
   motion_type: "general" as const,
+  is_visible: true,
+  already_voted: false,
 };
 
 const motionNoDesc = {
@@ -19,6 +21,8 @@ const motionNoDesc = {
   display_order: 2,
   motion_number: null,
   motion_type: "general" as const,
+  is_visible: true,
+  already_voted: false,
 };
 
 const motionSpecial = {
@@ -28,6 +32,8 @@ const motionSpecial = {
   display_order: 3,
   motion_number: null,
   motion_type: "special" as const,
+  is_visible: true,
+  already_voted: false,
 };
 
 const motionWithNumber = {
@@ -194,6 +200,34 @@ describe("MotionCard", () => {
     );
     const card = screen.getByTestId("motion-card-mot-001");
     expect(card).not.toHaveClass("motion-card--highlight");
+  });
+
+  // --- 1-based motion number display ---
+
+  it("displays motion number as order_index + 1 (1-based)", () => {
+    render(
+      <MotionCard
+        motion={{ ...motion, order_index: 0 }}
+        choice={null}
+        onChoiceChange={() => {}}
+        disabled={false}
+        highlight={false}
+      />
+    );
+    expect(screen.getByText("Motion 1")).toBeInTheDocument();
+  });
+
+  it("displays correct 1-based number for order_index 4", () => {
+    render(
+      <MotionCard
+        motion={{ ...motion, order_index: 4 }}
+        choice={null}
+        onChoiceChange={() => {}}
+        disabled={false}
+        highlight={false}
+      />
+    );
+    expect(screen.getByText("Motion 5")).toBeInTheDocument();
   });
 
   // --- motion_type badge tests ---

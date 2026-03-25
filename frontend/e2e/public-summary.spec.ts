@@ -42,7 +42,7 @@ test.describe("Public AGM summary page", () => {
     });
 
     // Create or find the building
-    const buildingsRes = await api.get("/api/admin/buildings");
+    const buildingsRes = await api.get("/api/admin/buildings?limit=1000");
     const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
     let building = buildings.find((b) => b.name === BUILDING_NAME);
     if (!building) {
@@ -76,7 +76,7 @@ test.describe("Public AGM summary page", () => {
     }
 
     // Close any existing open/pending AGMs for this building, then create a fresh one
-    const agmsRes = await api.get("/api/admin/general-meetings");
+    const agmsRes = await api.get("/api/admin/general-meetings?limit=1000");
     const agms = (await agmsRes.json()) as {
       id: string;
       status: string;
@@ -149,8 +149,8 @@ test.describe("Public AGM summary page", () => {
     await expect(page.getByText("Do you approve the annual budget?")).toBeVisible();
     await expect(page.getByText("Do you approve the bylaw amendment?")).toBeVisible();
 
-    // Status is shown (open)
-    await expect(page.getByText(/open/i)).toBeVisible();
+    // Status is shown (open) — use exact match to avoid matching AGM/building names
+    await expect(page.getByText('Open', { exact: true })).toBeVisible();
   });
 
   test("invalid AGM ID shows not-found state", async ({ page }) => {

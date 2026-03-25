@@ -9,7 +9,7 @@ import asyncio
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -34,13 +34,22 @@ from app.schemas.admin import (
     LotOwnerImportResult,
     LotOwnerOut,
     LotOwnerUpdate,
+    MotionAddRequest,
+    MotionDetail,
+    MotionOut,
     MotionReorderOut,
     MotionReorderRequest,
+    MotionUpdateRequest,
+    MotionVisibilityOut,
+    MotionVisibilityRequest,
     ProxyImportResult,
     ResendReportOut,
     SetProxyRequest,
 )
+from app.schemas.config import FaviconUploadOut, LogoUploadOut, TenantConfigOut, TenantConfigUpdate
 from app.services import admin_service
+from app.services import config_service
+from app.services import blob_service
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 
@@ -58,6 +67,46 @@ _EXCEL_CONTENT_TYPES = {
 }
 
 _EXCEL_EXTENSIONS = {".xlsx", ".xls"}
+
+_IMAGE_CONTENT_TYPES = {
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+}
+
+_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"}
+
+_MAX_LOGO_BYTES = 5 * 1024 * 1024  # 5 MB
+
+
+def _detect_image_format(file: UploadFile) -> str:
+    """Return the MIME type for an image upload. Raise 415 if not a recognised image.
+
+    Extension takes precedence over content-type.
+    """
+    content_type = (file.content_type or "").lower().split(";")[0].strip()
+    filename = (file.filename or "").lower()
+    ext = os.path.splitext(filename)[1]
+
+    if ext in _IMAGE_EXTENSIONS:
+        # Map extension to a canonical MIME type
+        ext_to_mime = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".gif": "image/gif",
+            ".svg": "image/svg+xml",
+        }
+        return ext_to_mime[ext]
+    if content_type in _IMAGE_CONTENT_TYPES:
+        return content_type
+    raise HTTPException(
+        status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+        detail="File must be an image (PNG, JPEG, WebP, GIF, or SVG)",
+    )
 
 
 def _detect_file_format(file: UploadFile) -> str:
@@ -123,9 +172,12 @@ async def create_building(
 
 @router.get("/buildings", response_model=list[BuildingOut])
 async def list_buildings(
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    name: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[BuildingOut]:
-    buildings = await admin_service.list_buildings(db)
+    buildings = await admin_service.list_buildings(db, limit=limit, offset=offset, name=name)
     return [BuildingOut.model_validate(b) for b in buildings]
 
 
@@ -141,6 +193,15 @@ async def archive_building(
     return BuildingArchiveOut.model_validate(building)
 
 
+@router.get("/buildings/{building_id}", response_model=BuildingOut)
+async def get_building(
+    building_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> BuildingOut:
+    building = await admin_service.get_building_or_404(building_id, db)
+    return BuildingOut.model_validate(building)
+
+
 @router.patch("/buildings/{building_id}", response_model=BuildingOut)
 async def update_building(
     building_id: uuid.UUID,
@@ -149,6 +210,14 @@ async def update_building(
 ) -> BuildingOut:
     building = await admin_service.update_building(building_id, data, db)
     return BuildingOut.model_validate(building)
+
+
+@router.delete("/buildings/{building_id}", status_code=204)
+async def delete_building(
+    building_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await admin_service.delete_building(building_id, db)
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +231,11 @@ async def update_building(
 )
 async def list_lot_owners(
     building_id: uuid.UUID,
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
-    owners = await admin_service.list_lot_owners(building_id, db)
+    owners = await admin_service.list_lot_owners(building_id, db, limit=limit, offset=offset)
     return [LotOwnerOut(**o) for o in owners]
 
 
@@ -321,6 +392,84 @@ async def remove_lot_owner_proxy(
 
 
 # ---------------------------------------------------------------------------
+# Motions
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/motions/{motion_id}/visibility", response_model=MotionDetail)
+async def toggle_motion_visibility_endpoint(
+    motion_id: uuid.UUID,
+    data: MotionVisibilityRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MotionDetail:
+    """Toggle the visibility of a motion. Requires admin auth.
+
+    Returns 200 with updated motion detail on success.
+    Returns 404 if motion not found.
+    Returns 409 if meeting is closed or if hiding a motion that has votes.
+    """
+    result = await admin_service.toggle_motion_visibility(motion_id, data.is_visible, db)
+    return MotionDetail(**result)
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/motions",
+    response_model=MotionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_motion_to_meeting_endpoint(
+    general_meeting_id: uuid.UUID,
+    data: MotionAddRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MotionOut:
+    """Add a new motion to an existing General Meeting.
+
+    Returns 201 with the created motion.
+    Returns 404 if the meeting does not exist.
+    Returns 409 if the meeting is closed.
+    """
+    result = await admin_service.add_motion_to_meeting(general_meeting_id, data, db)
+    return MotionOut(**result)
+
+
+@router.patch(
+    "/motions/{motion_id}",
+    response_model=MotionVisibilityOut,
+    status_code=status.HTTP_200_OK,
+)
+async def update_motion_endpoint(
+    motion_id: uuid.UUID,
+    data: MotionUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MotionVisibilityOut:
+    """Edit title, description, or motion_type of a hidden motion.
+
+    Returns 200 with the updated motion.
+    Returns 404 if the motion does not exist.
+    Returns 409 if the motion is visible or the meeting is closed.
+    """
+    result = await admin_service.update_motion(motion_id, data, db)
+    return MotionVisibilityOut(**result)
+
+
+@router.delete(
+    "/motions/{motion_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_motion_endpoint(
+    motion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Delete a hidden motion permanently.
+
+    Returns 204 on success.
+    Returns 404 if the motion does not exist.
+    Returns 409 if the motion is visible or the meeting is closed.
+    """
+    await admin_service.delete_motion(motion_id, db)
+
+
+# ---------------------------------------------------------------------------
 # General Meetings
 # ---------------------------------------------------------------------------
 
@@ -340,9 +489,15 @@ async def create_general_meeting(
 
 @router.get("/general-meetings", response_model=list[GeneralMeetingListItem])
 async def list_general_meetings(
+    limit: int = Query(default=100, le=1000),
+    offset: int = Query(default=0, ge=0),
+    name: str | None = Query(default=None),
+    building_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[GeneralMeetingListItem]:
-    items = await admin_service.list_general_meetings(db)
+    items = await admin_service.list_general_meetings(
+        db, limit=limit, offset=offset, name=name, building_id=building_id
+    )
     return [GeneralMeetingListItem(**item) for item in items]
 
 
@@ -446,3 +601,83 @@ async def reset_general_meeting_ballots(
     """
     result = await admin_service.reset_general_meeting_ballots(general_meeting_id, db)
     return GeneralMeetingBallotResetOut(**result)
+
+
+# ---------------------------------------------------------------------------
+# Tenant configuration
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/config/logo",
+    response_model=LogoUploadOut,
+    status_code=status.HTTP_200_OK,
+)
+async def upload_logo(
+    file: UploadFile = File(...),
+) -> LogoUploadOut:
+    """Upload a logo image to Vercel Blob and return its public URL.
+
+    The caller is responsible for then saving the URL via PUT /api/admin/config.
+
+    Returns 400 if the file exceeds 5 MB.
+    Returns 415 if the file is not a recognised image type.
+    Returns 500 if BLOB_READ_WRITE_TOKEN is not configured.
+    Returns 502 if the Vercel Blob upload fails.
+    """
+    mime_type = _detect_image_format(file)
+    content = await file.read()
+    if len(content) > _MAX_LOGO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File exceeds maximum size of 5 MB",
+        )
+    filename = file.filename or "logo"
+    url = await blob_service.upload_to_blob(filename, content, mime_type)
+    return LogoUploadOut(url=url)
+
+
+
+@router.post(
+    "/config/favicon",
+    response_model=FaviconUploadOut,
+    status_code=status.HTTP_200_OK,
+)
+async def upload_favicon(
+    file: UploadFile = File(...),
+) -> FaviconUploadOut:
+    """Upload a favicon image to Vercel Blob and return its public URL.
+
+    The caller is responsible for then saving the URL via PUT /api/admin/config.
+
+    Returns 400 if the file exceeds 5 MB.
+    Returns 415 if the file is not a recognised image type.
+    Returns 500 if BLOB_READ_WRITE_TOKEN is not configured.
+    Returns 502 if the Vercel Blob upload fails.
+    """
+    mime_type = _detect_image_format(file)
+    content = await file.read()
+    if len(content) > _MAX_LOGO_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File exceeds maximum size of 5 MB",
+        )
+    filename = file.filename or "favicon"
+    url = await blob_service.upload_to_blob(filename, content, mime_type)
+    return FaviconUploadOut(url=url)
+
+@router.get("/config", response_model=TenantConfigOut)
+async def get_admin_config(db: AsyncSession = Depends(get_db)) -> TenantConfigOut:
+    """Return current branding config — admin only."""
+    config = await config_service.get_config(db)
+    return TenantConfigOut.model_validate(config)
+
+
+@router.put("/config", response_model=TenantConfigOut)
+async def update_admin_config(
+    data: TenantConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> TenantConfigOut:
+    """Update branding config — admin only. Returns 422 on validation failure."""
+    config = await config_service.update_config(data, db)
+    return TenantConfigOut.model_validate(config)

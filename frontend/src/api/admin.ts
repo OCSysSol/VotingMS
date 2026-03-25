@@ -33,6 +33,7 @@ export interface MotionOut {
   display_order: number;
   motion_number: string | null;
   motion_type: MotionType;
+  is_visible: boolean;
 }
 
 export interface GeneralMeetingOut {
@@ -90,6 +91,7 @@ export interface MotionDetail {
   display_order: number;
   motion_number: string | null;
   motion_type: MotionType;
+  is_visible: boolean;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
@@ -237,6 +239,10 @@ export interface AdminMeOut {
 
 export async function listBuildings(): Promise<Building[]> {
   return apiFetch<Building[]>("/api/admin/buildings");
+}
+
+export async function getBuilding(buildingId: string): Promise<Building> {
+  return apiFetch<Building>(`/api/admin/buildings/${buildingId}`);
 }
 
 export async function createBuilding(data: BuildingCreateRequest): Promise<Building> {
@@ -460,4 +466,84 @@ export async function reorderMotions(
       body: JSON.stringify({ motions }),
     }
   );
+}
+
+export async function deleteBuilding(buildingId: string): Promise<void> {
+  const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  const res = await fetch(`${BASE_URL}/api/admin/buildings/${buildingId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+}
+
+export async function toggleMotionVisibility(
+  motionId: string,
+  isVisible: boolean,
+): Promise<MotionDetail> {
+  return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/visibility`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ is_visible: isVisible }),
+  });
+}
+
+export interface MotionVisibilityOut {
+  id: string;
+  title: string;
+  description: string | null;
+  order_index: number;
+  motion_type: MotionType;
+  is_visible: boolean;
+}
+
+export interface AddMotionRequest {
+  title: string;
+  description: string | null;
+  motion_type: MotionType;
+}
+
+export interface UpdateMotionRequest {
+  title?: string;
+  description?: string | null;
+  motion_type?: MotionType;
+}
+
+export async function addMotionToMeeting(
+  meetingId: string,
+  data: AddMotionRequest,
+): Promise<MotionOut> {
+  return apiFetch<MotionOut>(`/api/admin/general-meetings/${meetingId}/motions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateMotion(
+  motionId: string,
+  data: UpdateMotionRequest,
+): Promise<MotionVisibilityOut> {
+  return apiFetch<MotionVisibilityOut>(`/api/admin/motions/${motionId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function deleteMotion(motionId: string): Promise<void> {
+  const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+  const res = await fetch(`${BASE_URL}/api/admin/motions/${motionId}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
 }
