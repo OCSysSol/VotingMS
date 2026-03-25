@@ -1039,6 +1039,7 @@ async def list_general_meetings(
     limit: int = 100,
     offset: int = 0,
     name: str | None = None,
+    building_id: uuid.UUID | None = None,
 ) -> list[dict]:
     q = (
         select(GeneralMeeting, Building.name.label("building_name"))
@@ -1047,6 +1048,8 @@ async def list_general_meetings(
     )
     if name is not None:
         q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
+    if building_id is not None:
+        q = q.where(GeneralMeeting.building_id == building_id)
     result = await db.execute(q.offset(offset).limit(limit))
     rows = result.all()
     items = []

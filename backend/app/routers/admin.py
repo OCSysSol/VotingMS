@@ -490,9 +490,12 @@ async def list_general_meetings(
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
     name: str | None = Query(default=None),
+    building_id: uuid.UUID | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[GeneralMeetingListItem]:
-    items = await admin_service.list_general_meetings(db, limit=limit, offset=offset, name=name)
+    items = await admin_service.list_general_meetings(
+        db, limit=limit, offset=offset, name=name, building_id=building_id
+    )
     return [GeneralMeetingListItem(**item) for item in items]
 
 

@@ -1867,6 +1867,111 @@ class TestListAGMs:
         data = response.json()
         assert len(data) <= 2
 
+    # --- building_id filter ---
+
+    async def test_agm_building_id_filter_returns_only_that_building(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b1 = Building(name="AGM BldFilter Building1", manager_email="bf1@test.com")
+        b2 = Building(name="AGM BldFilter Building2", manager_email="bf2@test.com")
+        db_session.add_all([b1, b2])
+        await db_session.flush()
+        agm1 = GeneralMeeting(
+            building_id=b1.id,
+            title="BuildingFilter AGM B1",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        agm2 = GeneralMeeting(
+            building_id=b2.id,
+            title="BuildingFilter AGM B2",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add_all([agm1, agm2])
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings?building_id={b1.id}")
+        assert response.status_code == 200
+        data = response.json()
+        ids = [item["id"] for item in data]
+        assert str(agm1.id) in ids
+        assert str(agm2.id) not in ids
+
+    async def test_agm_building_id_filter_no_match_returns_empty(
+        self, client: AsyncClient
+    ):
+        import uuid as _uuid
+        random_id = str(_uuid.uuid4())
+        response = await client.get(f"/api/admin/general-meetings?building_id={random_id}")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_agm_building_id_filter_combined_with_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="AGM BldName Filter Building", manager_email="bfn@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm_match = GeneralMeeting(
+            building_id=b.id,
+            title="BldNameCombo AGM Match",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        agm_no_match = GeneralMeeting(
+            building_id=b.id,
+            title="Other AGM Title",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add_all([agm_match, agm_no_match])
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/general-meetings?building_id={b.id}&name=BldNameCombo"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        ids = [item["id"] for item in data]
+        assert str(agm_match.id) in ids
+        assert str(agm_no_match.id) not in ids
+
+    async def test_agm_building_id_filter_absent_returns_all_buildings(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b1 = Building(name="AGM NoBldFilter B1", manager_email="nbf1@test.com")
+        b2 = Building(name="AGM NoBldFilter B2", manager_email="nbf2@test.com")
+        db_session.add_all([b1, b2])
+        await db_session.flush()
+        agm1 = GeneralMeeting(
+            building_id=b1.id,
+            title="NoBldFilter AGM B1",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        agm2 = GeneralMeeting(
+            building_id=b2.id,
+            title="NoBldFilter AGM B2",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add_all([agm1, agm2])
+        await db_session.commit()
+
+        response = await client.get("/api/admin/general-meetings")
+        assert response.status_code == 200
+        data = response.json()
+        ids = [item["id"] for item in data]
+        assert str(agm1.id) in ids
+        assert str(agm2.id) in ids
+
 
 # ---------------------------------------------------------------------------
 # GET /api/admin/general-meetings/{agm_id}

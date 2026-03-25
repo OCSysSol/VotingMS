@@ -189,9 +189,12 @@ export async function createOpenMeeting(
   title: string,
   motions: MotionSeed[]
 ): Promise<string> {
-  // Close any existing open/pending meetings for this building
+  // Close any existing open/pending meetings for this building.
+  // Query by building_id (not name) so we catch meetings with different titles
+  // that would otherwise block the new meeting from being created (the backend
+  // enforces one open/pending meeting per building).
   const agmsRes = await api.get(
-    `/api/admin/general-meetings?name=${encodeURIComponent(title)}`
+    `/api/admin/general-meetings?building_id=${encodeURIComponent(buildingId)}&limit=100`
   );
   const agms = (await agmsRes.json()) as {
     id: string;
@@ -199,7 +202,7 @@ export async function createOpenMeeting(
     building_id: string;
   }[];
   const openAgms = agms.filter(
-    (a) => a.building_id === buildingId && (a.status === "open" || a.status === "pending")
+    (a) => a.status === "open" || a.status === "pending"
   );
   for (const agm of openAgms) {
     await api.post(`/api/admin/general-meetings/${agm.id}/close`);
@@ -248,9 +251,12 @@ export async function createPendingMeeting(
   title: string,
   motions: MotionSeed[]
 ): Promise<string> {
-  // Close any existing open/pending meetings for this building
+  // Close any existing open/pending meetings for this building.
+  // Query by building_id (not name) so we catch meetings with different titles
+  // that would otherwise block the new meeting from being created (the backend
+  // enforces one open/pending meeting per building).
   const agmsRes = await api.get(
-    `/api/admin/general-meetings?name=${encodeURIComponent(title)}`
+    `/api/admin/general-meetings?building_id=${encodeURIComponent(buildingId)}&limit=100`
   );
   const agms = (await agmsRes.json()) as {
     id: string;
@@ -258,7 +264,7 @@ export async function createPendingMeeting(
     building_id: string;
   }[];
   const openAgms = agms.filter(
-    (a) => a.building_id === buildingId && (a.status === "open" || a.status === "pending")
+    (a) => a.status === "open" || a.status === "pending"
   );
   for (const agm of openAgms) {
     await api.post(`/api/admin/general-meetings/${agm.id}/close`);
