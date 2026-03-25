@@ -50,8 +50,8 @@ export default function GeneralMeetingSummaryPage() {
       ) : (
         <ol>
           {meeting.motions.map((motion) => (
-            <li key={motion.order_index}>
-              <strong>{motion.order_index + 1}. {motion.title}</strong>
+            <li key={motion.display_order}>
+              <strong>{motion.motion_number?.trim() || String(motion.display_order)}. {motion.title}</strong>
               {motion.description && <p>{motion.description}</p>}
             </li>
           ))}

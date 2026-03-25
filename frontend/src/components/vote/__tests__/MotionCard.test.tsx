@@ -7,7 +7,8 @@ const motion = {
   id: "mot-001",
   title: "Approve budget",
   description: "The annual budget",
-  order_index: 0,
+  display_order: 1,
+  motion_number: null,
   motion_type: "general" as const,
 };
 
@@ -15,7 +16,8 @@ const motionNoDesc = {
   id: "mot-002",
   title: "Motion without description",
   description: null,
-  order_index: 1,
+  display_order: 2,
+  motion_number: null,
   motion_type: "general" as const,
 };
 
@@ -23,8 +25,18 @@ const motionSpecial = {
   id: "mot-003",
   title: "Special resolution",
   description: "A special motion",
-  order_index: 2,
+  display_order: 3,
+  motion_number: null,
   motion_type: "special" as const,
+};
+
+const motionWithNumber = {
+  id: "mot-004",
+  title: "Special Resolution Budget",
+  description: null,
+  display_order: 4,
+  motion_number: "SR-1",
+  motion_type: "general" as const,
 };
 
 describe("MotionCard", () => {
@@ -32,6 +44,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -46,6 +59,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motionNoDesc}
+        position={2}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -59,6 +73,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -74,6 +89,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice="yes"
         onChoiceChange={() => {}}
         disabled={false}
@@ -89,6 +105,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={onChoiceChange}
         disabled={false}
@@ -105,6 +122,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice="yes"
         onChoiceChange={onChoiceChange}
         disabled={false}
@@ -121,6 +139,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={onChoiceChange}
         disabled={true}
@@ -135,6 +154,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice="yes"
         onChoiceChange={() => {}}
         disabled={false}
@@ -150,6 +170,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -164,6 +185,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -180,6 +202,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -196,6 +219,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motionSpecial}
+        position={3}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -214,6 +238,7 @@ describe("MotionCard", () => {
     render(
       <MotionCard
         motion={motion}
+        position={1}
         choice={null}
         onChoiceChange={() => {}}
         disabled={false}
@@ -224,5 +249,50 @@ describe("MotionCard", () => {
     buttons.forEach((btn) => {
       expect(btn).not.toHaveAttribute("aria-disabled", "true");
     });
+  });
+
+  // --- motion_number label tests ---
+
+  it("displays motion_number when it is set", () => {
+    render(
+      <MotionCard
+        motion={motionWithNumber}
+        position={4}
+        choice={null}
+        onChoiceChange={() => {}}
+        disabled={false}
+        highlight={false}
+      />
+    );
+    expect(screen.getByText("SR-1")).toBeInTheDocument();
+  });
+
+  it("falls back to 'Motion {position}' label when motion_number is null", () => {
+    render(
+      <MotionCard
+        motion={motion}
+        position={1}
+        choice={null}
+        onChoiceChange={() => {}}
+        disabled={false}
+        highlight={false}
+      />
+    );
+    expect(screen.getByText("Motion 1")).toBeInTheDocument();
+  });
+
+  it("falls back to 'Motion {position}' label when motion_number is empty string after trim", () => {
+    const motionEmptyNumber = { ...motion, motion_number: "   " };
+    render(
+      <MotionCard
+        motion={motionEmptyNumber}
+        position={5}
+        choice={null}
+        onChoiceChange={() => {}}
+        disabled={false}
+        highlight={false}
+      />
+    );
+    expect(screen.getByText("Motion 5")).toBeInTheDocument();
   });
 });

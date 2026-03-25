@@ -95,7 +95,7 @@ async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int
         general_meeting_id=agm.id,
         title=f"Motion {order_index}",
         description=description,
-        order_index=order_index,
+        display_order=order_index,
     )
     db.add(motion)
     await db.flush()
@@ -944,7 +944,7 @@ class TestCloseAgmEmailIntegration:
         await db_session.flush()
 
         motion = Motion(
-            general_meeting_id=agm.id, title="M1", description=None, order_index=0
+            general_meeting_id=agm.id, title="M1", description=None, display_order=0
         )
         db_session.add(motion)
         await db_session.commit()

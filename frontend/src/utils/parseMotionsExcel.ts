@@ -156,6 +156,7 @@ export async function parseMotionsExcel(file: File): Promise<ParseResult> {
   const motions: MotionFormEntry[] = motionEntries.map((e) => ({
     title: e.title,
     description: e.description,
+    motion_number: "",
     motion_type: e.motion_type,
   }));
 

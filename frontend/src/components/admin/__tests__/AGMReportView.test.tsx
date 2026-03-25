@@ -8,7 +8,8 @@ const motions: MotionDetail[] = [
     id: "m1",
     title: "Motion 1",
     description: "First motion description",
-    order_index: 0,
+    display_order: 1,
+    motion_number: null,
     motion_type: "general" as const,
     tally: {
       yes: { voter_count: 2, entitlement_sum: 200 },
@@ -35,7 +36,8 @@ const motions: MotionDetail[] = [
     id: "m2",
     title: "Motion 2",
     description: null,
-    order_index: 1,
+    display_order: 2,
+    motion_number: null,
     motion_type: "special" as const,
     tally: {
       yes: { voter_count: 1, entitlement_sum: 50 },

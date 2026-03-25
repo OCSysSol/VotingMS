@@ -6,6 +6,7 @@ const CHOICES: VoteChoice[] = ["yes", "no", "abstained"];
 
 interface MotionCardProps {
   motion: MotionOut;
+  position: number;
   choice: VoteChoice | null;
   onChoiceChange: (motionId: string, choice: VoteChoice | null) => void;
   disabled: boolean;
@@ -14,6 +15,7 @@ interface MotionCardProps {
 
 export function MotionCard({
   motion,
+  position,
   choice,
   onChoiceChange,
   disabled,
@@ -35,7 +37,7 @@ export function MotionCard({
       className={`motion-card${highlight ? " motion-card--highlight" : ""}`}
     >
       <div className="motion-card__top-row">
-        <p className="motion-card__number">Motion {motion.order_index}</p>
+        <p className="motion-card__number">{motion.motion_number?.trim() || `Motion ${position}`}</p>
         <span
           className={`motion-type-badge${isSpecial ? " motion-type-badge--special" : " motion-type-badge--general"}`}
           aria-label={`Motion type: ${isSpecial ? "Special" : "General"}`}

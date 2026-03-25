@@ -67,7 +67,7 @@ async def list_motions(
     result = await db.execute(
         select(Motion)
         .where(Motion.general_meeting_id == general_meeting_id)
-        .order_by(Motion.order_index)
+        .order_by(Motion.display_order)
     )
     motions = result.scalars().all()
     return [
@@ -75,7 +75,8 @@ async def list_motions(
             id=m.id,
             title=m.title,
             description=m.description,
-            order_index=m.order_index,
+            display_order=m.display_order,
+            motion_number=m.motion_number,
             motion_type=m.motion_type,
         )
         for m in motions

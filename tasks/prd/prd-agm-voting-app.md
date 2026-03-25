@@ -113,15 +113,59 @@ A web application for body corporates to run voting during Annual General Meetin
 
 **Acceptance Criteria:**
 
-- [ ] Host can create an AGM (from the admin portal) by providing: building selection, meeting title, meeting date/time, scheduled voting close date/time, and one or more motions (each with a title and description)
+- [ ] Host can create an AGM (from the admin portal) by providing: building selection, meeting title, meeting date/time, scheduled voting close date/time, and one or more motions (each with a title, optional description, and optional motion number)
 - [ ] Scheduled voting close date/time must be after the meeting date/time; validation error shown if not
-- [ ] Each motion is stored with an ordered index
+- [ ] Each motion is stored with a display order (1-based integer) and an optional motion number string
 - [ ] AGM is created in "open" status immediately — there is no draft state
 - [ ] On creation, the system snapshots the unit entitlement of every lot in the building into an immutable `agm_lot_weights` record (see FR-14); this snapshot is used for all tally calculations for this AGM regardless of future lot owner data changes
 - [ ] AGM has a shareable URL that the host can copy and send to lot owners
 - [ ] Once created, the AGM and its motions are immutable — no edits are permitted regardless of status (see FR-11)
 - [ ] Only one open AGM may exist per building at a time; attempting to create a second is rejected with a clear error
 - [ ] Typecheck/lint passes
+
+---
+
+### US-MN-01: Custom motion number
+
+**Description:** As a meeting host, I want to assign a custom display label (motion number) to each motion so that the voting page and reports show the official motion numbering from the meeting agenda (e.g. "5", "5a", "5b", "Special Resolution 1") rather than a sequential counter.
+
+**Acceptance Criteria:**
+
+- [ ] The AGM creation form includes an optional "Motion number" text field for each motion; the field accepts any non-empty string up to 100 characters (e.g. "5", "5a", "Special Resolution 1")
+- [ ] Leaving the motion number field blank is valid; blank values are stored as `NULL` in the database
+- [ ] Whitespace-only input (e.g. spaces only) is treated as blank and stored as `NULL`
+- [ ] On the voter-facing voting page, each motion card displays the `motion_number` as its label if set; if `motion_number` is `NULL` or blank, the card shows the positional label "Motion {N}" (1-based position in the displayed list)
+- [ ] On the public meeting summary page, each motion is listed with its `motion_number` as the label if set; otherwise the positional label is used
+- [ ] In the admin AGM detail page motion table, a "Motion #" column shows the custom motion number (blank if not set)
+- [ ] The AGM results report (admin) uses `motion_number` as the motion label if set; otherwise the positional label
+- [ ] Motion numbers are not required to be unique per AGM — duplicate labels are allowed (e.g. two sub-motions both labelled "5a")
+- [ ] Motion number has no effect on display order; changing a motion's number does not change its position in the list
+- [ ] `motion_number` is included in all motion-related API responses: `GET /api/general-meeting/{id}/motions`, `GET /api/general-meeting/{id}/my-ballot`, `GET /api/general-meeting/{id}/summary`, `GET /api/admin/general-meetings/{id}`
+- [ ] All tests pass at 100% coverage
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
+
+---
+
+### US-MN-02: Admin motion reordering
+
+**Description:** As a meeting host, I want to change the display order of motions so that voters see them in the intended agenda sequence, with drag-and-drop as the primary interaction and keyboard-accessible move buttons as fallback.
+
+**Acceptance Criteria:**
+
+- [ ] On the admin AGM detail page (open or pending meetings only), each row in the motion table has a drag handle that allows the admin to drag and drop it to a new position
+- [ ] On the same page, each motion row has four order-control buttons: "Move to top", "Move up", "Move down", "Move to bottom"; "Move to top" and "Move up" are disabled for the first motion; "Move down" and "Move to bottom" are disabled for the last motion
+- [ ] Reordering takes effect immediately in the UI (optimistic update); the new order is persisted via `PUT /api/admin/general-meetings/{id}/motions/reorder` with the complete ordered list of motion IDs
+- [ ] If the reorder API call fails, the UI reverts to the pre-drag order and shows an error message
+- [ ] Reordering is not available when the meeting is closed — drag handles and move buttons are absent on the closed meeting detail page
+- [ ] After a reorder, the voter-facing voting page shows motions in the new order (sorted by `display_order`)
+- [ ] After a reorder, the public summary page shows motions in the new order
+- [ ] Changing display order does NOT change any motion's `motion_number` — the labels are preserved exactly as set
+- [ ] A meeting with a single motion has no drag handle and no move buttons (nothing to reorder)
+- [ ] `PUT /api/admin/general-meetings/{id}/motions/reorder` returns 409 if the meeting is closed, 422 if the submitted list is incomplete or has duplicate positions, 404 if the meeting does not exist
+- [ ] All tests pass at 100% coverage
+- [ ] Typecheck/lint passes
+- [ ] Verify in browser using dev-browser skill
 
 ---
 
@@ -417,6 +461,8 @@ A web application for body corporates to run voting during Annual General Meetin
 - FR-13: Motion selections are held entirely in client-side React state — no draft auto-save to the backend occurs. Selections are transmitted to the backend only when the lot owner clicks Submit and confirms the submission dialog. Voters who never submit are recorded as absent when the AGM is closed. (The backend `PUT /api/general-meeting/{id}/draft` endpoint is retained for backward compatibility but the frontend no longer calls it.) Vote choices are passed **inline** in the `POST /api/general-meeting/{id}/submit` request body as a `votes` list of `{motion_id, choice}` objects. The backend does not read draft Vote rows to determine submitted choices; it uses only the inline votes provided. Any draft Vote rows for the submitting lots are deleted before the submitted Vote rows are inserted, preventing unique-constraint conflicts.
 - FR-14: At AGM creation, the system records an immutable weight snapshot (`agm_lot_weights`) containing the `unit_entitlement` of every lot owner in the building at that moment. All tally calculations and the results report use this snapshot exclusively. Subsequent changes to lot owner data (CSV/Excel import, manual edit, PropertyIQ sync) do not alter existing snapshots. The lot owner import uses upsert semantics (matched by `lot_number`) rather than delete-all-then-insert, ensuring that database IDs — and therefore the foreign-key references from `agm_lot_weights` — are preserved for unchanged lots.
 - FR-15: The server exposes the current server UTC time via an API endpoint. The voting page fetches this on load, computes the offset from client time, and uses the corrected time for the countdown timer and 5-minute warning to eliminate client clock skew.
+- FR-16: Each motion has an optional `motion_number` (VARCHAR, nullable). This is a free-text display label (e.g. "5", "5a", "Special Resolution 1") shown to voters instead of a sequential counter. `motion_number` is stored as set by the admin and has no effect on display order. It is not required to be unique per AGM. A NULL or blank value causes the voter-facing UI to fall back to a positional label ("Motion 1", "Motion 2", ...) based on the motion's `display_order` position.
+- FR-17: Motions have a `display_order` (INTEGER, 1-based, unique per meeting) that determines the sequence in which they are rendered on the voting page, public summary, and admin detail pages. The admin can reorder motions via `PUT /api/admin/general-meetings/{id}/motions/reorder` which accepts the complete ordered list of motion IDs and atomically renormalises `display_order` values to 1, 2, 3, ... Reordering is only permitted on open or pending meetings. Changing `display_order` never modifies `motion_number`, and changing `motion_number` never modifies `display_order`.
 
 ---
 

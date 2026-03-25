@@ -106,7 +106,8 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
       id: "m1",
       title: "Motion 1",
       description: "Description 1",
-      order_index: 0,
+      display_order: 1,
+      motion_number: null,
       motion_type: "general" as const,
       tally: {
         yes: { voter_count: 2, entitlement_sum: 200 },
@@ -168,7 +169,8 @@ export const ADMIN_CREATED_MEETING: GeneralMeetingOut = {
       id: "m-new",
       title: "First Motion",
       description: null,
-      order_index: 0,
+      display_order: 1,
+      motion_number: null,
       motion_type: "general" as const,
     },
   ],
@@ -427,8 +429,8 @@ export const agmSummaryFixture: GeneralMeetingSummaryData = {
   voting_closes_at: "2024-06-01T18:00:00Z",
   building_name: "Sunset Towers",
   motions: [
-    { order_index: 0, title: "Motion 1", description: "Approve the budget" },
-    { order_index: 1, title: "Motion 2", description: null },
+    { display_order: 1, motion_number: null, title: "Motion 1", description: "Approve the budget" },
+    { display_order: 2, motion_number: null, title: "Motion 2", description: null },
   ],
 };
 
@@ -472,13 +474,17 @@ export const motionFixtures = [
     id: MOTION_ID_1,
     title: "Motion 1",
     description: "Approve the budget",
-    order_index: 0,
+    display_order: 1,
+    motion_number: null,
+    motion_type: "general" as const,
   },
   {
     id: MOTION_ID_2,
     title: "Motion 2",
     description: null,
-    order_index: 1,
+    display_order: 2,
+    motion_number: null,
+    motion_type: "general" as const,
   },
 ];
 
@@ -495,14 +501,16 @@ export const myBallotFixture = {
         {
           motion_id: MOTION_ID_1,
           motion_title: "Motion 1",
-          order_index: 0,
+          display_order: 1,
+          motion_number: null,
           choice: "yes" as const,
           eligible: true,
         },
         {
           motion_id: MOTION_ID_2,
           motion_title: "Motion 2",
-          order_index: 1,
+          display_order: 2,
+          motion_number: null,
           choice: "no" as const,
           eligible: true,
         },

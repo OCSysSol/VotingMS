@@ -226,7 +226,7 @@ async def submit_ballot(
 
     # Get all motions for this General Meeting
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.display_order)
     )
     motions = list(motions_result.scalars().all())
 
@@ -358,7 +358,7 @@ async def submit_ballot(
             )
 
         # Re-sort vote_items to match motion order
-        motion_order = {m.id: m.order_index for m in motions}
+        motion_order = {m.id: m.display_order for m in motions}
         vote_items.sort(key=lambda v: motion_order.get(v.motion_id, 0))
 
         # Insert BallotSubmission (set proxy_email for audit trail)
@@ -472,7 +472,7 @@ async def get_my_ballot(
 
     # Get all motions
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.display_order)
     )
     motions = list(motions_result.scalars().all())
 
@@ -486,7 +486,7 @@ async def get_my_ballot(
             Vote.lot_owner_id.in_(target_lot_ids),
             Vote.status == VoteStatus.submitted,
         )
-        .order_by(Motion.order_index)
+        .order_by(Motion.display_order)
     )
     rows = votes_result.all()
 
@@ -526,7 +526,8 @@ async def get_my_ballot(
                 lot_votes.append(BallotVoteItem(
                     motion_id=motion.id,
                     motion_title=motion.title,
-                    order_index=motion.order_index,
+                    display_order=motion.display_order,
+                    motion_number=motion.motion_number,
                     choice=not_eligible_choice,
                     eligible=False,
                 ))
@@ -536,7 +537,8 @@ async def get_my_ballot(
                         lot_votes.append(BallotVoteItem(
                             motion_id=m.id,
                             motion_title=m.title,
-                            order_index=m.order_index,
+                            display_order=m.display_order,
+                            motion_number=m.motion_number,
                             choice=vote.choice,
                             eligible=True,
                         ))
@@ -560,7 +562,8 @@ async def get_my_ballot(
                     lot_votes.append(BallotVoteItem(
                         motion_id=motion.id,
                         motion_title=motion.title,
-                        order_index=motion.order_index,
+                        display_order=motion.display_order,
+                        motion_number=motion.motion_number,
                         choice=fallback_vote.choice,
                         eligible=True,
                     ))
@@ -568,7 +571,8 @@ async def get_my_ballot(
                     lot_votes.append(BallotVoteItem(
                         motion_id=motion.id,
                         motion_title=motion.title,
-                        order_index=motion.order_index,
+                        display_order=motion.display_order,
+                        motion_number=motion.motion_number,
                         choice=VoteChoice.abstained,
                         eligible=True,
                     ))

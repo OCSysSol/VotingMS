@@ -952,13 +952,29 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
     db.add(general_meeting)
     await db.flush()  # get general_meeting.id
 
-    # Create motions
-    for motion_data in data.motions:
+    # Create motions — sort by supplied display_order, then normalise to 1-based integers
+    sorted_motions = sorted(data.motions, key=lambda m: m.display_order)
+    # Validate no duplicate non-null motion_numbers within this meeting
+    seen_motion_numbers: set[str] = set()
+    for motion_data in sorted_motions:
+        mn = motion_data.motion_number.strip() if motion_data.motion_number else None
+        mn = mn if mn else None
+        if mn is not None:
+            if mn in seen_motion_numbers:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate motion number '{mn}' within the same General Meeting.",
+                )
+            seen_motion_numbers.add(mn)
+    for position, motion_data in enumerate(sorted_motions, start=1):
+        motion_number = motion_data.motion_number.strip() if motion_data.motion_number else None
+        motion_number = motion_number if motion_number else None
         motion = Motion(
             general_meeting_id=general_meeting.id,
             title=motion_data.title,
             description=motion_data.description,
-            order_index=motion_data.order_index,
+            display_order=position,
+            motion_number=motion_number,
             motion_type=motion_data.motion_type,
         )
         db.add(motion)
@@ -985,7 +1001,7 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
 
     # Load motions explicitly (avoid lazy load on async session)
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting.id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting.id).order_by(Motion.display_order)
     )
     loaded_motions = list(motions_result.scalars().all())
 
@@ -1004,7 +1020,8 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
                 "id": m.id,
                 "title": m.title,
                 "description": m.description,
-                "order_index": m.order_index,
+                "display_order": m.display_order,
+                "motion_number": m.motion_number,
                 "motion_type": m.motion_type.value if hasattr(m.motion_type, "value") else m.motion_type,
             }
             for m in loaded_motions
@@ -1051,7 +1068,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
 
     # Load motions
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.display_order)
     )
     motions = list(motions_result.scalars().all())
 
@@ -1180,7 +1197,8 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 "id": motion.id,
                 "title": motion.title,
                 "description": motion.description,
-                "order_index": motion.order_index,
+                "display_order": motion.display_order,
+                "motion_number": motion.motion_number,
                 "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
                 "tally": {
                     "yes": _tally(yes_ids),

@@ -828,7 +828,7 @@ class TestImportLotOwners:
         )
         db_session.add(agm)
         await db_session.flush()
-        motion = Motion(general_meeting_id=agm.id, title="Test Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Test Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1291,7 +1291,7 @@ class TestCreateAGM:
                 {
                     "title": "Motion 1",
                     "description": "First motion",
-                    "order_index": 1,
+                    "display_order": 1,
                 }
             ],
         }
@@ -1353,9 +1353,9 @@ class TestCreateAGM:
 
         payload = self._agm_payload(b.id)
         payload["motions"] = [
-            {"title": "Motion A", "description": "A", "order_index": 1},
-            {"title": "Motion B", "description": "B", "order_index": 2},
-            {"title": "Motion C", "description": None, "order_index": 3},
+            {"title": "Motion A", "description": "A", "display_order": 1},
+            {"title": "Motion B", "description": "B", "display_order": 2},
+            {"title": "Motion C", "description": None, "display_order": 3},
         ]
         response = await client.post("/api/admin/general-meetings", json=payload)
         assert response.status_code == 201
@@ -1435,7 +1435,7 @@ class TestCreateAGM:
             "title": "Test",
             "meeting_at": meeting_dt().isoformat(),
             "voting_closes_at": closing_dt().isoformat(),
-            "motions": [{"title": "M1", "order_index": 1}],
+            "motions": [{"title": "M1", "display_order": 1}],
         }
         response = await client.post("/api/admin/general-meetings", json=payload)
         assert response.status_code == 422
@@ -1519,6 +1519,62 @@ class TestCreateAGM:
         # Second create should be blocked
         r2 = await client.post("/api/admin/general-meetings", json=payload)
         assert r2.status_code == 409
+
+    # --- motion_number uniqueness ---
+
+    async def test_create_agm_with_motion_numbers(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with distinct motion_numbers on each motion is accepted (201)."""
+        b = Building(name="Motion Number Test Bldg", manager_email="mn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1, "motion_number": "1"},
+            {"title": "Motion B", "display_order": 2, "motion_number": "2"},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 201
+        motions = response.json()["motions"]
+        assert motions[0]["motion_number"] == "1"
+        assert motions[1]["motion_number"] == "2"
+
+    async def test_create_agm_with_null_motion_numbers(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with null motion_numbers on multiple motions is accepted (201); nulls don't conflict."""
+        b = Building(name="Null MN Bldg", manager_email="nullmn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1},
+            {"title": "Motion B", "display_order": 2},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 201
+        motions = response.json()["motions"]
+        assert motions[0]["motion_number"] is None
+        assert motions[1]["motion_number"] is None
+
+    async def test_create_agm_with_duplicate_motion_numbers_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with two motions sharing the same non-null motion_number returns 409."""
+        b = Building(name="Dup MN Bldg", manager_email="dupmn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1, "motion_number": "1"},
+            {"title": "Motion B", "display_order": 2, "motion_number": "1"},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 409
 
 
 # ---------------------------------------------------------------------------
@@ -1618,7 +1674,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion D1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion D1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1754,7 +1810,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion NV1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion NV1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1808,7 +1864,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="ST Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="ST Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1872,7 +1928,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="TL Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="TL Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1952,7 +2008,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="All Yes Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="All Yes Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2016,7 +2072,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NC Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NC Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2076,7 +2132,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NS Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NS Motion", display_order=1)
         db_session.add(motion)
         # Intentionally no GeneralMeetingLotWeight rows for this GeneralMeeting
         await db_session.commit()
@@ -2117,7 +2173,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NE Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NE Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2219,7 +2275,7 @@ class TestCloseAGM:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="DD Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="DD Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2597,7 +2653,7 @@ class TestResetAGMBallots:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Reset Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Reset Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2689,7 +2745,7 @@ class TestResetAGMBallots:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Draft Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Draft Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2729,7 +2785,7 @@ class TestResetAGMBallots:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Multi Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Multi Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2870,7 +2926,7 @@ class TestSchemas:
                 title="t",
                 meeting_at=now + timedelta(days=2),
                 voting_closes_at=now + timedelta(days=1),
-                motions=[MotionCreate(title="M", order_index=1)],
+                motions=[MotionCreate(title="M", display_order=1)],
             )
 
     def test_lot_owner_create_empty_lot_number_raises(self):
@@ -4649,7 +4705,7 @@ class TestCloseAGMAbsentRecords:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion 1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion 1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -4890,7 +4946,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion AB1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion AB1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 

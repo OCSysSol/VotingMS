@@ -86,7 +86,7 @@ describe("ConfirmationPage", () => {
     });
   });
 
-  it("votes are sorted by order_index", async () => {
+  it("votes are sorted by display_order", async () => {
     server.use(
       http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
         HttpResponse.json({
@@ -99,8 +99,8 @@ describe("ConfirmationPage", () => {
               lot_number: "1A",
               financial_position: "normal",
               votes: [
-                { motion_id: "m2", motion_title: "Second Motion", order_index: 1, choice: "no", eligible: true },
-                { motion_id: "m1", motion_title: "First Motion", order_index: 0, choice: "yes", eligible: true },
+                { motion_id: "m2", motion_title: "Second Motion", display_order: 1, choice: "no", eligible: true },
+                { motion_id: "m1", motion_title: "First Motion", display_order: 0, choice: "yes", eligible: true },
               ],
             },
           ],
@@ -129,7 +129,7 @@ describe("ConfirmationPage", () => {
               lot_number: "1A",
               financial_position: "normal",
               votes: [
-                { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "abstained", eligible: true },
+                { motion_id: "m1", motion_title: "Motion", display_order: 0, choice: "abstained", eligible: true },
               ],
             },
           ],
@@ -167,7 +167,7 @@ describe("ConfirmationPage", () => {
               lot_number: "1A",
               financial_position: "normal",
               votes: [
-                { motion_id: "m1", motion_title: "Motion", order_index: 0, choice: "unknown_choice", eligible: true },
+                { motion_id: "m1", motion_title: "Motion", display_order: 0, choice: "unknown_choice", eligible: true },
               ],
             },
           ],
@@ -194,7 +194,7 @@ describe("ConfirmationPage", () => {
               lot_number: "1A",
               financial_position: "normal",
               votes: [
-                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "yes", eligible: true },
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 0, choice: "yes", eligible: true },
               ],
             },
             {
@@ -202,7 +202,7 @@ describe("ConfirmationPage", () => {
               lot_number: "2B",
               financial_position: "normal",
               votes: [
-                { motion_id: "m1", motion_title: "Motion 1", order_index: 0, choice: "no", eligible: true },
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 0, choice: "no", eligible: true },
               ],
             },
           ],
@@ -230,8 +230,8 @@ describe("ConfirmationPage", () => {
               lot_number: "1A",
               financial_position: "in_arrear",
               votes: [
-                { motion_id: "m1", motion_title: "General Motion", order_index: 0, choice: "not_eligible", eligible: false },
-                { motion_id: "m2", motion_title: "Special Motion", order_index: 1, choice: "yes", eligible: true },
+                { motion_id: "m1", motion_title: "General Motion", display_order: 0, choice: "not_eligible", eligible: false },
+                { motion_id: "m2", motion_title: "Special Motion", display_order: 1, choice: "yes", eligible: true },
               ],
             },
             {
@@ -239,7 +239,7 @@ describe("ConfirmationPage", () => {
               lot_number: "2B",
               financial_position: "normal",
               votes: [
-                { motion_id: "m1", motion_title: "General Motion", order_index: 0, choice: "yes", eligible: true },
+                { motion_id: "m1", motion_title: "General Motion", display_order: 0, choice: "yes", eligible: true },
               ],
             },
           ],

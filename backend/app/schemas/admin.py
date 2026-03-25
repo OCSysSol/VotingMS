@@ -179,15 +179,17 @@ class LotOwnerImportResult(BaseModel):
 class MotionCreate(BaseModel):
     title: str
     description: str | None = None
-    order_index: int
+    display_order: int
     motion_type: MotionType = MotionType.general
+    motion_number: str | None = None
 
 
 class MotionOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
-    order_index: int
+    display_order: int
+    motion_number: str | None
     motion_type: MotionType
 
     model_config = {"from_attributes": True}
@@ -280,7 +282,8 @@ class MotionDetail(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
-    order_index: int
+    display_order: int
+    motion_number: str | None
     motion_type: MotionType
     tally: MotionTally
     voter_lists: MotionVoterLists

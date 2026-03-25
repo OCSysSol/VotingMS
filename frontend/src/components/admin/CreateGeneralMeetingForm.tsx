@@ -19,7 +19,7 @@ export default function CreateGeneralMeetingForm() {
   const [title, setTitle] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
   const [votingClosesAt, setVotingClosesAt] = useState("");
-  const [motions, setMotions] = useState<MotionFormEntry[]>([{ title: "", description: "", motion_type: "general" }]);
+  const [motions, setMotions] = useState<MotionFormEntry[]>([{ title: "", description: "", motion_number: "", motion_type: "general" }]);
   const [formError, setFormError] = useState<string | null>(null);
 
   const mutation = useMutation<GeneralMeetingOut, Error, GeneralMeetingCreateRequest>({
@@ -56,7 +56,8 @@ export default function CreateGeneralMeetingForm() {
       motions: motions.map((m, i) => ({
         title: m.title.trim(),
         description: m.description.trim() || null,
-        order_index: i,
+        display_order: i + 1,
+        motion_number: m.motion_number.trim() || null,
         motion_type: m.motion_type,
       })),
     });

@@ -30,7 +30,8 @@ export interface MotionOut {
   id: string;
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
 }
 
@@ -86,7 +87,8 @@ export interface MotionDetail {
   id: string;
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
@@ -187,7 +189,8 @@ export async function removeLotOwnerProxy(
 export interface MotionCreateRequest {
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
 }
 

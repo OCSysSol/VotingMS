@@ -11,7 +11,8 @@ class MotionOut(BaseModel):
     id: uuid.UUID
     title: str
     description: Optional[str]
-    order_index: int
+    display_order: int
+    motion_number: Optional[str]
     motion_type: MotionType
 
     model_config = {"from_attributes": True}
@@ -59,7 +60,8 @@ class SubmitResponse(BaseModel):
 class BallotVoteItem(BaseModel):
     motion_id: uuid.UUID
     motion_title: str
-    order_index: int
+    display_order: int
+    motion_number: Optional[str] = None
     choice: VoteChoice
     eligible: bool = True
 
