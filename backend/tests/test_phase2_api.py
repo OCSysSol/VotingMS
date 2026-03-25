@@ -95,8 +95,8 @@ async def building_with_agm(db_session: AsyncSession):
     db_session.add(agm)
     await db_session.flush()
 
-    m1 = Motion(general_meeting_id=agm.id, title="P2 Motion 1", order_index=1, description="First")
-    m2 = Motion(general_meeting_id=agm.id, title="P2 Motion 2", order_index=2, description=None)
+    m1 = Motion(general_meeting_id=agm.id, title="P2 Motion 1", display_order=1, description="First")
+    m2 = Motion(general_meeting_id=agm.id, title="P2 Motion 2", display_order=2, description=None)
     db_session.add_all([m1, m2])
     await db_session.flush()
 
@@ -1371,7 +1371,7 @@ class TestListMotions:
         assert "id" in motion
         assert "title" in motion
         assert "description" in motion
-        assert "order_index" in motion
+        assert "display_order" in motion
 
     # --- submitted_choice field (BUG-RV-02) ---
 
@@ -1692,7 +1692,7 @@ class TestSaveDraft:
         db_session.add(closed_agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=closed_agm.id, title="CM1", order_index=1)
+        motion = Motion(general_meeting_id=closed_agm.id, title="CM1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1722,7 +1722,7 @@ class TestSaveDraft:
         db_session.add(pending_agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=pending_agm.id, title="PM1", order_index=1)
+        motion = Motion(general_meeting_id=pending_agm.id, title="PM1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 

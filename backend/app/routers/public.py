@@ -117,7 +117,7 @@ async def get_general_meeting_summary(
     motions_result = await db.execute(
         select(Motion)
         .where(Motion.general_meeting_id == general_meeting_id)
-        .order_by(Motion.order_index)
+        .order_by(Motion.display_order)
     )
     motions = motions_result.scalars().all()
 
@@ -131,7 +131,8 @@ async def get_general_meeting_summary(
         building_name=building.name,
         motions=[
             MotionSummaryOut(
-                order_index=m.order_index,
+                display_order=m.display_order,
+                motion_number=m.motion_number,
                 title=m.title,
                 description=m.description,
                 motion_type=m.motion_type,

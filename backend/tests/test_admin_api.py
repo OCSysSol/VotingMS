@@ -954,7 +954,7 @@ class TestImportLotOwners:
         )
         db_session.add(agm)
         await db_session.flush()
-        motion = Motion(general_meeting_id=agm.id, title="Test Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Test Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -1417,7 +1417,7 @@ class TestCreateAGM:
                 {
                     "title": "Motion 1",
                     "description": "First motion",
-                    "order_index": 1,
+                    "display_order": 1,
                 }
             ],
         }
@@ -1479,9 +1479,9 @@ class TestCreateAGM:
 
         payload = self._agm_payload(b.id)
         payload["motions"] = [
-            {"title": "Motion A", "description": "A", "order_index": 1},
-            {"title": "Motion B", "description": "B", "order_index": 2},
-            {"title": "Motion C", "description": None, "order_index": 3},
+            {"title": "Motion A", "description": "A", "display_order": 1},
+            {"title": "Motion B", "description": "B", "display_order": 2},
+            {"title": "Motion C", "description": None, "display_order": 3},
         ]
         response = await client.post("/api/admin/general-meetings", json=payload)
         assert response.status_code == 201
@@ -1561,7 +1561,7 @@ class TestCreateAGM:
             "title": "Test",
             "meeting_at": meeting_dt().isoformat(),
             "voting_closes_at": closing_dt().isoformat(),
-            "motions": [{"title": "M1", "order_index": 1}],
+            "motions": [{"title": "M1", "display_order": 1}],
         }
         response = await client.post("/api/admin/general-meetings", json=payload)
         assert response.status_code == 422
@@ -1645,6 +1645,62 @@ class TestCreateAGM:
         # Second create should be blocked
         r2 = await client.post("/api/admin/general-meetings", json=payload)
         assert r2.status_code == 409
+
+    # --- motion_number uniqueness ---
+
+    async def test_create_agm_with_motion_numbers(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with distinct motion_numbers on each motion is accepted (201)."""
+        b = Building(name="Motion Number Test Bldg", manager_email="mn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1, "motion_number": "1"},
+            {"title": "Motion B", "display_order": 2, "motion_number": "2"},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 201
+        motions = response.json()["motions"]
+        assert motions[0]["motion_number"] == "1"
+        assert motions[1]["motion_number"] == "2"
+
+    async def test_create_agm_with_null_motion_numbers(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with null motion_numbers on multiple motions is accepted (201); nulls don't conflict."""
+        b = Building(name="Null MN Bldg", manager_email="nullmn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1},
+            {"title": "Motion B", "display_order": 2},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 201
+        motions = response.json()["motions"]
+        assert motions[0]["motion_number"] is None
+        assert motions[1]["motion_number"] is None
+
+    async def test_create_agm_with_duplicate_motion_numbers_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """AGM with two motions sharing the same non-null motion_number returns 409."""
+        b = Building(name="Dup MN Bldg", manager_email="dupmn@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        payload = self._agm_payload(b.id)
+        payload["motions"] = [
+            {"title": "Motion A", "display_order": 1, "motion_number": "1"},
+            {"title": "Motion B", "display_order": 2, "motion_number": "1"},
+        ]
+        response = await client.post("/api/admin/general-meetings", json=payload)
+        assert response.status_code == 409
 
 
 # ---------------------------------------------------------------------------
@@ -2010,7 +2066,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion D1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion D1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2146,7 +2202,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion NV1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion NV1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2200,7 +2256,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="ST Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="ST Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2264,7 +2320,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="TL Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="TL Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2344,7 +2400,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="All Yes Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="All Yes Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2408,7 +2464,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NC Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NC Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2468,7 +2524,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NS Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NS Motion", display_order=1)
         db_session.add(motion)
         # Intentionally no GeneralMeetingLotWeight rows for this GeneralMeeting
         await db_session.commit()
@@ -2509,7 +2565,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="NE Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="NE Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2611,7 +2667,7 @@ class TestCloseAGM:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="DD Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="DD Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -2996,7 +3052,7 @@ class TestResetAGMBallots:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Reset Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Reset Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -3092,7 +3148,7 @@ class TestResetAGMBallots:
         db_session.add(lo_draft)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Draft Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Draft Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -3133,7 +3189,7 @@ class TestResetAGMBallots:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Multi Motion", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Multi Motion", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -3274,7 +3330,7 @@ class TestSchemas:
                 title="t",
                 meeting_at=now + timedelta(days=2),
                 voting_closes_at=now + timedelta(days=1),
-                motions=[MotionCreate(title="M", order_index=1)],
+                motions=[MotionCreate(title="M", display_order=1)],
             )
 
     def test_lot_owner_create_empty_lot_number_raises(self):
@@ -5186,7 +5242,7 @@ class TestCloseAGMAbsentRecords:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion 1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion 1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -5427,7 +5483,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(agm)
         await db_session.flush()
 
-        motion = Motion(general_meeting_id=agm.id, title="Motion AB1", order_index=1)
+        motion = Motion(general_meeting_id=agm.id, title="Motion AB1", display_order=1)
         db_session.add(motion)
         await db_session.flush()
 
@@ -5577,12 +5633,398 @@ class TestDeleteGeneralMeeting:
             assert response.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# PATCH /api/admin/motions/{motion_id}/visibility
-# ---------------------------------------------------------------------------
+class TestReorderMotions:
+    """Tests for the bulk motion reorder endpoint."""
+
+    async def _create_meeting_with_motions(
+        self,
+        db_session: AsyncSession,
+        name: str,
+        status: GeneralMeetingStatus = GeneralMeetingStatus.open,
+        motion_count: int = 3,
+    ) -> tuple[GeneralMeeting, list[Motion]]:
+        b = Building(name=name, manager_email=f"reorder_{name}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title=f"Reorder Test {name}",
+            status=status,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+        motions = []
+        for i in range(1, motion_count + 1):
+            m = Motion(
+                general_meeting_id=agm.id,
+                title=f"Motion {i}",
+                display_order=i,
+            )
+            db_session.add(m)
+            motions.append(m)
+        await db_session.flush()
+        for m in motions:
+            await db_session.refresh(m)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        return agm, motions
+
+    # --- Happy path ---
+
+    async def test_reorder_three_motions(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reorder 3 motions: verify display_order values updated correctly."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderHappy3", motion_count=3
+        )
+        m1, m2, m3 = motions
+        # Send in reverse order: m3 → 1, m2 → 2, m1 → 3
+        payload = {
+            "motions": [
+                {"motion_id": str(m3.id), "display_order": 1},
+                {"motion_id": str(m2.id), "display_order": 2},
+                {"motion_id": str(m1.id), "display_order": 3},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "motions" in data
+        returned_motions = data["motions"]
+        assert len(returned_motions) == 3
+        # Should be sorted by display_order
+        assert returned_motions[0]["id"] == str(m3.id)
+        assert returned_motions[0]["display_order"] == 1
+        assert returned_motions[1]["id"] == str(m2.id)
+        assert returned_motions[1]["display_order"] == 2
+        assert returned_motions[2]["id"] == str(m1.id)
+        assert returned_motions[2]["display_order"] == 3
+
+    async def test_reorder_normalises_to_sequential_positions(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Non-sequential submitted display_order values are normalised to 1-based sequential."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderNorm", motion_count=3
+        )
+        m1, m2, m3 = motions
+        # Submit non-sequential values: 10, 20, 30 — should normalise to 1, 2, 3
+        payload = {
+            "motions": [
+                {"motion_id": str(m3.id), "display_order": 10},
+                {"motion_id": str(m1.id), "display_order": 20},
+                {"motion_id": str(m2.id), "display_order": 30},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        returned = response.json()["motions"]
+        assert returned[0]["id"] == str(m3.id)
+        assert returned[0]["display_order"] == 1
+        assert returned[1]["id"] == str(m1.id)
+        assert returned[1]["display_order"] == 2
+        assert returned[2]["id"] == str(m2.id)
+        assert returned[2]["display_order"] == 3
+
+    async def test_reorder_returns_full_motion_details(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Response includes all motion fields."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderFields", motion_count=2
+        )
+        m1, m2 = motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m2.id), "display_order": 1},
+                {"motion_id": str(m1.id), "display_order": 2},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        first = response.json()["motions"][0]
+        assert "id" in first
+        assert "title" in first
+        assert "display_order" in first
+        assert "motion_number" in first
+        assert "motion_type" in first
+
+    async def test_reorder_single_motion_no_op(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Single motion meeting: reorder with the same ID succeeds."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderSingle", motion_count=1
+        )
+        m1 = motions[0]
+        payload = {
+            "motions": [
+                {"motion_id": str(m1.id), "display_order": 1},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        assert len(response.json()["motions"]) == 1
+
+    async def test_reorder_pending_meeting_succeeds(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reorder is allowed on pending meetings."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderPending", status=GeneralMeetingStatus.pending, motion_count=2
+        )
+        m1, m2 = motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m2.id), "display_order": 1},
+                {"motion_id": str(m1.id), "display_order": 2},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+
+    # --- Input validation ---
+
+    async def test_reorder_empty_list_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Empty motion list returns 422."""
+        agm, _ = await self._create_meeting_with_motions(
+            db_session, "ReorderEmpty", motion_count=2
+        )
+        payload = {"motions": []}
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 422
+
+    async def test_reorder_extra_ids_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Submitting extra motion IDs (not belonging to meeting) returns 422."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderExtra", motion_count=2
+        )
+        m1, m2 = motions
+        fake_id = uuid.uuid4()
+        payload = {
+            "motions": [
+                {"motion_id": str(m1.id), "display_order": 1},
+                {"motion_id": str(m2.id), "display_order": 2},
+                {"motion_id": str(fake_id), "display_order": 3},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 422
+        assert "motion_order" in response.json()["detail"]
+
+    async def test_reorder_missing_ids_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Submitting fewer motion IDs than exist in the meeting returns 422."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderMissing", motion_count=3
+        )
+        m1, _, _ = motions
+        # Only include 1 of 3 motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m1.id), "display_order": 1},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 422
+
+    async def test_reorder_ids_from_different_meeting_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Submitting IDs from a different meeting returns 422."""
+        agm1, motions1 = await self._create_meeting_with_motions(
+            db_session, "ReorderAGM1", motion_count=2
+        )
+        agm2, motions2 = await self._create_meeting_with_motions(
+            db_session, "ReorderAGM2", motion_count=2
+        )
+        # Send motions from agm2 to agm1's endpoint
+        payload = {
+            "motions": [
+                {"motion_id": str(motions2[0].id), "display_order": 1},
+                {"motion_id": str(motions2[1].id), "display_order": 2},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm1.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 422
+
+    async def test_reorder_duplicate_display_order_in_request_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Duplicate display_order values in request body returns 422."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderDupOrder", motion_count=2
+        )
+        m1, m2 = motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m1.id), "display_order": 1},
+                {"motion_id": str(m2.id), "display_order": 1},  # duplicate
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 422
+        assert "Duplicate" in response.json()["detail"]
+
+    # --- State / precondition errors ---
+
+    async def test_reorder_closed_meeting_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reorder on a closed meeting returns 409."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderClosed", status=GeneralMeetingStatus.closed, motion_count=2
+        )
+        m1, m2 = motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m2.id), "display_order": 1},
+                {"motion_id": str(m1.id), "display_order": 2},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 409
+        assert "closed" in response.json()["detail"].lower()
+
+    async def test_reorder_meeting_not_found_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reorder on a non-existent meeting returns 404."""
+        fake_id = uuid.uuid4()
+        payload = {
+            "motions": [
+                {"motion_id": str(uuid.uuid4()), "display_order": 1},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{fake_id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 404
+        assert "General Meeting not found" in response.json()["detail"]
+
+    # --- Edge cases ---
+
+    async def test_reorder_preserves_motion_numbers(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reorder does not change motion_number values."""
+        b = Building(name="ReorderMN", manager_email="rmn@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Reorder MN Test",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+        m1 = Motion(
+            general_meeting_id=agm.id,
+            title="Alpha",
+            display_order=1,
+            motion_number="A",
+        )
+        m2 = Motion(
+            general_meeting_id=agm.id,
+            title="Beta",
+            display_order=2,
+            motion_number="B",
+        )
+        db_session.add_all([m1, m2])
+        await db_session.flush()
+        await db_session.refresh(m1)
+        await db_session.refresh(m2)
+        await db_session.commit()
+
+        # Swap order
+        payload = {
+            "motions": [
+                {"motion_id": str(m2.id), "display_order": 1},
+                {"motion_id": str(m1.id), "display_order": 2},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        returned = response.json()["motions"]
+        # m2 is now first, should still have motion_number "B"
+        assert returned[0]["id"] == str(m2.id)
+        assert returned[0]["motion_number"] == "B"
+        assert returned[1]["id"] == str(m1.id)
+        assert returned[1]["motion_number"] == "A"
+
+    async def test_reorder_same_order_is_idempotent(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Reordering with the same order as current returns the same display_order values."""
+        agm, motions = await self._create_meeting_with_motions(
+            db_session, "ReorderIdempotent", motion_count=3
+        )
+        m1, m2, m3 = motions
+        payload = {
+            "motions": [
+                {"motion_id": str(m1.id), "display_order": 1},
+                {"motion_id": str(m2.id), "display_order": 2},
+                {"motion_id": str(m3.id), "display_order": 3},
+            ]
+        }
+        response = await client.put(
+            f"/api/admin/general-meetings/{agm.id}/motions/reorder",
+            json=payload,
+        )
+        assert response.status_code == 200
+        returned = response.json()["motions"]
+        assert returned[0]["display_order"] == 1
+        assert returned[1]["display_order"] == 2
+        assert returned[2]["display_order"] == 3
 
 
-@pytest.mark.asyncio
 class TestToggleMotionVisibility:
     """Tests for the motion visibility toggle endpoint."""
 
@@ -5609,7 +6051,7 @@ class TestToggleMotionVisibility:
         motion = Motion(
             general_meeting_id=agm.id,
             title=f"Vis Motion {label}",
-            order_index=1,
+            display_order=1,
             motion_type=motion_type,
             is_visible=is_visible,
         )
@@ -5721,7 +6163,7 @@ class TestToggleMotionVisibility:
         motion = Motion(
             general_meeting_id=agm.id,
             title="Vis Motion DraftVotes",
-            order_index=1,
+            display_order=1,
             is_visible=True,
         )
         db_session.add(motion)
@@ -5798,7 +6240,7 @@ class TestToggleMotionVisibility:
         motion = Motion(
             general_meeting_id=agm.id,
             title="Vis Motion VotedHide",
-            order_index=1,
+            display_order=1,
             is_visible=True,
         )
         db_session.add(motion)
@@ -5920,7 +6362,7 @@ class TestToggleMotionVisibility:
         motion = Motion(
             general_meeting_id=agm.id,
             title="Vis Motion ShowVoted",
-            order_index=1,
+            display_order=1,
             is_visible=False,
         )
         db_session.add(motion)
@@ -6017,7 +6459,7 @@ class TestMotionManagement:
             general_meeting_id=agm.id,
             title=f"Motion {label}",
             description=f"Desc {label}",
-            order_index=order_index,
+            display_order=order_index,
             motion_type=MotionType.general,
             is_visible=is_visible,
         )
@@ -6044,7 +6486,7 @@ class TestMotionManagement:
         assert data["motion_type"] == "general"
         assert data["is_visible"] is False
         assert "id" in data
-        assert "order_index" in data
+        assert "display_order" in data
 
     async def test_add_motion_to_pending_meeting_returns_201(
         self, client: AsyncClient, db_session: AsyncSession
@@ -6061,31 +6503,31 @@ class TestMotionManagement:
     async def test_add_motion_first_motion_order_index_zero(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """First motion on a meeting with no existing motions gets order_index=0."""
+        """First motion on a meeting with no existing motions gets display_order=0."""
         agm = await self._create_meeting(db_session, "FirstMotion")
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "First"},
         )
         assert response.status_code == 201
-        assert response.json()["order_index"] == 0
+        assert response.json()["display_order"] == 0
 
     async def test_add_motion_order_index_increments(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Second motion gets order_index = max + 1."""
+        """Second motion gets display_order = max + 1."""
         agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=0)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Motion"},
         )
         assert response.status_code == 201
-        assert response.json()["order_index"] == 1
+        assert response.json()["display_order"] == 1
 
     async def test_add_multiple_motions_sequential_order_indexes(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Adding 3 motions results in order_indexes 0, 1, 2 with no constraint violations."""
+        """Adding 3 motions results in display_orders 0, 1, 2 with no constraint violations."""
         agm = await self._create_meeting(db_session, "SeqOrder")
         indexes = []
         for i in range(3):
@@ -6094,7 +6536,7 @@ class TestMotionManagement:
                 json={"title": f"Motion {i}"},
             )
             assert r.status_code == 201
-            indexes.append(r.json()["order_index"])
+            indexes.append(r.json()["display_order"])
         assert indexes == [0, 1, 2]
 
     async def test_add_motion_motion_type_defaults_to_general(
@@ -6406,7 +6848,7 @@ class TestMotionManagement:
         motion_b = Motion(
             general_meeting_id=agm.id,
             title="Motion B",
-            order_index=1,
+            display_order=1,
             is_visible=False,
         )
         db_session.add(motion_b)
@@ -6418,7 +6860,7 @@ class TestMotionManagement:
         result = await db_session.execute(select(Motion).where(Motion.id == motion_b.id))
         surviving = result.scalar_one_or_none()
         assert surviving is not None
-        assert surviving.order_index == 1  # Not renumbered
+        assert surviving.display_order == 1  # Not renumbered
 
     # --- State / precondition errors (delete) ---
 

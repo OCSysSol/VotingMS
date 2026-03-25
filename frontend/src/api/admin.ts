@@ -30,7 +30,8 @@ export interface MotionOut {
   id: string;
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
   is_visible: boolean;
 }
@@ -87,7 +88,8 @@ export interface MotionDetail {
   id: string;
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
   is_visible: boolean;
   tally: MotionTally;
@@ -189,7 +191,8 @@ export async function removeLotOwnerProxy(
 export interface MotionCreateRequest {
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
 }
 
@@ -437,6 +440,32 @@ export async function deleteGeneralMeeting(meetingId: string): Promise<void> {
     credentials: "include",
   });
   if (!res.ok) throw new Error(`Failed to delete meeting: ${res.status}`);
+}
+
+// ---------------------------------------------------------------------------
+// Motion reorder
+// ---------------------------------------------------------------------------
+
+export interface MotionReorderItem {
+  motion_id: string;
+  display_order: number;
+}
+
+export interface MotionReorderOut {
+  motions: MotionOut[];
+}
+
+export async function reorderMotions(
+  meetingId: string,
+  motions: MotionReorderItem[]
+): Promise<MotionReorderOut> {
+  return apiFetch<MotionReorderOut>(
+    `/api/admin/general-meetings/${meetingId}/motions/reorder`,
+    {
+      method: "PUT",
+      body: JSON.stringify({ motions }),
+    }
+  );
 }
 
 export async function deleteBuilding(buildingId: string): Promise<void> {

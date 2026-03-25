@@ -57,7 +57,8 @@ export interface MotionOut {
   id: string;
   title: string;
   description: string | null;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
   is_visible: boolean;
   already_voted: boolean;
@@ -93,7 +94,8 @@ export interface SubmitResponse {
 export interface BallotVoteItem {
   motion_id: string;
   motion_title: string;
-  order_index: number;
+  display_order: number;
+  motion_number: string | null;
   choice: VoteChoice;
   eligible: boolean;
 }

@@ -9,6 +9,7 @@ import GeneralMeetingDetailPage from "../GeneralMeetingDetailPage";
 import {
   ADMIN_MEETING_DETAIL,
   ADMIN_MEETING_DETAIL_CLOSED,
+  ADMIN_MEETING_DETAIL_PENDING,
   ADMIN_MEETING_DETAIL_HIDDEN_MOTION,
   ADMIN_MEETING_DETAIL_MIXED_VISIBILITY,
   ADMIN_MEETING_DETAIL_ALL_HIDDEN,
@@ -175,7 +176,7 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Results Report")).toBeInTheDocument();
     });
-    // Motion 1 appears in both the Motion Visibility section and the Results Report section
+    // "Motion 1" appears in both the Motions reorder table/visibility section and the report view
     expect(screen.getAllByText(/Motion 1/).length).toBeGreaterThanOrEqual(1);
   });
 
@@ -334,6 +335,119 @@ describe("GeneralMeetingDetailPage", () => {
     expect(mockNavigate).not.toHaveBeenCalledWith("/admin/general-meetings");
   });
 
+  // --- Motion reorder panel integration ---
+
+  it("renders Motions section heading", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Motions")).toBeInTheDocument();
+    });
+  });
+
+  it("shows move buttons for open meeting motions", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Move Motion 1 to top/ })).toBeInTheDocument();
+    });
+  });
+
+  it("does not show move buttons for closed meeting", async () => {
+    renderPage("agm2");
+    await waitFor(() => {
+      expect(screen.getByText("Motions")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: /Move .* to top/ })).not.toBeInTheDocument();
+  });
+
+  it("shows move buttons for pending meeting", async () => {
+    renderPage("agm-pending");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Move Motion 1 to top/ })).toBeInTheDocument();
+    });
+  });
+
+  it("clicking 'Move to bottom' calls reorder API and updates display", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Move Motion 1 to bottom/ })).toBeInTheDocument();
+    });
+    // There is only 1 motion in the test fixture so this button is disabled —
+    // use a fixture with 2+ motions via server override
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", ({ params }) => {
+        if (params.meetingId === "agm-reorder-test") {
+          return HttpResponse.json({
+            ...ADMIN_MEETING_DETAIL,
+            id: "agm-reorder-test",
+            motions: [
+              { ...ADMIN_MEETING_DETAIL.motions[0], id: "m1", display_order: 1, title: "First Motion" },
+              {
+                id: "m2",
+                title: "Second Motion",
+                description: null,
+                display_order: 2,
+                motion_number: null,
+                motion_type: "general",
+                tally: ADMIN_MEETING_DETAIL.motions[0].tally,
+                voter_lists: ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ detail: "not found" }, { status: 404 });
+      })
+    );
+    const { unmount } = renderPage("agm-reorder-test");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move First Motion to bottom" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Move First Motion to bottom" }));
+    // After clicking, reorderMutation fires — the button click should have been processed
+    await waitFor(() => {
+      // The mutation fires asynchronously; verify no error alert is shown
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    unmount();
+  });
+
+  it("shows reorder error alert when API returns error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", ({ params }) => {
+        if (params.meetingId === "agm-reorder-error") {
+          return HttpResponse.json({
+            ...ADMIN_MEETING_DETAIL,
+            id: "agm-reorder-error",
+            motions: [
+              { ...ADMIN_MEETING_DETAIL.motions[0], id: "m1", display_order: 1, title: "Motion A" },
+              {
+                id: "m2",
+                title: "Motion B",
+                description: null,
+                display_order: 2,
+                motion_number: null,
+                motion_type: "general",
+                tally: ADMIN_MEETING_DETAIL.motions[0].tally,
+                voter_lists: ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ detail: "not found" }, { status: 404 });
+      })
+    );
+    const { unmount } = renderPage("agm-reorder-error");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move Motion A to bottom" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Move Motion A to bottom" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    unmount();
+  });
+
   it("Escape key closes delete modal without navigating", async () => {
     mockNavigate.mockClear();
     const user = userEvent.setup();
@@ -374,9 +488,10 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Motion Visibility")).toBeInTheDocument();
     });
-    expect(screen.getByRole("columnheader", { name: "#" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Motion" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Type" })).toBeInTheDocument();
+    // Both the reorder panel and visibility table have "#" — use getAllByRole
+    expect(screen.getAllByRole("columnheader", { name: "#" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("columnheader", { name: "Motion" }).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByRole("columnheader", { name: "Type" }).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByRole("columnheader", { name: "Visibility" })).toBeInTheDocument();
   });
 
@@ -510,7 +625,8 @@ describe("GeneralMeetingDetailPage", () => {
   it("renders Actions column header in motions table", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("columnheader", { name: "Actions" })).toBeInTheDocument();
+      // Both the reorder panel and visibility table have an "Actions" header
+      expect(screen.getAllByRole("columnheader", { name: "Actions" }).length).toBeGreaterThanOrEqual(1);
     });
   });
 

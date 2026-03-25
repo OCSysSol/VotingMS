@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getGeneralMeetingDetail,
   deleteGeneralMeeting,
+  reorderMotions,
   toggleMotionVisibility,
   addMotionToMeeting,
   updateMotion,
@@ -17,6 +18,7 @@ import StartGeneralMeetingButton from "../../components/admin/StartGeneralMeetin
 import EmailStatusBanner from "../../components/admin/EmailStatusBanner";
 import AGMReportView from "../../components/admin/AGMReportView";
 import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
+import MotionReorderPanel from "../../components/admin/MotionReorderPanel";
 
 interface DeleteMeetingConfirmModalProps {
   meetingTitle: string;
@@ -86,11 +88,67 @@ export default function GeneralMeetingDetailPage() {
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
 
+  // Optimistic motions list — updated immediately on reorder, confirmed on API response
+  const [optimisticMotions, setOptimisticMotions] = useState<MotionDetail[] | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+
   const { data: meeting, isLoading, error } = useQuery<GeneralMeetingDetail>({
     queryKey: ["admin", "general-meetings", meetingId],
     queryFn: () => getGeneralMeetingDetail(meetingId!),
     enabled: !!meetingId,
   });
+
+  // Reset optimistic state whenever fresh data arrives
+  if (meeting && optimisticMotions !== null) {
+    const serverIds = meeting.motions.map((m) => m.id).join(",");
+    const optimisticIds = optimisticMotions.map((m) => m.id).join(",");
+    if (serverIds === optimisticIds) {
+      // Server confirmed our optimistic order — clear it so we use server data
+      setOptimisticMotions(null);
+    }
+  }
+
+  const reorderMutation = useMutation({
+    mutationFn: (newOrder: MotionDetail[]) => {
+      const items = newOrder.map((m, idx) => ({
+        motion_id: m.id,
+        display_order: idx + 1,
+      }));
+      return reorderMotions(meetingId!, items);
+    },
+    onSuccess: (result) => {
+      // Build updated meeting with new motion order
+      queryClient.setQueryData(
+        ["admin", "general-meetings", meetingId],
+        (old: GeneralMeetingDetail | undefined) => {
+          if (!old) return old;
+          // Merge new display_order values into existing motion objects
+          const orderMap = new Map(result.motions.map((m) => [m.id, m.display_order]));
+          const merged = [...old.motions]
+            .map((m) => ({ ...m, display_order: orderMap.get(m.id) ?? m.display_order }))
+            .sort((a, b) => a.display_order - b.display_order);
+          return { ...old, motions: merged };
+        }
+      );
+      setOptimisticMotions(null);
+      setReorderError(null);
+    },
+    onError: (err: Error, previousOrder) => {
+      // Revert optimistic update
+      if (meeting) {
+        setOptimisticMotions(meeting.motions);
+      } else {
+        setOptimisticMotions(null);
+      }
+      setReorderError(err.message ?? "Failed to reorder motions");
+    },
+  });
+
+  function handleReorder(newOrder: MotionDetail[]) {
+    setReorderError(null);
+    setOptimisticMotions(newOrder);
+    reorderMutation.mutate(newOrder);
+  }
 
   function handleCloseSuccess() {
     void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
@@ -290,6 +348,9 @@ export default function GeneralMeetingDetailPage() {
     meeting.status === "closed" &&
     meetingExtended.email_delivery?.status === "failed";
 
+  // Use optimistic motions for the reorder panel; fall back to server data
+  const displayMotions = optimisticMotions ?? meeting.motions;
+
   return (
     <div>
       <button type="button" className="btn btn--ghost back-btn" onClick={() => navigate("/admin/general-meetings")}>
@@ -377,7 +438,16 @@ export default function GeneralMeetingDetailPage() {
         />
       )}
 
-      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motion Visibility</h2>
+      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
+      <MotionReorderPanel
+        motions={displayMotions}
+        meetingStatus={meeting.status}
+        onReorder={handleReorder}
+        isPending={reorderMutation.isPending}
+        error={reorderError}
+      />
+
+      <h2 style={{ fontSize: "1.25rem", marginTop: 32, marginBottom: 16 }}>Motion Visibility</h2>
       <div style={{ marginBottom: 24 }}>
         {meeting.status !== "closed" && (
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>

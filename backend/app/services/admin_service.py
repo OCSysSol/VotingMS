@@ -974,13 +974,29 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
     db.add(general_meeting)
     await db.flush()  # get general_meeting.id
 
-    # Create motions
-    for motion_data in data.motions:
+    # Create motions — sort by supplied display_order, then normalise to 1-based integers
+    sorted_motions = sorted(data.motions, key=lambda m: m.display_order)
+    # Validate no duplicate non-null motion_numbers within this meeting
+    seen_motion_numbers: set[str] = set()
+    for motion_data in sorted_motions:
+        mn = motion_data.motion_number.strip() if motion_data.motion_number else None
+        mn = mn if mn else None
+        if mn is not None:
+            if mn in seen_motion_numbers:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Duplicate motion number '{mn}' within the same General Meeting.",
+                )
+            seen_motion_numbers.add(mn)
+    for position, motion_data in enumerate(sorted_motions, start=1):
+        motion_number = motion_data.motion_number.strip() if motion_data.motion_number else None
+        motion_number = motion_number if motion_number else None
         motion = Motion(
             general_meeting_id=general_meeting.id,
             title=motion_data.title,
             description=motion_data.description,
-            order_index=motion_data.order_index,
+            display_order=position,
+            motion_number=motion_number,
             motion_type=motion_data.motion_type,
         )
         db.add(motion)
@@ -1007,7 +1023,7 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
 
     # Load motions explicitly (avoid lazy load on async session)
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting.id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting.id).order_by(Motion.display_order)
     )
     loaded_motions = list(motions_result.scalars().all())
 
@@ -1026,7 +1042,8 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
                 "id": m.id,
                 "title": m.title,
                 "description": m.description,
-                "order_index": m.order_index,
+                "display_order": m.display_order,
+                "motion_number": m.motion_number,
                 "motion_type": m.motion_type.value if hasattr(m.motion_type, "value") else m.motion_type,
             }
             for m in loaded_motions
@@ -1084,7 +1101,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
 
     # Load motions
     motions_result = await db.execute(
-        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.order_index)
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.display_order)
     )
     motions = list(motions_result.scalars().all())
 
@@ -1213,7 +1230,8 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 "id": motion.id,
                 "title": motion.title,
                 "description": motion.description,
-                "order_index": motion.order_index,
+                "display_order": motion.display_order,
+                "motion_number": motion.motion_number,
                 "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
                 "is_visible": motion.is_visible,
                 "tally": {
@@ -1304,7 +1322,8 @@ async def toggle_motion_visibility(
         "id": motion.id,
         "title": motion.title,
         "description": motion.description,
-        "order_index": motion.order_index,
+        "display_order": motion.display_order,
+        "motion_number": motion.motion_number,
         "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
         "is_visible": motion.is_visible,
         "tally": {
@@ -1349,7 +1368,7 @@ async def add_motion_to_meeting(
         raise HTTPException(status_code=409, detail="Cannot add a motion to a closed meeting")
 
     max_result = await db.execute(
-        select(func.max(Motion.order_index)).where(
+        select(func.max(Motion.display_order)).where(
             Motion.general_meeting_id == general_meeting_id
         )
     )
@@ -1360,7 +1379,7 @@ async def add_motion_to_meeting(
         general_meeting_id=general_meeting_id,
         title=data.title.strip(),
         description=data.description,
-        order_index=next_index,
+        display_order=next_index,
         motion_type=data.motion_type,
         is_visible=False,
     )
@@ -1373,7 +1392,8 @@ async def add_motion_to_meeting(
         "id": motion.id,
         "title": motion.title,
         "description": motion.description,
-        "order_index": motion.order_index,
+        "display_order": motion.display_order,
+        "motion_number": motion.motion_number,
         "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
         "is_visible": motion.is_visible,
     }
@@ -1424,7 +1444,7 @@ async def update_motion(
         "id": motion.id,
         "title": motion.title,
         "description": motion.description,
-        "order_index": motion.order_index,
+        "order_index": motion.display_order,
         "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
         "is_visible": motion.is_visible,
     }
@@ -1576,6 +1596,105 @@ async def resend_report(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict
     logger.info("Email delivery triggered for General Meeting %s", general_meeting_id)
 
     return {"queued": True}
+
+
+async def reorder_motions(
+    general_meeting_id: uuid.UUID,
+    request,  # MotionReorderRequest — imported at call site to avoid circular import
+    db: AsyncSession,
+) -> dict:
+    """Bulk reorder motions for a general meeting.
+
+    Validates:
+    - Meeting exists (404 if not)
+    - Meeting is not closed (403 if closed)
+    - request.motions contains exactly the same set of IDs as the meeting's motions (422)
+    - No duplicate display_order values in the request (422)
+
+    Then normalises display_order to 1-based sequential integers sorted by the
+    submitted display_order values and updates all motions atomically.
+
+    Returns {"motions": [...]} sorted by display_order.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    # Fetch meeting
+    result = await db.execute(
+        select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id)
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+
+    # Check not closed
+    effective = get_effective_status(meeting)
+    if effective == GeneralMeetingStatus.closed:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot reorder motions on a closed General Meeting",
+        )
+
+    # Load all motions for this meeting
+    motions_result = await db.execute(
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id)
+    )
+    motions = list(motions_result.scalars().all())
+    existing_ids = {m.id for m in motions}
+    motion_map = {m.id: m for m in motions}
+
+    # Validate request list
+    submitted_ids = {item.motion_id for item in request.motions}
+
+    if len(request.motions) == 0 or submitted_ids != existing_ids:
+        raise HTTPException(
+            status_code=422,
+            detail="motion_order must contain exactly all motion IDs for this meeting",
+        )
+
+    # Check for duplicate display_order values in the request
+    submitted_orders = [item.display_order for item in request.motions]
+    if len(submitted_orders) != len(set(submitted_orders)):
+        raise HTTPException(
+            status_code=422,
+            detail="Duplicate display_order values in request",
+        )
+
+    # Sort request items by submitted display_order, then assign normalised 1-based positions
+    sorted_items = sorted(request.motions, key=lambda x: x.display_order)
+
+    # Two-pass update to avoid unique constraint violations:
+    # Pass 1: assign large temporary values
+    offset = len(motions) + 1000
+    for item in sorted_items:
+        motion_map[item.motion_id].display_order = item.display_order + offset
+    await db.flush()
+
+    # Pass 2: assign final normalised values
+    for position, item in enumerate(sorted_items, start=1):
+        motion_map[item.motion_id].display_order = position
+    await db.commit()
+
+    # Reload sorted motions
+    final_result = await db.execute(
+        select(Motion)
+        .where(Motion.general_meeting_id == general_meeting_id)
+        .order_by(Motion.display_order)
+    )
+    final_motions = list(final_result.scalars().all())
+
+    return {
+        "motions": [
+            {
+                "id": m.id,
+                "title": m.title,
+                "description": m.description,
+                "display_order": m.display_order,
+                "motion_number": m.motion_number,
+                "motion_type": m.motion_type.value if hasattr(m.motion_type, "value") else m.motion_type,
+            }
+            for m in final_motions
+        ]
+    }
 
 
 async def reset_general_meeting_ballots(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict:

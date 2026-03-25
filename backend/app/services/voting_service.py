@@ -245,7 +245,7 @@ async def submit_ballot(
             Motion.general_meeting_id == general_meeting_id,
             Motion.is_visible == True,  # noqa: E712
         )
-        .order_by(Motion.order_index)
+        .order_by(Motion.display_order)
     )
     visible_motions = list(motions_result.scalars().all())
 
@@ -395,7 +395,7 @@ async def submit_ballot(
             )
 
         # Re-sort vote_items to match motion order
-        motion_order = {m.id: m.order_index for m in visible_motions}
+        motion_order = {m.id: m.display_order for m in visible_motions}
         vote_items.sort(key=lambda v: motion_order.get(v.motion_id, 0))
 
         # Reuse existing BallotSubmission if present; otherwise create one.
@@ -516,7 +516,14 @@ async def get_my_ballot(
         w.lot_owner_id: w for w in weights_result.scalars().all()
     }
 
-    # Get submitted votes for these lots (only actual Vote records — no fallback to all motions)
+    # Get all motions
+    motions_result = await db.execute(
+        select(Motion).where(Motion.general_meeting_id == general_meeting_id).order_by(Motion.display_order)
+    )
+    motions = list(motions_result.scalars().all())
+
+    # Get submitted votes for these lots
+
     votes_result = await db.execute(
         select(Vote, Motion)
         .join(Motion, Vote.motion_id == Motion.id)
@@ -526,7 +533,7 @@ async def get_my_ballot(
             Vote.lot_owner_id.in_(target_lot_ids),
             Vote.status == VoteStatus.submitted,
         )
-        .order_by(Motion.order_index)
+        .order_by(Motion.display_order)
     )
     rows = votes_result.all()
 
@@ -553,16 +560,47 @@ async def get_my_ballot(
         lot_votes: list[BallotVoteItem] = []
         lot_vote_rows = votes_by_lot.get(lot_owner_id, [])
 
-        # Only show motions for which an actual submitted Vote record exists
-        for vote, motion in lot_vote_rows:
-            eligible = not (is_in_arrear and motion.motion_type == MotionType.general)
-            lot_votes.append(BallotVoteItem(
-                motion_id=motion.id,
-                motion_title=motion.title,
-                order_index=motion.order_index,
-                choice=vote.choice,
-                eligible=eligible,
-            ))
+        voted_motion_ids = {m.id for _, m in lot_vote_rows}
+
+        for motion in motions:
+            if is_in_arrear and motion.motion_type == MotionType.general:
+                # Show as "not eligible" — the DB row should have choice=not_eligible
+                # Find the actual vote for this motion if it exists
+                not_eligible_choice = VoteChoice.not_eligible
+                for vote, m in lot_vote_rows:
+                    if m.id == motion.id:
+                        not_eligible_choice = vote.choice if vote.choice is not None else VoteChoice.not_eligible
+                        break
+                lot_votes.append(BallotVoteItem(
+                    motion_id=motion.id,
+                    motion_title=motion.title,
+                    display_order=motion.display_order,
+                    motion_number=motion.motion_number,
+                    choice=not_eligible_choice,
+                    eligible=False,
+                ))
+            elif motion.id in voted_motion_ids:
+                for vote, m in lot_vote_rows:
+                    if m.id == motion.id:
+                        lot_votes.append(BallotVoteItem(
+                            motion_id=m.id,
+                            motion_title=m.title,
+                            display_order=m.display_order,
+                            motion_number=m.motion_number,
+                            choice=vote.choice,
+                            eligible=True,
+                        ))
+                        break
+            else:
+                # Motion not voted on — show as abstained
+                lot_votes.append(BallotVoteItem(
+                    motion_id=motion.id,
+                    motion_title=motion.title,
+                    display_order=motion.display_order,
+                    motion_number=motion.motion_number,
+                    choice=VoteChoice.abstained,
+                    eligible=True,
+                ))
 
         submitted_lots.append(LotBallotSummary(
             lot_owner_id=lot_owner_id,

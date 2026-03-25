@@ -10,6 +10,8 @@ import type {
   GeneralMeetingOut,
   GeneralMeetingCloseOut,
   GeneralMeetingStartOut,
+  MotionOut,
+  MotionReorderOut,
   ResendReportOut,
 } from "../../src/api/admin";
 import type { GeneralMeetingSummaryData } from "../../src/api/public";
@@ -132,7 +134,8 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
       id: "m1",
       title: "Motion 1",
       description: "Description 1",
-      order_index: 0,
+      display_order: 1,
+      motion_number: null,
       motion_type: "general" as const,
       is_visible: true,
       tally: {
@@ -296,7 +299,8 @@ export const ADMIN_CREATED_MEETING: GeneralMeetingOut = {
       id: "m-new",
       title: "First Motion",
       description: null,
-      order_index: 0,
+      display_order: 1,
+      motion_number: null,
       motion_type: "general" as const,
       is_visible: true,
     },
@@ -575,6 +579,41 @@ export const adminHandlers = [
     return HttpResponse.json(result);
   }),
 
+  http.put(`${BASE}/api/admin/general-meetings/:meetingId/motions/reorder`, async ({ request, params }) => {
+    if (params.meetingId === "agm-closed-reorder") {
+      return HttpResponse.json(
+        { detail: "Cannot reorder motions on a closed General Meeting" },
+        { status: 409 }
+      );
+    }
+    if (params.meetingId === "agm-reorder-error") {
+      return HttpResponse.json(
+        { detail: "Server error" },
+        { status: 500 }
+      );
+    }
+    const body = await request.json() as { motions?: Array<{ motion_id: string; display_order: number }> };
+    const incomingMotions = body?.motions ?? [];
+    // Sort by display_order and return updated motions using ADMIN_MEETING_DETAIL motions as base
+    const sorted = [...incomingMotions].sort((a, b) => a.display_order - b.display_order);
+    const baseMotions = ADMIN_MEETING_DETAIL.motions;
+    const motionMap = new Map(baseMotions.map((m) => [m.id, m]));
+    const reordered: MotionOut[] = sorted.map((item, idx) => {
+      const base = motionMap.get(item.motion_id);
+      return {
+        id: item.motion_id,
+        title: base?.title ?? `Motion ${idx + 1}`,
+        description: base?.description ?? null,
+        display_order: idx + 1,
+        motion_number: base?.motion_number ?? null,
+        motion_type: base?.motion_type ?? "general",
+        is_visible: base?.is_visible ?? true,
+      };
+    });
+    const result: MotionReorderOut = { motions: reordered };
+    return HttpResponse.json(result);
+  }),
+
   http.patch(`${BASE}/api/admin/motions/:motionId/visibility`, async ({ params, request }) => {
     if (params.motionId === "motion-closed") {
       return HttpResponse.json({ detail: "Cannot change visibility on a closed meeting" }, { status: 409 });
@@ -604,7 +643,8 @@ export const adminHandlers = [
       id: "motion-new",
       title: body?.title ?? "New Motion",
       description: body?.description ?? null,
-      order_index: 3,
+      display_order: 3,
+      motion_number: null,
       motion_type: body?.motion_type ?? "general",
       is_visible: false,
     }, { status: 201 });
@@ -683,8 +723,8 @@ export const agmSummaryFixture: GeneralMeetingSummaryData = {
   voting_closes_at: "2024-06-01T18:00:00Z",
   building_name: "Sunset Towers",
   motions: [
-    { order_index: 0, title: "Motion 1", description: "Approve the budget" },
-    { order_index: 1, title: "Motion 2", description: null },
+    { display_order: 1, motion_number: null, title: "Motion 1", description: "Approve the budget" },
+    { display_order: 2, motion_number: null, title: "Motion 2", description: null },
   ],
 };
 
@@ -728,7 +768,9 @@ export const motionFixtures = [
     id: MOTION_ID_1,
     title: "Motion 1",
     description: "Approve the budget",
-    order_index: 0,
+    display_order: 1,
+    motion_number: null,
+    motion_type: "general" as const,
     is_visible: true,
     already_voted: false,
     submitted_choice: null,
@@ -737,7 +779,9 @@ export const motionFixtures = [
     id: MOTION_ID_2,
     title: "Motion 2",
     description: null,
-    order_index: 1,
+    display_order: 2,
+    motion_number: null,
+    motion_type: "general" as const,
     is_visible: true,
     already_voted: false,
     submitted_choice: null,
@@ -757,14 +801,16 @@ export const myBallotFixture = {
         {
           motion_id: MOTION_ID_1,
           motion_title: "Motion 1",
-          order_index: 0,
+          display_order: 1,
+          motion_number: null,
           choice: "yes" as const,
           eligible: true,
         },
         {
           motion_id: MOTION_ID_2,
           motion_title: "Motion 2",
-          order_index: 1,
+          display_order: 2,
+          motion_number: null,
           choice: "no" as const,
           eligible: true,
         },

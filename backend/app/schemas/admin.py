@@ -179,15 +179,17 @@ class LotOwnerImportResult(BaseModel):
 class MotionCreate(BaseModel):
     title: str
     description: str | None = None
-    order_index: int
+    display_order: int
     motion_type: MotionType = MotionType.general
+    motion_number: str | None = None
 
 
 class MotionOut(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
-    order_index: int
+    display_order: int
+    motion_number: str | None
     motion_type: MotionType
     is_visible: bool = True
 
@@ -328,7 +330,8 @@ class MotionDetail(BaseModel):
     id: uuid.UUID
     title: str
     description: str | None
-    order_index: int
+    display_order: int
+    motion_number: str | None
     motion_type: MotionType
     is_visible: bool = True
     tally: MotionTally
@@ -407,6 +410,24 @@ class ProxyImportResult(BaseModel):
 class FinancialPositionImportResult(BaseModel):
     updated: int
     skipped: int
+
+
+# ---------------------------------------------------------------------------
+# Motion reorder schemas
+# ---------------------------------------------------------------------------
+
+
+class MotionReorderItem(BaseModel):
+    motion_id: uuid.UUID
+    display_order: int
+
+
+class MotionReorderRequest(BaseModel):
+    motions: list[MotionReorderItem]
+
+
+class MotionReorderOut(BaseModel):
+    motions: list[MotionOut]
 
 
 # ---------------------------------------------------------------------------

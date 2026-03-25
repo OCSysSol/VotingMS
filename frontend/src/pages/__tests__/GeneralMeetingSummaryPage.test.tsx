@@ -105,6 +105,25 @@ describe("GeneralMeetingSummaryPage", () => {
     });
   });
 
+  it("displays motion_number as label when set on a motion", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/:meetingId/summary`, () =>
+        HttpResponse.json({
+          ...agmSummaryFixture,
+          motions: [
+            { display_order: 1, motion_number: "SR-1", title: "Special Motion", description: null },
+            { display_order: 2, motion_number: null, title: "General Motion", description: null },
+          ],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/SR-1\. Special Motion/)).toBeInTheDocument();
+      expect(screen.getByText(/2\. General Motion/)).toBeInTheDocument();
+    });
+  });
+
   it("renders motion description when present", async () => {
     renderPage();
     await waitFor(() => {
