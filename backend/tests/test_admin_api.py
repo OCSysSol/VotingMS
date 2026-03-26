@@ -6673,17 +6673,18 @@ class TestMotionManagement:
     async def test_update_motion_all_fields_returns_200(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """PATCH with all fields returns 200 and updated values."""
+        """PATCH with all fields (including motion_number) returns 200 and updated values."""
         _agm, motion = await self._create_meeting_with_motion(db_session, "UpdateAll")
         response = await client.patch(
             f"/api/admin/motions/{motion.id}",
-            json={"title": "Updated Title", "description": "Updated Desc", "motion_type": "special"},
+            json={"title": "Updated Title", "description": "Updated Desc", "motion_type": "special", "motion_number": "42"},
         )
         assert response.status_code == 200
         data = response.json()
         assert data["title"] == "Updated Title"
         assert data["description"] == "Updated Desc"
         assert data["motion_type"] == "special"
+        assert data["motion_number"] == "42"
         assert data["is_visible"] is False
 
     async def test_update_motion_partial_title_only(
@@ -6730,14 +6731,15 @@ class TestMotionManagement:
     async def test_update_motion_persists_to_db(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Updated fields are persisted in the DB."""
+        """Updated fields including motion_number are persisted in the DB."""
         _agm, motion = await self._create_meeting_with_motion(db_session, "PersistUpdate")
         await client.patch(
             f"/api/admin/motions/{motion.id}",
-            json={"title": "DB Persisted"},
+            json={"title": "DB Persisted", "motion_number": "99"},
         )
         await db_session.refresh(motion)
         assert motion.title == "DB Persisted"
+        assert motion.motion_number == "99"
 
     # --- Input validation (update) ---
 
@@ -6751,6 +6753,40 @@ class TestMotionManagement:
             json={},
         )
         assert response.status_code == 422
+
+    async def test_update_motion_partial_motion_number_only(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with only motion_number updates it and returns 200."""
+        _agm, motion = await self._create_meeting_with_motion(db_session, "MotionNumberOnly")
+        response = await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": "SR-1"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["motion_number"] == "SR-1"
+        # Other fields unchanged
+        assert data["title"] == motion.title
+
+    async def test_update_motion_motion_number_clear_with_empty_string(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with motion_number='' clears the motion number (stores NULL)."""
+        _agm, motion = await self._create_meeting_with_motion(db_session, "ClearMotionNumber")
+        # First set a motion number
+        await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": "5"},
+        )
+        # Now clear it with empty string
+        response = await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": ""},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["motion_number"] is None
 
     async def test_update_motion_empty_title_returns_422(
         self, client: AsyncClient, db_session: AsyncSession

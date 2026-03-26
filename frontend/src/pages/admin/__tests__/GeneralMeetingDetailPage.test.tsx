@@ -471,6 +471,120 @@ describe("GeneralMeetingDetailPage", () => {
     unmount();
   });
 
+  it("clicking 'Move to top' in visibility table calls reorder API", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", ({ params }) => {
+        if (params.meetingId === "agm-move-top-test") {
+          return HttpResponse.json({
+            ...ADMIN_MEETING_DETAIL,
+            id: "agm-move-top-test",
+            motions: [
+              { ...ADMIN_MEETING_DETAIL.motions[0], id: "mt1", display_order: 1, title: "Motion First" },
+              {
+                id: "mt2",
+                title: "Motion Last",
+                description: null,
+                display_order: 2,
+                motion_number: null,
+                motion_type: "general",
+                is_visible: true,
+                tally: ADMIN_MEETING_DETAIL.motions[0].tally,
+                voter_lists: ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ detail: "not found" }, { status: 404 });
+      })
+    );
+    const { unmount } = renderPage("agm-move-top-test");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move Motion Last to top" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Move Motion Last to top" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    unmount();
+  });
+
+  it("clicking 'Move up' in visibility table calls reorder API", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", ({ params }) => {
+        if (params.meetingId === "agm-move-up-test") {
+          return HttpResponse.json({
+            ...ADMIN_MEETING_DETAIL,
+            id: "agm-move-up-test",
+            motions: [
+              { ...ADMIN_MEETING_DETAIL.motions[0], id: "mu1", display_order: 1, title: "Motion Alpha" },
+              {
+                id: "mu2",
+                title: "Motion Beta",
+                description: null,
+                display_order: 2,
+                motion_number: null,
+                motion_type: "general",
+                is_visible: true,
+                tally: ADMIN_MEETING_DETAIL.motions[0].tally,
+                voter_lists: ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ detail: "not found" }, { status: 404 });
+      })
+    );
+    const { unmount } = renderPage("agm-move-up-test");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move Motion Beta up" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Move Motion Beta up" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    unmount();
+  });
+
+  it("clicking 'Move down' in visibility table calls reorder API", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", ({ params }) => {
+        if (params.meetingId === "agm-move-down-test") {
+          return HttpResponse.json({
+            ...ADMIN_MEETING_DETAIL,
+            id: "agm-move-down-test",
+            motions: [
+              { ...ADMIN_MEETING_DETAIL.motions[0], id: "md1", display_order: 1, title: "Motion Gamma" },
+              {
+                id: "md2",
+                title: "Motion Delta",
+                description: null,
+                display_order: 2,
+                motion_number: null,
+                motion_type: "general",
+                is_visible: true,
+                tally: ADMIN_MEETING_DETAIL.motions[0].tally,
+                voter_lists: ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({ detail: "not found" }, { status: 404 });
+      })
+    );
+    const { unmount } = renderPage("agm-move-down-test");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Move Motion Gamma down" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Move Motion Gamma down" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+    unmount();
+  });
+
   it("Escape key closes delete modal without navigating", async () => {
     mockNavigate.mockClear();
     const user = userEvent.setup();
@@ -948,7 +1062,7 @@ describe("Edit motion modal", () => {
     expect(screen.getByText("Edit Motion")).toBeInTheDocument();
   });
 
-  it("modal pre-fills form fields with current motion values", async () => {
+  it("modal pre-fills form fields with current motion values including motion number", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
@@ -962,6 +1076,48 @@ describe("Edit motion modal", () => {
     expect(dialog.querySelector("#modal-edit-description")).toHaveValue(
       ADMIN_MEETING_DETAIL_HIDDEN_MOTION.motions[0].description ?? ""
     );
+    expect(dialog.querySelector("#modal-edit-motion-number")).toHaveValue(
+      ADMIN_MEETING_DETAIL_HIDDEN_MOTION.motions[0].motion_number ?? ""
+    );
+  });
+
+  it("motion number input is visible in the edit modal", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Motion number (optional)")).toBeInTheDocument();
+  });
+
+  it("editing motion number sends updated value to API", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.patch("http://localhost:8000/api/admin/motions/:motionId", async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        const motion = ADMIN_MEETING_DETAIL_HIDDEN_MOTION.motions[0];
+        return HttpResponse.json({
+          ...motion,
+          id: "m-hidden",
+          motion_number: capturedBody.motion_number ?? motion.motion_number,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const motionNumberInput = screen.getByLabelText("Motion number (optional)");
+    await user.clear(motionNumberInput);
+    await user.type(motionNumberInput, "SR-1");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(capturedBody).not.toBeNull();
+    });
+    expect(capturedBody!.motion_number).toBe("SR-1");
   });
 
   it("modal pre-fills motion_number from the motion being edited", async () => {

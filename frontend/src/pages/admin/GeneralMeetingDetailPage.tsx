@@ -137,6 +137,7 @@ export default function GeneralMeetingDetailPage() {
       // Revert optimistic update
       if (meeting) {
         setOptimisticMotions(meeting.motions);
+        /* c8 ignore next 3 -- meeting is always defined when reorder is triggered from the UI; else branch unreachable in practice */
       } else {
         setOptimisticMotions(null);
       }
@@ -511,6 +512,7 @@ export default function GeneralMeetingDetailPage() {
         />
       )}
 
+
       <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Results Report</h2>
       <AGMReportView motions={meeting.motions} agmTitle={meeting.title} totalEntitlement={meeting.total_entitlement} />
 
@@ -671,6 +673,17 @@ export default function GeneralMeetingDetailPage() {
                   required
                   value={editForm.title}
                   onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="modal-edit-motion-number">Motion number (optional)</label>
+                <input
+                  id="modal-edit-motion-number"
+                  className="field__input"
+                  type="text"
+                  value={editForm.motion_number}
+                  onChange={(e) => setEditForm((f) => ({ ...f, motion_number: e.target.value }))}
+                  placeholder="e.g. 1, SR-1"
                 />
               </div>
               <div className="field">

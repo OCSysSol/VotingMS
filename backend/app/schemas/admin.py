@@ -205,6 +205,7 @@ class MotionVisibilityOut(BaseModel):
     title: str
     description: str | None
     display_order: int
+    motion_number: str | None
     motion_type: MotionType
     is_visible: bool
 
@@ -228,10 +229,16 @@ class MotionUpdateRequest(BaseModel):
     title: str | None = None
     description: str | None = None
     motion_type: MotionType | None = None
+    motion_number: str | None = None
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "MotionUpdateRequest":
-        if self.title is None and self.description is None and self.motion_type is None:
+        if (
+            self.title is None
+            and self.description is None
+            and self.motion_type is None
+            and self.motion_number is None
+        ):
             raise ValueError("At least one field must be provided")
         return self
 

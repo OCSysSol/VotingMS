@@ -1435,6 +1435,9 @@ async def update_motion(
         motion.description = data.description
     if data.motion_type is not None:
         motion.motion_type = data.motion_type
+    if data.motion_number is not None:
+        stripped = data.motion_number.strip()
+        motion.motion_number = stripped if stripped else None
 
     await db.flush()
     await db.commit()
@@ -1445,6 +1448,7 @@ async def update_motion(
         "title": motion.title,
         "description": motion.description,
         "display_order": motion.display_order,
+        "motion_number": motion.motion_number,
         "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
         "is_visible": motion.is_visible,
     }
