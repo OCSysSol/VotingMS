@@ -121,12 +121,18 @@ class TestSecurityHeaders:
         assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
 
     async def test_content_security_policy_present(self, client: AsyncClient):
-        """Content-Security-Policy header is set with expected directives."""
+        """Content-Security-Policy header is set with expected directives.
+
+        script-src includes 'unsafe-inline' to permit Vite's module preload
+        polyfill inline script that is injected into index.html at build time.
+        """
         response = await client.get("/api/health")
         csp = response.headers.get("Content-Security-Policy", "")
         assert "default-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
         assert "script-src 'self'" in csp
+        assert "'unsafe-inline'" in csp
+        assert "connect-src 'self'" in csp
 
     async def test_csp_allows_google_fonts(self, client: AsyncClient):
         """CSP permits Google Fonts for font-src and style-src."""
