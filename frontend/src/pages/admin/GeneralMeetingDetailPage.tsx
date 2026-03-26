@@ -238,11 +238,24 @@ export default function GeneralMeetingDetailPage() {
       setPendingVisibilityMotionId(motionId);
       return toggleMotionVisibility(motionId, isVisible);
     },
-    onSuccess: () => {
-      setPendingVisibilityMotionId(null);
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    onMutate: async ({ motionId, isVisible }) => {
+      await queryClient.cancelQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      const previous = queryClient.getQueryData(["admin", "general-meetings", meetingId]);
+      queryClient.setQueryData(["admin", "general-meetings", meetingId], (old: any) => {
+        if (!old) return old;
+        return {
+          ...old,
+          motions: old.motions.map((m: any) =>
+            m.id === motionId ? { ...m, is_visible: isVisible } : m
+          ),
+        };
+      });
+      return { previous };
     },
-    onError: (error: Error, variables) => {
+    onError: (error: Error, variables, context: any) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["admin", "general-meetings", meetingId], context.previous);
+      }
       setPendingVisibilityMotionId(null);
       const isVotesError = error.message.includes("received votes");
       if (isVotesError) {
@@ -254,6 +267,10 @@ export default function GeneralMeetingDetailPage() {
         ? "Cannot change visibility on a closed meeting"
         : "Failed to update visibility";
       setVisibilityErrors((prev) => ({ ...prev, [variables.motionId]: msg }));
+    },
+    onSuccess: () => {
+      setPendingVisibilityMotionId(null);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
   });
 

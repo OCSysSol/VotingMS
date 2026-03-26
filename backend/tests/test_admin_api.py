@@ -6856,6 +6856,56 @@ class TestMotionManagement:
             )
             assert response.status_code == 401
 
+    async def test_update_motion_all_fields_includes_motion_number(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with all fields including motion_number returns 200 with motion_number set."""
+        _agm, motion = await self._create_meeting_with_motion(db_session, "UpdateAllMN")
+        response = await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"title": "Updated Title MN", "description": "Updated Desc MN", "motion_type": "special", "motion_number": "42"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["title"] == "Updated Title MN"
+        assert data["description"] == "Updated Desc MN"
+        assert data["motion_type"] == "special"
+        assert data["motion_number"] == "42"
+        assert data["is_visible"] is False
+
+    async def test_update_motion_partial_motion_number_only(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with only motion_number updates it; other fields unchanged."""
+        _agm, motion = await self._create_meeting_with_motion(db_session, "PartialMN")
+        response = await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": "SR-1"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["motion_number"] == "SR-1"
+        assert data["title"] == motion.title
+
+    async def test_update_motion_motion_number_empty_string_clears(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with motion_number='' clears the motion_number to null."""
+        _agm, motion = await self._create_meeting_with_motion(db_session, "ClearMN")
+        # First set a motion number
+        await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": "OLD-NUM"},
+        )
+        # Now clear it with empty string
+        response = await client.patch(
+            f"/api/admin/motions/{motion.id}",
+            json={"motion_number": ""},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["motion_number"] is None
+
     # --- Happy path (delete) ---
 
     async def test_delete_motion_returns_204(
