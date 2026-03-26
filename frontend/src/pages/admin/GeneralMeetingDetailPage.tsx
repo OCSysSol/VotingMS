@@ -133,7 +133,7 @@ export default function GeneralMeetingDetailPage() {
       setOptimisticMotions(null);
       setReorderError(null);
     },
-    onError: (err: Error, previousOrder) => {
+    onError: (err: Error, _previousOrder) => {
       // Revert optimistic update
       if (meeting) {
         setOptimisticMotions(meeting.motions);

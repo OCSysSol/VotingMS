@@ -12,6 +12,7 @@ const motion = {
   motion_type: "general" as const,
   is_visible: true,
   already_voted: false,
+  submitted_choice: null,
 };
 
 const motionNoDesc = {
@@ -23,6 +24,7 @@ const motionNoDesc = {
   motion_type: "general" as const,
   is_visible: true,
   already_voted: false,
+  submitted_choice: null,
 };
 
 const motionSpecial = {
@@ -34,6 +36,7 @@ const motionSpecial = {
   motion_type: "special" as const,
   is_visible: true,
   already_voted: false,
+  submitted_choice: null,
 };
 
 const motionWithNumber = {
@@ -43,6 +46,9 @@ const motionWithNumber = {
   display_order: 4,
   motion_number: "SR-1",
   motion_type: "general" as const,
+  is_visible: true,
+  already_voted: false,
+  submitted_choice: null,
 };
 
 describe("MotionCard", () => {

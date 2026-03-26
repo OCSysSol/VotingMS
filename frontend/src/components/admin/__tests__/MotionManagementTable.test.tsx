@@ -58,7 +58,6 @@ const MOTION_B = makeMotion("m2", "Beta Motion", 2);
 const MOTION_C = makeMotion("m3", "Gamma Motion", 3, { motion_type: "special" });
 
 const HIDDEN_A = makeMotion("m-h1", "Hidden Alpha", 1, { is_visible: false });
-const HIDDEN_B = makeMotion("m-h2", "Hidden Beta", 2, { is_visible: false });
 
 function defaultProps(overrides: Partial<MotionManagementTableProps> = {}): MotionManagementTableProps {
   return {
@@ -238,7 +237,7 @@ describe("MotionManagementTable", () => {
     act(() => {
       capturedOnDragEnd!({
         active: { id: "m3", data: { current: undefined } } as DragEndEvent["active"],
-        over: { id: "m1", data: { current: undefined }, rect: { current: { initial: null, translated: null } } } as DragEndEvent["over"],
+        over: { id: "m1", disabled: false, data: { current: undefined }, rect: { current: { initial: null, translated: null } } } as unknown as DragEndEvent["over"],
         activatorEvent: {} as Event,
         collisions: null,
         delta: { x: 0, y: 0 },

@@ -178,8 +178,8 @@ describe("CreateGeneralMeetingForm", () => {
 
   it("pre-populates motions after successful Excel parse", async () => {
     const motions = [
-      { title: "Imported Motion 1", description: "", motion_type: "general" as const },
-      { title: "Imported Motion 2", description: "", motion_type: "special" as const },
+      { title: "Imported Motion 1", description: "", motion_number: "", motion_type: "general" as const },
+      { title: "Imported Motion 2", description: "", motion_number: "", motion_type: "special" as const },
     ];
     mockParse.mockResolvedValue({ motions });
 
