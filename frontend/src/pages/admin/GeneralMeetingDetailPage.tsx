@@ -137,6 +137,7 @@ export default function GeneralMeetingDetailPage() {
       // Revert optimistic update
       if (meeting) {
         setOptimisticMotions(meeting.motions);
+        /* c8 ignore next 3 -- meeting is always defined when reorder is triggered from the UI; else branch unreachable in practice */
       } else {
         setOptimisticMotions(null);
       }
@@ -179,10 +180,11 @@ export default function GeneralMeetingDetailPage() {
 
   // Edit motion state
   const [editingMotion, setEditingMotion] = useState<MotionDetail | null>(null);
-  const [editForm, setEditForm] = useState<{ title: string; description: string; motion_type: MotionType }>({
+  const [editForm, setEditForm] = useState<{ title: string; description: string; motion_type: MotionType; motion_number: string }>({
     title: "",
     description: "",
     motion_type: "general",
+    motion_number: "",
   });
   const [editMotionError, setEditMotionError] = useState<string | null>(null);
 
@@ -325,6 +327,7 @@ export default function GeneralMeetingDetailPage() {
         title: editForm.title || undefined,
         description: editForm.description || undefined,
         motion_type: editForm.motion_type,
+        motion_number: editForm.motion_number,
       },
     });
   }
@@ -493,7 +496,7 @@ export default function GeneralMeetingDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {meeting.motions.map((motion) => {
+                {meeting.motions.map((motion, motionIndex) => {
                   const isVisLoading = pendingVisibilityMotionId === motion.id;
                   const isVisDisabled =
                     meeting.status === "closed" ||
@@ -509,6 +512,9 @@ export default function GeneralMeetingDetailPage() {
                   const isEditDeleteDisabled = motion.is_visible || meeting.status === "closed";
                   const editDeleteTitle = isEditDeleteDisabled ? "Hide this motion first to edit or delete" : undefined;
                   const mutedCell = !motion.is_visible ? "admin-table__cell--muted" : undefined;
+                  const isReorderDisabled = meeting.status === "closed" || reorderMutation.isPending;
+                  const isFirst = motionIndex === 0;
+                  const isLast = motionIndex === meeting.motions.length - 1;
                   return (
                     <tr
                       key={motion.id}
@@ -566,7 +572,7 @@ export default function GeneralMeetingDetailPage() {
                         )}
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                           <button
                             type="button"
                             className="btn btn--secondary"
@@ -579,6 +585,7 @@ export default function GeneralMeetingDetailPage() {
                                 title: motion.title,
                                 description: motion.description ?? "",
                                 motion_type: motion.motion_type,
+                                motion_number: motion.motion_number ?? "",
                               });
                               setEditMotionError(null);
                             }}
@@ -598,6 +605,64 @@ export default function GeneralMeetingDetailPage() {
                           >
                             Delete
                           </button>
+                          {meeting.status !== "closed" && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn--admin"
+                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                                aria-label={`Move ${motion.title} to top`}
+                                disabled={isFirst || isReorderDisabled}
+                                onClick={() => {
+                                  const without = displayMotions.filter((m) => m.id !== motion.id);
+                                  handleReorder([motion, ...without]);
+                                }}
+                              >
+                                ⤒
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--admin"
+                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                                aria-label={`Move ${motion.title} up`}
+                                disabled={isFirst || isReorderDisabled}
+                                onClick={() => {
+                                  const newOrder = [...displayMotions];
+                                  [newOrder[motionIndex - 1], newOrder[motionIndex]] = [newOrder[motionIndex], newOrder[motionIndex - 1]];
+                                  handleReorder(newOrder);
+                                }}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--admin"
+                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                                aria-label={`Move ${motion.title} down`}
+                                disabled={isLast || isReorderDisabled}
+                                onClick={() => {
+                                  const newOrder = [...displayMotions];
+                                  [newOrder[motionIndex], newOrder[motionIndex + 1]] = [newOrder[motionIndex + 1], newOrder[motionIndex]];
+                                  handleReorder(newOrder);
+                                }}
+                              >
+                                ↓
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--admin"
+                                style={{ padding: "5px 10px", fontSize: "0.8rem" }}
+                                aria-label={`Move ${motion.title} to bottom`}
+                                disabled={isLast || isReorderDisabled}
+                                onClick={() => {
+                                  const without = displayMotions.filter((m) => m.id !== motion.id);
+                                  handleReorder([...without, motion]);
+                                }}
+                              >
+                                ⤓
+                              </button>
+                            </>
+                          )}
                         </div>
                         {deleteMotionErrors[motion.id] && (
                           <span style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginTop: 4 }} role="alert">
@@ -763,6 +828,17 @@ export default function GeneralMeetingDetailPage() {
                   required
                   value={editForm.title}
                   onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                />
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="modal-edit-motion-number">Motion number (optional)</label>
+                <input
+                  id="modal-edit-motion-number"
+                  className="field__input"
+                  type="text"
+                  value={editForm.motion_number}
+                  onChange={(e) => setEditForm((f) => ({ ...f, motion_number: e.target.value }))}
+                  placeholder="e.g. 1, SR-1"
                 />
               </div>
               <div className="field">

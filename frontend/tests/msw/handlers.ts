@@ -192,6 +192,7 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
       title: "Hidden Motion",
       description: "Hidden desc",
       display_order: 1,
+      motion_number: "3",
       motion_type: "general" as const,
       is_visible: false,
       tally: {
@@ -658,7 +659,7 @@ export const adminHandlers = [
     if (params.motionId === "motion-edit-fail") {
       return HttpResponse.json({ detail: "Server error" }, { status: 500 });
     }
-    const body = await request.json() as { title?: string; description?: string | null; motion_type?: string };
+    const body = await request.json() as { title?: string; description?: string | null; motion_type?: string; motion_number?: string | null };
     const motion = ADMIN_MEETING_DETAIL.motions[0];
     return HttpResponse.json({
       ...motion,
@@ -666,6 +667,7 @@ export const adminHandlers = [
       title: body?.title ?? motion.title,
       description: body?.description ?? motion.description,
       motion_type: body?.motion_type ?? motion.motion_type,
+      motion_number: body?.motion_number !== undefined ? body.motion_number : motion.motion_number,
     });
   }),
 

@@ -178,6 +178,7 @@ A web application for body corporates to run voting during Annual General Meetin
 - [ ] Motion numbers are not required to be unique per AGM — duplicate labels are allowed (e.g. two sub-motions both labelled "5a")
 - [ ] Motion number has no effect on display order; changing a motion's number does not change its position in the list
 - [ ] `motion_number` is included in all motion-related API responses: `GET /api/general-meeting/{id}/motions`, `GET /api/general-meeting/{id}/my-ballot`, `GET /api/general-meeting/{id}/summary`, `GET /api/admin/general-meetings/{id}`
+- [ ] When editing a hidden motion via the Edit Motion modal on the admin General Meeting detail page, the admin can change or clear the motion number; the new value is persisted and reflected in the motion table after saving
 - [ ] All tests pass at 100% coverage
 - [ ] Typecheck/lint passes
 - [ ] Verify in browser using dev-browser skill

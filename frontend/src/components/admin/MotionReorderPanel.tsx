@@ -36,26 +36,16 @@ interface MotionReorderPanelProps {
 
 interface SortableRowProps {
   motion: MotionDetail;
-  index: number;
   total: number;
   isEditable: boolean;
   isPending: boolean;
-  onMoveTop: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onMoveBottom: () => void;
 }
 
 function SortableRow({
   motion,
-  index,
   total,
   isEditable,
   isPending,
-  onMoveTop,
-  onMoveUp,
-  onMoveDown,
-  onMoveBottom,
 }: SortableRowProps) {
   const {
     attributes,
@@ -73,8 +63,6 @@ function SortableRow({
     opacity: isDragging ? 0.5 : 1,
   };
 
-  const isFirst = index === 0;
-  const isLast = index === total - 1;
   const label = motion.motion_number?.trim() || String(motion.display_order);
 
   return (
@@ -97,52 +85,6 @@ function SortableRow({
       <td style={{ fontVariantNumeric: "tabular-nums", width: 48 }}>{label}</td>
       <td>{motion.title}</td>
       <td style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>{motion.motion_type}</td>
-      {isEditable && (
-        <td>
-          <div style={{ display: "flex", gap: 4 }}>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ padding: "2px 6px", fontSize: "0.75rem" }}
-              aria-label={`Move ${motion.title} to top`}
-              onClick={onMoveTop}
-              disabled={isFirst || isPending}
-            >
-              ⤒
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ padding: "2px 6px", fontSize: "0.75rem" }}
-              aria-label={`Move ${motion.title} up`}
-              onClick={onMoveUp}
-              disabled={isFirst || isPending}
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ padding: "2px 6px", fontSize: "0.75rem" }}
-              aria-label={`Move ${motion.title} down`}
-              onClick={onMoveDown}
-              disabled={isLast || isPending}
-            >
-              ↓
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              style={{ padding: "2px 6px", fontSize: "0.75rem" }}
-              aria-label={`Move ${motion.title} to bottom`}
-              onClick={onMoveBottom}
-              disabled={isLast || isPending}
-            >
-              ⤓
-            </button>
-          </div>
-        </td>
-      )}
     </tr>
   );
 }
@@ -194,15 +136,6 @@ export default function MotionReorderPanel({
     onReorder(newOrder);
   }
 
-  function applyMove(newOrder: MotionDetail[]) {
-    setLocalOrder(newOrder);
-    onReorder(newOrder);
-  }
-
-  function moveItem(fromIndex: number, toIndex: number) {
-    applyMove(arrayMove(localOrder, fromIndex, toIndex));
-  }
-
   return (
     <div>
       {error && (
@@ -226,22 +159,16 @@ export default function MotionReorderPanel({
                 <th>#</th>
                 <th>Title</th>
                 <th>Type</th>
-                {isEditable && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
-              {localOrder.map((motion, index) => (
+              {localOrder.map((motion) => (
                 <SortableRow
                   key={motion.id}
                   motion={motion}
-                  index={index}
                   total={localOrder.length}
                   isEditable={isEditable}
                   isPending={isPending}
-                  onMoveTop={() => moveItem(index, 0)}
-                  onMoveUp={() => moveItem(index, index - 1)}
-                  onMoveDown={() => moveItem(index, index + 1)}
-                  onMoveBottom={() => moveItem(index, localOrder.length - 1)}
                 />
               ))}
             </tbody>

@@ -497,6 +497,7 @@ export interface MotionVisibilityOut {
   title: string;
   description: string | null;
   display_order: number;
+  motion_number: string | null;
   motion_type: MotionType;
   is_visible: boolean;
 }
@@ -511,6 +512,7 @@ export interface UpdateMotionRequest {
   title?: string;
   description?: string | null;
   motion_type?: MotionType;
+  motion_number?: string | null;
 }
 
 export async function addMotionToMeeting(
