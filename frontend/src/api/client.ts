@@ -7,7 +7,7 @@ export async function apiFetch<T>(
   // Do not set Content-Type when the body is FormData — the browser sets the
   // correct multipart/form-data boundary automatically. Only inject the JSON
   // content-type for string bodies (i.e. JSON.stringify output).
-  const contentTypeHeader =
+  const contentTypeHeader: Record<string, string> =
     options?.body instanceof FormData
       ? {}
       : { "Content-Type": "application/json" };

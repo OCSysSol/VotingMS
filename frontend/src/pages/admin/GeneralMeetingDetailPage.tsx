@@ -133,7 +133,7 @@ export default function GeneralMeetingDetailPage() {
       setOptimisticMotions(null);
       setReorderError(null);
     },
-    onError: (err: Error, previousOrder) => {
+    onError: (err: Error, _previousOrder) => {
       // Revert optimistic update
       if (meeting) {
         setOptimisticMotions(meeting.motions);
@@ -710,16 +710,6 @@ export default function GeneralMeetingDetailPage() {
                   className="field__input"
                   value={editForm.description}
                   onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
-                />
-              </div>
-              <div className="field">
-                <label className="field__label" htmlFor="modal-edit-motion-number">Motion number (optional)</label>
-                <input
-                  id="modal-edit-motion-number"
-                  className="field__input"
-                  type="text"
-                  value={editForm.motion_number}
-                  onChange={(e) => setEditForm((f) => ({ ...f, motion_number: e.target.value }))}
                 />
               </div>
               <div className="field">
