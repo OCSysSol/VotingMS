@@ -81,6 +81,77 @@ describe("VotingPage", () => {
     });
   });
 
+  it("uses display_order for both motions when first visible motion has display_order 2 and second has display_order 3", async () => {
+    // Simulates a meeting where motion 1 is hidden (excluded from the visible list).
+    // The visible motions have display_order 2 and 3.
+    // Bug: position={index + 1} would render "Motion 1" / "Motion 2".
+    // Fix: position={motion.display_order} renders "Motion 2" / "Motion 3".
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Second Motion",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Third Motion",
+            description: null,
+            display_order: 3,
+            motion_number: null,
+            motion_type: "special",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+          },
+        ])
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Motion 2")).toBeInTheDocument();
+      expect(screen.getByText("Motion 3")).toBeInTheDocument();
+    });
+    // Array-index labels must NOT appear
+    expect(screen.queryByText("Motion 1")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Motion {motion_number}' heading when motion has a non-null motion_number", async () => {
+    // When motion_number is set (e.g. "SR-1"), the label should read "Motion SR-1",
+    // not "Motion 1" (display_order fallback).
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Special Resolution Budget",
+            description: null,
+            display_order: 1,
+            motion_number: "SR-1",
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+          },
+        ])
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      // "Motion SR-1" should appear (MotionCard prepends "Motion " to motion_number)
+      expect(screen.getByText("Motion SR-1")).toBeInTheDocument();
+    });
+    // The numeric position label must NOT appear as the heading
+    expect(screen.queryByText("Motion 1")).not.toBeInTheDocument();
+  });
+
   it("renders AGM title and building name", async () => {
     renderPage();
     await waitFor(() => {
