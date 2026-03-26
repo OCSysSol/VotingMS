@@ -53,13 +53,42 @@ describe("ConfirmationPage", () => {
     });
   });
 
-  it("renders each motion with vote", async () => {
+  it("renders each motion with vote using display_order when motion_number is null", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("1. Motion 1")).toBeInTheDocument();
+      expect(screen.getByText("Motion 1. Motion 1")).toBeInTheDocument();
       expect(screen.getByText("For")).toBeInTheDocument();
-      expect(screen.getByText("2. Motion 2")).toBeInTheDocument();
+      expect(screen.getByText("Motion 2. Motion 2")).toBeInTheDocument();
       expect(screen.getByText("Against")).toBeInTheDocument();
+    });
+  });
+
+  it("renders each motion with vote using motion_number when set", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "owner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo-e2e",
+              lot_number: "E2E-1",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: "A1", choice: "yes", eligible: true },
+                { motion_id: "m2", motion_title: "Motion 2", display_order: 2, motion_number: "  BBB  ", choice: "no", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Motion A1. Motion 1")).toBeInTheDocument();
+      expect(screen.getByText("Motion BBB. Motion 2")).toBeInTheDocument();
     });
   });
 
@@ -114,8 +143,8 @@ describe("ConfirmationPage", () => {
     renderPage();
     await waitFor(() => {
       const items = screen.getAllByRole("listitem");
-      expect(items[0]).toHaveTextContent("1. First Motion");
-      expect(items[1]).toHaveTextContent("2. Second Motion");
+      expect(items[0]).toHaveTextContent("Motion 1. First Motion");
+      expect(items[1]).toHaveTextContent("Motion 2. Second Motion");
     });
   });
 
@@ -367,6 +396,68 @@ describe("ConfirmationPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Lot 1A")).toBeInTheDocument();
       expect(screen.getByText("Not eligible")).toBeInTheDocument();
+    });
+  });
+
+  it("renders multi-lot ballot motion labels using motion_number when set", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "voter@test.com",
+          meeting_title: "Test Meeting",
+          building_name: "Test Building",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Budget Motion", display_order: 1, motion_number: "A1", choice: "yes", eligible: true },
+              ],
+            },
+            {
+              lot_owner_id: "lo2",
+              lot_number: "2B",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Budget Motion", display_order: 1, motion_number: "A1", choice: "no", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getAllByText("Motion A1. Budget Motion")).toHaveLength(2);
+    });
+  });
+
+  it("falls back to display_order when motion_number is whitespace in single-lot ballot", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "voter@test.com",
+          meeting_title: "Test Meeting",
+          building_name: "Test Building",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion", display_order: 5, motion_number: "   ", choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Motion 5. Motion")).toBeInTheDocument();
     });
   });
 });

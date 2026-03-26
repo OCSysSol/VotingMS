@@ -1,5 +1,5 @@
 interface SubmitDialogProps {
-  unansweredMotions: { display_order: number; title: string }[];
+  unansweredMotions: { display_order: number; motion_number: string | null; title: string }[];
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -29,7 +29,7 @@ export function SubmitDialog({ unansweredMotions, onConfirm, onCancel }: SubmitD
             <ul className="dialog__list">
               {unansweredMotions.map((m) => (
                 <li className="dialog__list-item" key={m.display_order}>
-                  Motion {m.display_order} — {m.title}
+                  Motion {m.motion_number?.trim() || m.display_order} — {m.title}
                 </li>
               ))}
             </ul>

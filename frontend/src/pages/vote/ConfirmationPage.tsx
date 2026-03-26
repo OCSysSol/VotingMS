@@ -54,7 +54,7 @@ export function ConfirmationPage() {
   }
 
   // Collect all votes across submitted lots, deduplicated by motion_id (first lot wins)
-  const allVotes: { motion_id: string; motion_title: string; display_order: number; choice: string; lot_number: string }[] = [];
+  const allVotes: { motion_id: string; motion_title: string; display_order: number; motion_number: string | null; choice: string; lot_number: string }[] = [];
   for (const lot of data.submitted_lots) {
     for (const v of lot.votes) {
       if (!allVotes.find((x) => x.motion_id === v.motion_id && x.lot_number === lot.lot_number)) {
@@ -101,7 +101,7 @@ export function ConfirmationPage() {
                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                       {[...lot.votes].sort((a, b) => a.display_order - b.display_order).map((v) => (
                         <li className="vote-item" key={v.motion_id}>
-                          <span className="vote-item__motion">{v.display_order}. {v.motion_title}</span>
+                          <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
                           <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
                             {CHOICE_LABELS[v.choice] ?? v.choice}
                           </span>
@@ -112,7 +112,7 @@ export function ConfirmationPage() {
                 ))
               : sortedVotes.map((v) => (
                   <li className="vote-item" key={v.motion_id}>
-                    <span className="vote-item__motion">{v.display_order}. {v.motion_title}</span>
+                    <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
                     <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
                       {CHOICE_LABELS[v.choice] ?? v.choice}
                     </span>
