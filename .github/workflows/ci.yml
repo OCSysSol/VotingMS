@@ -80,3 +80,12 @@ jobs:
 
       - name: Security lint (eslint-plugin-security)
         run: cd frontend && npm run lint:security
+
+  semgrep:
+    name: Semgrep security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: semgrep/semgrep-action@v1
+        with:
+          config: .semgrep/rules.yml
