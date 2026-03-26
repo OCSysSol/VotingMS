@@ -55,6 +55,23 @@ test.describe("Voter flow", () => {
   });
 });
 
+// requires: sec/headers-cors-validation
+// This test will fail until the security headers middleware is deployed.
+// It is intentionally written as a normal (non-skipped) test so that it acts
+// as a regression gate after sec/headers-cors-validation merges.
+test.describe("Security headers", () => {
+  test("API responses include required security headers", async ({ request }) => {
+    const response = await request.get('/api/health');
+    expect(response.status()).toBe(200);
+
+    const headers = response.headers();
+    expect(headers['x-frame-options']).toBe('DENY');
+    expect(headers['x-content-type-options']).toBe('nosniff');
+    expect(headers['strict-transport-security']).toContain('max-age=');
+    expect(headers['content-security-policy']).toContain("frame-ancestors 'none'");
+  });
+});
+
 test.describe("Admin flow", () => {
   test("admin login page loads without console errors", async ({ page }) => {
     await page.goto("/admin/login");
