@@ -1,6 +1,6 @@
-> **For any feature, bug fix, or task — spawn the `agm-orchestrate` agent as the entry point.**
-> All coordination, agent spawning, and tool execution is delegated through that agent.
-> Direct tool use in the main session is prohibited. See `.claude/agents/agm-orchestrate.md` for the full protocol.
+> **For any feature, bug fix, or task — invoke the `/orchestrate-feature-dev` skill as the entry point.**
+> The skill runs in the main session and coordinates all sub-agents (design, implement, test, cleanup) via the `Agent` tool.
+> See `.claude/skills/orchestrate-feature-dev/SKILL.md` for the full protocol.
 
 ---
 
@@ -126,11 +126,11 @@ Do NOT delete/archive real production data. Known real buildings: "The Vale", "S
 
 ## Development Workflow
 
-Agents live in `.claude/agents/`. The orchestrator (`agm-orchestrate`) coordinates all work — design → implement → test → cleanup. PRDs go in `tasks/prd/`, design docs in `tasks/design/`.
+Invoke `/orchestrate-feature-dev` to coordinate all work — design → implement → test → cleanup. The skill runs in the main session and spawns `agm-design`, `agm-implement`, `agm-test`, and `agm-cleanup` sub-agents. PRDs go in `tasks/prd/`, design docs in `tasks/design/`.
 
 ### Worktree-first rule
 
-A branch worktree must be created before any design, implementation, or test work begins. All agents work exclusively inside that worktree — never the main repo root, which may be on a different branch. See the orchestrator agent (`.claude/agents/agm-orchestrate.md` Step a) for the full protocol and commands.
+A branch worktree must be created before any design, implementation, or test work begins. All agents work exclusively inside that worktree — never the main repo root, which may be on a different branch. See `.claude/skills/orchestrate-feature-dev/SKILL.md` (Step a) for the full protocol and commands.
 
 ---
 
