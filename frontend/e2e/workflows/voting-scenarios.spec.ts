@@ -881,3 +881,168 @@ test.describe("WF7: In-arrear mixed lots — not_eligible on General, normal on 
     }
   });
 });
+
+// ── Voter — motion position with hidden motions ───────────────────────────────
+
+test.describe("Voter — motion position labels with hidden motions", () => {
+  test.describe.configure({ mode: "serial" });
+
+  // Use separate buildings for Scenarios D and E so their open meetings do not
+  // conflict. createOpenMeeting closes all open meetings for a building before
+  // creating a new one — if both meetings shared a building, creating Meeting E
+  // would close Meeting D, causing the OTP lookup to target the wrong meeting.
+  const BUILDING_D = `WF-Hidden Motion D-${RUN_SUFFIX}`;
+  const BUILDING_E = `WF-Custom Number E-${RUN_SUFFIX}`;
+  // Use a fixed short email instead of deriving from RUN_SUFFIX to avoid
+  // truncation issues when the branch name suffix exceeds email length limits.
+  const VOTER_EMAIL = "wf-hidden-voter-mpos@test.com";
+  const MOTION_VISIBLE = "Visible Motion Only";
+  const MOTION_CUSTOM_NUMBER = "Custom Numbered Motion";
+
+  let meetingIdHidden = "";
+  let meetingIdCustomNumber = "";
+  let buildingIdD = "";
+  let buildingIdE = "";
+
+  test.beforeAll(async () => {
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+
+    // Building D — used exclusively for Scenario D (hidden motion test)
+    buildingIdD = await seedBuilding(api, BUILDING_D, "wf-hidden-mgr-d@test.com");
+    await seedLotOwner(api, buildingIdD, {
+      lotNumber: "HIDDEN-1",
+      emails: [VOTER_EMAIL],
+      unitEntitlement: 50,
+      financialPosition: "normal",
+    });
+
+    // Building E — used exclusively for Scenario E (custom motion number test)
+    buildingIdE = await seedBuilding(api, BUILDING_E, "wf-hidden-mgr-e@test.com");
+    await seedLotOwner(api, buildingIdE, {
+      lotNumber: "HIDDEN-1",
+      emails: [VOTER_EMAIL],
+      unitEntitlement: 50,
+      financialPosition: "normal",
+    });
+
+    // Meeting D: two motions, first one hidden. Voter sees only motion 2.
+    meetingIdHidden = await createOpenMeeting(api, buildingIdD, `WF Hidden Motion D-${RUN_SUFFIX}`, [
+      {
+        title: "Hidden First Motion",
+        description: "This motion is hidden from voters.",
+        orderIndex: 1,
+        motionType: "general",
+      },
+      {
+        title: MOTION_VISIBLE,
+        description: "This is the visible second motion.",
+        orderIndex: 2,
+        motionType: "general",
+      },
+    ]);
+
+    // Motions default to is_visible=true. Explicitly hide motion 1 and ensure
+    // motion 2 is visible so Scenario D sees exactly one motion card.
+    const detailD = await api.get(`/api/admin/general-meetings/${meetingIdHidden}`);
+    const detailDData = await detailD.json() as { motions: { id: string; display_order: number }[] };
+    const hiddenMotion = detailDData.motions.find((m) => m.display_order === 1);
+    const visibleMotion = detailDData.motions.find((m) => m.display_order === 2);
+    if (hiddenMotion) {
+      await api.patch(`/api/admin/motions/${hiddenMotion.id}/visibility`, {
+        data: { is_visible: false },
+      });
+    }
+    if (visibleMotion) {
+      await api.patch(`/api/admin/motions/${visibleMotion.id}/visibility`, {
+        data: { is_visible: true },
+      });
+    }
+
+    // Meeting E: one motion with a custom motion_number "BBB", set at creation time.
+    // The motionNumber is included in the creation payload so there is no need for
+    // a separate PATCH — this avoids any potential race/Lambda caching issues.
+    meetingIdCustomNumber = await createOpenMeeting(api, buildingIdE, `WF Custom Number E-${RUN_SUFFIX}`, [
+      {
+        title: MOTION_CUSTOM_NUMBER,
+        description: "This motion has a custom number.",
+        orderIndex: 1,
+        motionType: "general",
+        motionNumber: "BBB",
+      },
+    ]);
+
+    await api.dispose();
+  }, { timeout: 60000 });
+
+  // Scenario D — Correct motion labels when first motion is hidden
+  test("Scenario D: visible motion card shows 'MOTION 2' when first motion is hidden", async ({ page }) => {
+    test.setTimeout(120000);
+
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+
+    await goToAuthPage(page, BUILDING_D);
+    await authenticateVoter(page, VOTER_EMAIL, () => getTestOtp(api, VOTER_EMAIL, meetingIdHidden));
+    await api.dispose();
+
+    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
+
+    // The visible motion (display_order=2) should show "MOTION 2" (case-insensitive match)
+    // MotionCard renders the number in a <p> with class motion-card__number
+    const motionCards = page.locator(".motion-card");
+    await expect(motionCards).toHaveCount(1, { timeout: 10000 });
+
+    // The motion position label should read "Motion 2", not "Motion 1"
+    await expect(page.locator(".motion-card__number")).toHaveText(/Motion 2/i, { timeout: 10000 });
+    await expect(page.locator(".motion-card__number")).not.toHaveText(/Motion 1/i);
+  });
+
+  // Scenario E — Custom motion_number shows with "MOTION" prefix
+  test("Scenario E: motion card label shows 'MOTION BBB' for motion with motion_number=BBB", async ({ page }) => {
+    test.setTimeout(120000);
+
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+
+    await goToAuthPage(page, BUILDING_E);
+    await authenticateVoter(page, VOTER_EMAIL, () => getTestOtp(api, VOTER_EMAIL, meetingIdCustomNumber));
+    await api.dispose();
+
+    await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
+
+    // The motion card should show "Motion BBB"
+    await expect(page.locator(".motion-card__number")).toHaveText(/Motion BBB/i, { timeout: 10000 });
+  });
+
+  test.afterAll(async () => {
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+    if (meetingIdHidden) {
+      // Close before delete since it's open
+      await api.post(`/api/admin/general-meetings/${meetingIdHidden}/close`).catch(() => {});
+      await api.delete(`/api/admin/general-meetings/${meetingIdHidden}`);
+    }
+    if (meetingIdCustomNumber) {
+      await api.post(`/api/admin/general-meetings/${meetingIdCustomNumber}/close`).catch(() => {});
+      await api.delete(`/api/admin/general-meetings/${meetingIdCustomNumber}`);
+    }
+    await api.dispose();
+  });
+});

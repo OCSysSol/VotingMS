@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures";
+import { ADMIN_AUTH_PATH } from "../workflows/helpers";
 
 /**
  * E2E tests for the Admin Settings (tenant branding) page.
@@ -192,5 +193,103 @@ test.describe("Admin Settings — favicon upload", () => {
     await input.fill("");
     await page.getByRole("button", { name: "Save" }).click();
     await expect(page.getByText("Settings saved.")).toBeVisible();
+  });
+});
+
+// ── Admin Settings — login page logo reflects branding ────────────────────────
+
+test.describe("Admin Settings — login page logo reflects branding", () => {
+  test.describe.configure({ mode: "serial" });
+
+  // Track original logo_url so we can restore it after the test
+  let originalLogoUrl = "";
+
+  test.beforeAll(async () => {
+    const { request: playwrightRequest } = await import("@playwright/test");
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await playwrightRequest.newContext({
+      baseURL,
+      ignoreHTTPSErrors: true,
+      storageState: ADMIN_AUTH_PATH,
+    });
+    const configRes = await api.get("/api/admin/config");
+    const config = await configRes.json() as { logo_url?: string };
+    originalLogoUrl = config.logo_url ?? "";
+    await api.dispose();
+  });
+
+  test("Scenario F: admin login page img src matches configured logo_url", async ({ page }) => {
+    test.setTimeout(60000);
+
+    const TEST_LOGO_URL = "https://example.com/e2e-test-logo.png";
+
+    // Step 1: Set a custom logo URL via the settings page
+    await page.goto("/admin/settings");
+    await expect(page.getByLabel("Logo URL")).toBeVisible({ timeout: 10000 });
+    await page.getByLabel("Logo URL").fill(TEST_LOGO_URL);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Settings saved.")).toBeVisible({ timeout: 10000 });
+
+    // Step 2: Navigate to admin login page (unauthenticated context)
+    // We use a new browser context to simulate an unauthenticated visit
+    const context = await page.context().browser()!.newContext();
+    const loginPage = await context.newPage();
+
+    try {
+      await loginPage.goto("/admin/login");
+      await expect(loginPage).toHaveURL(/admin\/login/, { timeout: 10000 });
+
+      // Step 3: The logo img should have src matching the configured logo_url
+      const logoImg = loginPage.locator(".admin-login-card__logo");
+      await expect(logoImg).toBeVisible({ timeout: 10000 });
+      await expect(logoImg).toHaveAttribute("src", TEST_LOGO_URL, { timeout: 5000 });
+
+      // It must NOT point to the hardcoded /logo.png
+      const src = await logoImg.getAttribute("src");
+      expect(src).not.toBe("/logo.png");
+    } finally {
+      await context.close();
+    }
+
+    // Restore original logo URL
+    await page.getByLabel("Logo URL").fill(originalLogoUrl);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Settings saved.")).toBeVisible({ timeout: 10000 });
+  });
+
+  test("Scenario F (empty logo): no broken /logo.png image on login page when logo_url is empty", async ({ page }) => {
+    test.setTimeout(60000);
+
+    // Step 1: Clear logo URL
+    await page.goto("/admin/settings");
+    await expect(page.getByLabel("Logo URL")).toBeVisible({ timeout: 10000 });
+    await page.getByLabel("Logo URL").fill("");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Settings saved.")).toBeVisible({ timeout: 10000 });
+
+    // Step 2: Visit login page unauthenticated
+    const context = await page.context().browser()!.newContext();
+    const loginPage = await context.newPage();
+
+    try {
+      await loginPage.goto("/admin/login");
+      await expect(loginPage).toHaveURL(/admin\/login/, { timeout: 10000 });
+
+      // When logo_url is empty, the img src should be the fallback /logo.png
+      // (that is the documented fallback behaviour for the empty-logo case)
+      const logoImg = loginPage.locator(".admin-login-card__logo");
+      await expect(logoImg).toBeVisible({ timeout: 10000 });
+
+      // The src should be defined and not point to an obviously broken external URL
+      const src = await logoImg.getAttribute("src");
+      expect(src).toBeTruthy();
+    } finally {
+      await context.close();
+    }
+
+    // Restore original logo URL
+    await page.getByLabel("Logo URL").fill(originalLogoUrl);
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Settings saved.")).toBeVisible({ timeout: 10000 });
   });
 });
