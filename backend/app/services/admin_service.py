@@ -255,6 +255,18 @@ async def list_buildings(
     return list(result.scalars().all())
 
 
+async def count_buildings(
+    db: AsyncSession,
+    name: str | None = None,
+) -> int:
+    """Return total count of buildings matching the optional name filter."""
+    q = select(func.count()).select_from(Building)
+    if name is not None:
+        q = q.where(func.lower(Building.name).contains(name.lower()))
+    result = await db.execute(q)
+    return result.scalar_one()
+
+
 async def archive_building(building_id: uuid.UUID, db: AsyncSession) -> Building:
     """
     Archive a building and any lot owners that have no emails in another non-archived building.
@@ -1094,6 +1106,21 @@ async def list_general_meetings(
             }
         )
     return items
+
+
+async def count_general_meetings(
+    db: AsyncSession,
+    name: str | None = None,
+    building_id: uuid.UUID | None = None,
+) -> int:
+    """Return total count of general meetings matching the optional filters."""
+    q = select(func.count()).select_from(GeneralMeeting)
+    if name is not None:
+        q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
+    if building_id is not None:
+        q = q.where(GeneralMeeting.building_id == building_id)
+    result = await db.execute(q)
+    return result.scalar_one()
 
 
 async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict:
