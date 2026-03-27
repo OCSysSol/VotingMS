@@ -990,8 +990,8 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
                 )
             seen_motion_numbers.add(mn)
     for position, motion_data in enumerate(sorted_motions, start=1):
-        motion_number = motion_data.motion_number.strip() if motion_data.motion_number else None
-        motion_number = motion_number if motion_number else None
+        raw = (motion_data.motion_number or "").strip()
+        motion_number = raw if raw else str(position)
         motion = Motion(
             general_meeting_id=general_meeting.id,
             title=motion_data.title,
@@ -1376,21 +1376,19 @@ async def add_motion_to_meeting(
     max_index = max_result.scalar_one_or_none()
     next_index = (max_index + 1) if max_index is not None else 0
 
-    # Auto-populate motion_number from display_order when caller omits it (None).
-    # If caller provides an explicit value (including empty string), use that
-    # (empty/whitespace → stored as NULL, preserving existing behaviour).
-    if data.motion_number is None:
-        motion_number: str | None = str(next_index)
-    else:
-        stripped = data.motion_number.strip()
-        motion_number = stripped if stripped else None
+    # Auto-assign motion_number from next display_order when the field is absent or blank.
+    # The frontend may send null or "" when the user leaves the field empty — treat both
+    # as "no explicit number supplied" and fall back to auto-assign.
+    explicit_number = data.motion_number.strip() if data.motion_number is not None else ""
+    assigned_motion_number = explicit_number if explicit_number else str(next_index)
+
     motion = Motion(
         general_meeting_id=general_meeting_id,
         title=data.title.strip(),
         description=data.description,
         display_order=next_index,
+        motion_number=assigned_motion_number,
         motion_type=data.motion_type,
-        motion_number=motion_number,
         is_visible=False,
     )
     db.add(motion)
