@@ -123,13 +123,20 @@ export function AuthForm({
             <p className="auth-card__hint" style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
               <span aria-hidden="true">*</span> Required field
             </p>
+            <p
+              className="auth-card__hint"
+              role="status"
+              aria-live="polite"
+            >
+              Verification code sent to {otpEmail}. Check your email — it may take a minute to arrive.
+            </p>
             <div className="field">
               <label className="field__label field__label--required" htmlFor="otp-code">Verification code</label>
               <input
                 id="otp-code"
                 className="field__input"
                 type="text"
-                inputMode="text"
+                inputMode="numeric"
                 maxLength={20}
                 autoComplete="one-time-code"
                 value={code}
