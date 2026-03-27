@@ -125,13 +125,17 @@ class TestSecurityHeaders:
 
         script-src includes 'unsafe-inline' to permit Vite's module preload
         polyfill inline script that is injected into index.html at build time.
-        https://vercel.live is included in script-src and connect-src to allow
-        Vercel's injected preview feedback widget to load and make API calls.
+        https://vercel.live is included in script-src, connect-src, and frame-src
+        to allow Vercel's injected preview feedback widget to load, make API calls,
+        and render its toolbar iframe.
+        frame-src governs what THIS page may frame outward; frame-ancestors governs
+        who may frame THIS page. Both are set.
         """
         response = await client.get("/api/health")
         csp = response.headers.get("Content-Security-Policy", "")
         assert "default-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
+        assert "frame-src https://vercel.live https://*.vercel.live" in csp
         assert "script-src 'self'" in csp
         assert "'unsafe-inline'" in csp
         assert "https://vercel.live" in csp

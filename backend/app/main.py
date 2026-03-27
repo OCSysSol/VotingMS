@@ -29,6 +29,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "font-src 'self' https://fonts.gstatic.com; "
             "img-src 'self' data: https:; "
             "connect-src 'self' https://vercel.live wss://vercel.live https://*.vercel.live wss://*.vercel.live; "  # vercel.live WSS and wildcard subdomains required for Vercel preview feedback widget
+            "frame-src https://vercel.live https://*.vercel.live; "  # allows Vercel preview toolbar to load iframes
             "frame-ancestors 'none'"
         )
         return response
