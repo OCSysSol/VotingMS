@@ -10,6 +10,9 @@ import {
   createPendingMeeting,
   closeMeeting,
   clearBallots,
+  goToAuthPage,
+  authenticateVoter,
+  getTestOtp,
 } from "../workflows/helpers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -632,21 +635,24 @@ test.describe("US-TCG-01: admin hides motion — voter no longer sees it on voti
 
     await page.goto(`/admin/general-meetings/${meetingId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText(MOTION2_TITLE)).toBeVisible({ timeout: 10000 });
 
-    // Find the row for Motion 2 and click its visibility toggle to hide it.
-    // The toggle is a checkbox whose accessible label (via the wrapping <label>) is
-    // "Visible" when checked.  Use getByRole("checkbox") filtered to the correct row.
+    // Wait for the motions table to render — the row for Motion 2 is the anchor.
+    // Use locator("tr").filter to scope to the table row, not any heading card.
     const motion2Row = page.locator("tr").filter({ hasText: MOTION2_TITLE });
+    await expect(motion2Row).toBeVisible({ timeout: 10000 });
+
+    // The visibility toggle is a custom styled checkbox.  The <input> is visually hidden;
+    // the clickable element is the <label> wrapper containing the "Visible" span.
+    // Use exact: true to scope to the toggle label span only (not the motion title text).
+    const visibleLabel = motion2Row.getByText("Visible", { exact: true });
+    await expect(visibleLabel).toBeVisible({ timeout: 5000 });
+    await visibleLabel.click();
+
+    // After clicking, the toggle label changes to "Hidden" (exact match, not title substring)
+    await expect(motion2Row.getByText("Hidden", { exact: true })).toBeVisible({ timeout: 10000 });
+    // The underlying checkbox should now be unchecked
     const toggle = motion2Row.getByRole("checkbox");
-    await expect(toggle).toBeChecked({ timeout: 5000 }); // currently visible (checked)
-
-    // Click the label element to toggle — the checkbox is styled, label is the click target
-    await toggle.click();
-
-    // Toggle should now be unchecked (hidden) and label text updated
-    await expect(toggle).not.toBeChecked({ timeout: 10000 });
-    await expect(motion2Row.getByText("Hidden")).toBeVisible({ timeout: 5000 });
+    await expect(toggle).not.toBeChecked({ timeout: 5000 });
   });
 
   test("TCG01.3: voter sees only 1 motion card after admin hid motion 2", async ({ page }) => {

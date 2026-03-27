@@ -12,8 +12,6 @@ import {
   closeMeeting,
   deleteMeeting,
   clearBallots,
-  goToAuthPage,
-  authenticateVoter,
   submitBallotViaApi,
 } from "./workflows/helpers";
 
@@ -205,12 +203,25 @@ test.describe("US-TCG-04: closed meeting auth flow — voter routed to confirmat
       storageState: ADMIN_AUTH_PATH,
     });
 
-    await goToAuthPage(page, TCG04_BUILDING);
-    await authenticateVoter(
-      page,
-      TCG04_VOTER_SUBMITTED_EMAIL,
-      () => getTestOtp(api, TCG04_VOTER_SUBMITTED_EMAIL, tcg04MeetingId)
-    );
+    // Navigate directly to the auth page by meeting ID — the building is not in the
+    // home-page dropdown because closed meetings are excluded from that list.
+    // Clear only the session cookie so restore returns 401 and the OTP form is shown.
+    // (Clearing all cookies would remove the Vercel bypass cookie, blocking page access.)
+    await page.context().clearCookies({ name: 'agm_session' });
+    await page.goto(`/vote/${tcg04MeetingId}/auth`);
+
+    // Wait for the URL to stabilise on the auth page and the OTP form to be ready
+    await expect(page).toHaveURL(/vote\/.*\/auth/, { timeout: 20000 });
+    const emailInputA = page.getByLabel("Email address");
+    await expect(emailInputA).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("button", { name: "Send Verification Code" })).toBeVisible({ timeout: 20000 });
+
+    await emailInputA.fill(TCG04_VOTER_SUBMITTED_EMAIL);
+    await page.getByRole("button", { name: "Send Verification Code" }).click();
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 15000 });
+    const codeA = await getTestOtp(api, TCG04_VOTER_SUBMITTED_EMAIL, tcg04MeetingId);
+    await page.getByLabel("Verification code").fill(codeA);
+    await page.getByRole("button", { name: "Verify" }).click();
     await api.dispose();
 
     // Auth on a closed meeting must route to confirmation (not block at auth)
@@ -228,12 +239,21 @@ test.describe("US-TCG-04: closed meeting auth flow — voter routed to confirmat
       storageState: ADMIN_AUTH_PATH,
     });
 
-    await goToAuthPage(page, TCG04_BUILDING);
-    await authenticateVoter(
-      page,
-      TCG04_VOTER_ABSENT_EMAIL,
-      () => getTestOtp(api, TCG04_VOTER_ABSENT_EMAIL, tcg04MeetingId)
-    );
+    // Same direct-navigation approach as TCG04-A.
+    await page.context().clearCookies({ name: 'agm_session' });
+    await page.goto(`/vote/${tcg04MeetingId}/auth`);
+
+    await expect(page).toHaveURL(/vote\/.*\/auth/, { timeout: 20000 });
+    const emailInputB = page.getByLabel("Email address");
+    await expect(emailInputB).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("button", { name: "Send Verification Code" })).toBeVisible({ timeout: 20000 });
+
+    await emailInputB.fill(TCG04_VOTER_ABSENT_EMAIL);
+    await page.getByRole("button", { name: "Send Verification Code" }).click();
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 15000 });
+    const codeB = await getTestOtp(api, TCG04_VOTER_ABSENT_EMAIL, tcg04MeetingId);
+    await page.getByLabel("Verification code").fill(codeB);
+    await page.getByRole("button", { name: "Verify" }).click();
     await api.dispose();
 
     // Auth on a closed meeting must route to confirmation (not block at auth)

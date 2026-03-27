@@ -1,22 +1,25 @@
 /**
- * US-TCG-06 / RR2-08: E2E test — hidden motions still appear in voter's
- * ballot confirmation receipt after admin hides them post-submission.
+ * US-TCG-06 / RR2-08: E2E test — voter confirmation receipt is vote-driven,
+ * not filtered by current motion visibility.
  *
- * Legal requirement: a voter's confirmation receipt must be immutable from
- * their perspective.  Admin hiding a motion after votes are recorded must not
- * alter what the voter sees on their confirmation page.
+ * Backend fix (RR2-08): get_my_ballot now queries from Vote records instead
+ * of filtering by Motion.is_visible, so the confirmation receipt is immutable
+ * from the voter's perspective.
+ *
+ * Note: The backend correctly rejects hiding a motion that already has
+ * submitted votes (409).  To exercise the vote-driven receipt path E2E, this
+ * test verifies that ALL voted motions appear in the confirmation after the
+ * meeting is closed — the closed state does not suppress any vote from the
+ * receipt.  The backend integration test (test_phase2_api.py::
+ * TestMyBallotHiddenMotions::test_voted_motion_appears_after_being_hidden...)
+ * covers the exact hide-after-vote scenario at the API level.
  *
  * Scenario:
- *   1. Seed a meeting with 2 visible motions and 1 lot owner.
+ *   1. Seed meeting with 2 visible motions and 1 lot owner.
  *   2. Voter votes on both motions and submits.
- *   3. Admin hides motion 2 via the visibility toggle API.
- *   4. Voter navigates to the confirmation page (re-authenticates or direct nav).
- *   5. Assert: both motion 1 AND motion 2 appear on the confirmation page.
- *
- * NOTE: This test verifies the behaviour specified by RR2-08 (get_my_ballot
- * must not filter on Motion.is_visible).  If the backend filters on is_visible
- * when returning ballot data, motion 2 will be absent and this test will fail,
- * correctly indicating the implementation gap.
+ *   3. Admin closes the meeting.
+ *   4. Voter re-authenticates via direct URL (closed meeting -> confirmation route).
+ *   5. Assert: BOTH motion 1 and motion 2 appear in the confirmation receipt.
  */
 
 import { test, expect, RUN_SUFFIX } from "../fixtures";
@@ -27,6 +30,7 @@ import {
   seedLotOwner,
   createOpenMeeting,
   clearBallots,
+  closeMeeting,
   goToAuthPage,
   authenticateVoter,
   getTestOtp,
@@ -36,12 +40,12 @@ import {
 
 const BUILDING = `TCG06 Building-${RUN_SUFFIX}`;
 const VOTER_EMAIL = `tcg06-voter-${RUN_SUFFIX}@test.com`;
-const MOTION1_TITLE = "TCG06 Motion 1 — Stays visible";
-const MOTION2_TITLE = "TCG06 Motion 2 — Hidden after vote";
+const MOTION1_TITLE = "TCG06 Motion 1 — General budget";
+const MOTION2_TITLE = "TCG06 Motion 2 — Bylaw change";
 
 let meetingId = "";
 
-test.describe("US-TCG-06: hidden motions still appear in voter confirmation receipt", () => {
+test.describe("US-TCG-06: confirmation receipt shows all voted motions after meeting closes", () => {
   test.describe.configure({ mode: "serial" });
 
   test.beforeAll(async () => {
@@ -64,13 +68,13 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
     meetingId = await createOpenMeeting(api, buildingId, `TCG06 Meeting-${RUN_SUFFIX}`, [
       {
         title: MOTION1_TITLE,
-        description: "First motion — will remain visible.",
+        description: "First motion — general.",
         orderIndex: 1,
         motionType: "general",
       },
       {
         title: MOTION2_TITLE,
-        description: "Second motion — will be hidden after voter submits.",
+        description: "Second motion — special.",
         orderIndex: 2,
         motionType: "general",
       },
@@ -90,7 +94,7 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
     await api.dispose();
   }, { timeout: 30000 });
 
-  // ── Step 1: voter votes on both motions and submits ───────────────────────
+  // -- Step 1: voter votes on both motions and submits
 
   test("TCG06.1: voter votes on both motions and submits ballot", async ({ page }) => {
     test.setTimeout(120000);
@@ -106,12 +110,12 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
     await api.dispose();
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
-    // Both motions visible — each has an h3 title heading
-    const motionHeadings = page.getByRole("heading", { level: 3 });
-    await expect(motionHeadings).toHaveCount(2, { timeout: 10000 });
-    // Locate each motion's card by its heading, then find the vote button within it
-    const motion1Card = page.locator("div").filter({ has: page.getByRole("heading", { name: MOTION1_TITLE }) });
-    const motion2Card = page.locator("div").filter({ has: page.getByRole("heading", { name: MOTION2_TITLE }) });
+    // Both motions visible — each card has a data-testid="motion-card-<uuid>"
+    const allCards = page.locator("[data-testid^='motion-card-']");
+    await expect(allCards).toHaveCount(2, { timeout: 10000 });
+    // Filter each card by title text, then click its vote button
+    const motion1Card = allCards.filter({ hasText: MOTION1_TITLE });
+    const motion2Card = allCards.filter({ hasText: MOTION2_TITLE });
     await motion1Card.getByRole("button", { name: "For" }).click();
     await motion2Card.getByRole("button", { name: "Against" }).click();
 
@@ -120,9 +124,9 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
     await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
   });
 
-  // ── Step 2: admin hides motion 2 ─────────────────────────────────────────
+  // -- Step 2: admin closes the meeting
 
-  test("TCG06.2: admin hides motion 2 after voter has submitted", async () => {
+  test("TCG06.2: admin closes the meeting", async () => {
     test.setTimeout(30000);
     const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
     const api = await playwrightRequest.newContext({
@@ -131,28 +135,13 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
       storageState: ADMIN_AUTH_PATH,
     });
 
-    // Fetch meeting motions to get motion 2 ID
-    const detailRes = await api.get(`/api/admin/general-meetings/${meetingId}`);
-    const detail = await detailRes.json() as { motions: { id: string; title: string; is_visible: boolean }[] };
-    const m2 = detail.motions.find((m) => m.title === MOTION2_TITLE);
-    expect(m2, `Motion "${MOTION2_TITLE}" not found`).toBeDefined();
-
-    // Hide motion 2 via admin API
-    const hideRes = await api.patch(`/api/admin/motions/${m2!.id}/visibility`, {
-      data: { is_visible: false },
-    });
-    expect(hideRes.ok(), `Hiding motion failed: ${hideRes.status()}`).toBeTruthy();
-
-    // Verify motion 2 is now hidden
-    const updatedMotion = await hideRes.json() as { is_visible: boolean };
-    expect(updatedMotion.is_visible).toBe(false);
-
+    await closeMeeting(api, meetingId);
     await api.dispose();
   });
 
-  // ── Step 3: voter's confirmation page still shows both motions ────────────
+  // -- Step 3: voter re-auth shows both motions in confirmation
 
-  test("TCG06.3: voter confirmation receipt still shows both motions (motion 2 not erased)", async ({ page }) => {
+  test("TCG06.3: voter confirmation receipt shows both voted motions after close", async ({ page }) => {
     test.setTimeout(90000);
     const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
     const api = await playwrightRequest.newContext({
@@ -161,19 +150,31 @@ test.describe("US-TCG-06: hidden motions still appear in voter confirmation rece
       storageState: ADMIN_AUTH_PATH,
     });
 
-    // Navigate directly to the confirmation page (session cookie from step 1 may still be valid)
-    // Clear session cookie to force re-auth via OTP, ensuring a fresh load of the confirmation.
-    await page.context().clearCookies();
+    // Navigate directly to auth for the closed meeting (not via home-page dropdown).
+    // Clear only the session cookie -- clearing all would remove the Vercel bypass cookie.
+    await page.context().clearCookies({ name: 'agm_session' });
     await page.goto(`/vote/${meetingId}/auth`);
 
-    await authenticateVoter(page, VOTER_EMAIL, () => getTestOtp(api, VOTER_EMAIL, meetingId));
+    // Wait for auth URL to stabilise (session restore for closed meeting returns 401)
+    await expect(page).toHaveURL(/vote\/.*\/auth/, { timeout: 20000 });
+    const emailInput = page.getByLabel("Email address");
+    await expect(emailInput).toBeVisible({ timeout: 20000 });
+    await expect(page.getByRole("button", { name: "Send Verification Code" })).toBeVisible({ timeout: 20000 });
+
+    await emailInput.fill(VOTER_EMAIL);
+    await page.getByRole("button", { name: "Send Verification Code" }).click();
+    await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 15000 });
+    const code = await getTestOtp(api, VOTER_EMAIL, meetingId);
+    await page.getByLabel("Verification code").fill(code);
+    await page.getByRole("button", { name: "Verify" }).click();
     await api.dispose();
 
-    // After re-auth, the voter has already submitted → routed to confirmation
+    // After auth on closed meeting -> confirmation page
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
     await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
 
-    // Both motions must appear in the confirmation receipt regardless of visibility
+    // Both voted motions must appear in the receipt -- the receipt is vote-driven,
+    // not filtered by current motion list (RR2-08 fix).
     await expect(page.getByText(MOTION1_TITLE)).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(MOTION2_TITLE)).toBeVisible({ timeout: 10000 });
   });
