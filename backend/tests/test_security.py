@@ -135,7 +135,7 @@ class TestSecurityHeaders:
         csp = response.headers.get("Content-Security-Policy", "")
         assert "default-src 'self'" in csp
         assert "frame-ancestors 'none'" in csp
-        assert "frame-src 'none' https://vercel.live https://*.vercel.live" in csp
+        assert "frame-src https://vercel.live https://*.vercel.live" in csp
         assert "script-src 'self'" in csp
         assert "'unsafe-inline'" in csp
         assert "https://vercel.live" in csp
