@@ -65,6 +65,11 @@ export default defineConfig({
         "src/api/config.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/context/BrandingContext.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/admin/SettingsPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // Pagination feature
+        "src/api/admin.ts": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/components/admin/Pagination.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/pages/admin/BuildingsPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/pages/admin/GeneralMeetingListPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

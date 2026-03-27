@@ -181,6 +181,16 @@ async def list_buildings(
     return [BuildingOut.model_validate(b) for b in buildings]
 
 
+@router.get("/buildings/count")
+async def count_buildings(
+    name: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Return the total count of buildings, applying the same name filter as the list endpoint."""
+    count = await admin_service.count_buildings(db, name=name)
+    return {"count": count}
+
+
 @router.post(
     "/buildings/{building_id}/archive",
     response_model=BuildingArchiveOut,
@@ -499,6 +509,17 @@ async def list_general_meetings(
         db, limit=limit, offset=offset, name=name, building_id=building_id
     )
     return [GeneralMeetingListItem(**item) for item in items]
+
+
+@router.get("/general-meetings/count")
+async def count_general_meetings(
+    name: str | None = Query(default=None),
+    building_id: uuid.UUID | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    """Return the total count of general meetings, applying the same filters as the list endpoint."""
+    count = await admin_service.count_general_meetings(db, name=name, building_id=building_id)
+    return {"count": count}
 
 
 @router.get("/general-meetings/{general_meeting_id}", response_model=GeneralMeetingDetail)

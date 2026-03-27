@@ -4,6 +4,9 @@ import { listBuildings, createBuilding } from "../../api/admin";
 import type { Building } from "../../types";
 import BuildingTable from "../../components/admin/BuildingTable";
 import BuildingCSVUpload from "../../components/admin/BuildingCSVUpload";
+import Pagination from "../../components/admin/Pagination";
+
+const PAGE_SIZE = 20;
 
 export default function BuildingsPage() {
   const queryClient = useQueryClient();
@@ -12,6 +15,7 @@ export default function BuildingsPage() {
   const [name, setName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const { data: buildings = [], isLoading, error } = useQuery<Building[]>({
     queryKey: ["admin", "buildings"],
@@ -32,6 +36,22 @@ export default function BuildingsPage() {
   const visibleBuildings = showArchived
     ? buildings
     : buildings.filter((b) => !b.is_archived);
+
+  const totalPages = Math.max(1, Math.ceil(visibleBuildings.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedBuildings = visibleBuildings.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
+  function handlePageChange(newPage: number) {
+    setPage(newPage);
+  }
+
+  function handleShowArchivedChange(checked: boolean) {
+    setShowArchived(checked);
+    setPage(1);
+  }
 
   function openModal() {
     setName("");
@@ -72,7 +92,7 @@ export default function BuildingsPage() {
               className="toggle-switch__input"
               type="checkbox"
               checked={showArchived}
-              onChange={(e) => setShowArchived(e.target.checked)}
+              onChange={(e) => handleShowArchivedChange(e.target.checked)}
             />
             <span className="toggle-switch__track" />
             Show archived
@@ -158,7 +178,21 @@ export default function BuildingsPage() {
       )}
 
       <div className="admin-card">
-        <BuildingTable buildings={visibleBuildings} isLoading={isLoading} />
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={visibleBuildings.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={handlePageChange}
+        />
+        <BuildingTable buildings={pagedBuildings} isLoading={isLoading} />
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={visibleBuildings.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={handlePageChange}
+        />
       </div>
       <BuildingCSVUpload onSuccess={handleCSVSuccess} />
     </div>

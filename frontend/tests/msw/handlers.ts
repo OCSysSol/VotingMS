@@ -332,6 +332,15 @@ export const adminHandlers = [
     return HttpResponse.json({ ok: true });
   }),
 
+  http.get(`${BASE}/api/admin/buildings/count`, ({ request }) => {
+    const url = new URL(request.url);
+    const name = url.searchParams.get("name");
+    const filtered = name
+      ? ADMIN_BUILDINGS.filter((b) => b.name.toLowerCase().includes(name.toLowerCase()))
+      : ADMIN_BUILDINGS;
+    return HttpResponse.json({ count: filtered.length });
+  }),
+
   http.get(`${BASE}/api/admin/buildings`, () => {
     return HttpResponse.json(ADMIN_BUILDINGS);
   }),
@@ -482,6 +491,16 @@ export const adminHandlers = [
 
   http.post(`${BASE}/api/admin/buildings/:buildingId/lot-owners/import-financial-positions`, () => {
     return HttpResponse.json<FinancialPositionImportResult>({ updated: 4, skipped: 0 });
+  }),
+
+  http.get(`${BASE}/api/admin/general-meetings/count`, ({ request }) => {
+    const url = new URL(request.url);
+    const name = url.searchParams.get("name");
+    const buildingId = url.searchParams.get("building_id");
+    let filtered = ADMIN_MEETING_LIST;
+    if (name) filtered = filtered.filter((m) => m.title.toLowerCase().includes(name.toLowerCase()));
+    if (buildingId) filtered = filtered.filter((m) => m.building_id === buildingId);
+    return HttpResponse.json({ count: filtered.length });
   }),
 
   http.get(`${BASE}/api/admin/general-meetings`, () => {

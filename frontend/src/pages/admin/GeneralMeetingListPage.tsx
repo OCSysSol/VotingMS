@@ -1,15 +1,20 @@
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { listGeneralMeetings, listBuildings } from "../../api/admin";
 import type { GeneralMeetingListItem } from "../../api/admin";
 import type { Building } from "../../types";
 import GeneralMeetingTable from "../../components/admin/GeneralMeetingTable";
+import Pagination from "../../components/admin/Pagination";
+
+const PAGE_SIZE = 20;
 
 export default function GeneralMeetingListPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedBuildingId = searchParams.get("building") ?? "";
   const selectedStatus = searchParams.get("status") ?? "";
+  const [page, setPage] = useState(1);
 
   const { data: meetings = [], isLoading, error } = useQuery<GeneralMeetingListItem[]>({
     queryKey: ["admin", "general-meetings"],
@@ -27,6 +32,13 @@ export default function GeneralMeetingListPage() {
     .filter((m) => !selectedBuildingId || m.building_id === selectedBuildingId)
     .filter((m) => !selectedStatus || m.status === selectedStatus);
 
+  const totalPages = Math.max(1, Math.ceil(filteredMeetings.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pagedMeetings = filteredMeetings.slice(
+    (safePage - 1) * PAGE_SIZE,
+    safePage * PAGE_SIZE,
+  );
+
   function handleBuildingChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;
     const next = new URLSearchParams(searchParams);
@@ -36,6 +48,7 @@ export default function GeneralMeetingListPage() {
       next.delete("building");
     }
     setSearchParams(next);
+    setPage(1);
   }
 
   function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
@@ -47,6 +60,7 @@ export default function GeneralMeetingListPage() {
       next.delete("status");
     }
     setSearchParams(next);
+    setPage(1);
   }
 
   if (error) return <p className="state-message state-message--error">Failed to load General Meetings.</p>;
@@ -94,7 +108,21 @@ export default function GeneralMeetingListPage() {
             </div>
           </div>
         </div>
-        <GeneralMeetingTable meetings={filteredMeetings} isLoading={isLoading} />
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={filteredMeetings.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
+        <GeneralMeetingTable meetings={pagedMeetings} isLoading={isLoading} />
+        <Pagination
+          page={safePage}
+          totalPages={totalPages}
+          totalItems={filteredMeetings.length}
+          pageSize={PAGE_SIZE}
+          onPageChange={setPage}
+        />
       </div>
     </div>
   );

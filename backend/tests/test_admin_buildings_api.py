@@ -344,6 +344,105 @@ class TestListBuildings:
         data = response.json()
         assert len(data) <= 2
 
+    # --- offset / pagination ---
+
+    async def test_offset_returns_second_page(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """offset=1 with limit=1 returns the second building ordered by created_at DESC."""
+        for i in range(3):
+            db_session.add(
+                Building(name=f"Page Building {i}", manager_email=f"pg{i}@test.com")
+            )
+        await db_session.commit()
+
+        first = await client.get("/api/admin/buildings?name=Page+Building&limit=1&offset=0")
+        second = await client.get("/api/admin/buildings?name=Page+Building&limit=1&offset=1")
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_ids = [b["id"] for b in first.json()]
+        second_ids = [b["id"] for b in second.json()]
+        # The two pages must not return the same building
+        assert first_ids != second_ids
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/buildings/count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestCountBuildings:
+    # --- Happy path ---
+
+    async def test_returns_total_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """GET /api/admin/buildings/count returns {"count": N}."""
+        # Create two buildings
+        db_session.add(Building(name="Count Building A", manager_email="ca@test.com"))
+        db_session.add(Building(name="Count Building B", manager_email="cb@test.com"))
+        await db_session.commit()
+
+        response = await client.get("/api/admin/buildings/count")
+        assert response.status_code == 200
+        data = response.json()
+        assert "count" in data
+        assert data["count"] >= 2
+
+    # --- name filter ---
+
+    async def test_name_filter_returns_filtered_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """?name=X returns only the count matching that substring."""
+        db_session.add(Building(name="CountFilter Unique X9Z", manager_email="cfx@test.com"))
+        db_session.add(Building(name="CountFilter Other Building", manager_email="cfo@test.com"))
+        await db_session.commit()
+
+        response = await client.get("/api/admin/buildings/count?name=CountFilter+Unique+X9Z")
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+
+    async def test_name_filter_no_match_returns_zero(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        response = await client.get("/api/admin/buildings/count?name=ZZZ-impossible-match-999")
+        assert response.status_code == 200
+        assert response.json()["count"] == 0
+
+    async def test_name_filter_case_insensitive(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        db_session.add(Building(name="CaseCount Building", manager_email="casecount@test.com"))
+        await db_session.commit()
+
+        response = await client.get("/api/admin/buildings/count?name=casecount")
+        assert response.status_code == 200
+        assert response.json()["count"] >= 1
+
+    async def test_no_name_filter_counts_all(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Omitting ?name returns the same count as the unfiltered list."""
+        list_resp = await client.get("/api/admin/buildings")
+        count_resp = await client.get("/api/admin/buildings/count")
+        assert list_resp.status_code == 200
+        assert count_resp.status_code == 200
+        assert count_resp.json()["count"] == len(list_resp.json())
+
+    # --- Boundary values ---
+
+    async def test_empty_name_filter_counts_all(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """?name= (empty string) matches everything — same as no filter."""
+        list_resp = await client.get("/api/admin/buildings")
+        count_resp = await client.get("/api/admin/buildings/count?name=")
+        assert list_resp.status_code == 200
+        assert count_resp.status_code == 200
+        assert count_resp.json()["count"] == len(list_resp.json())
+
 
 # ---------------------------------------------------------------------------
 # GET /api/admin/buildings/{building_id}

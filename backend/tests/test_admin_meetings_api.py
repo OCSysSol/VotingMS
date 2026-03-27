@@ -681,6 +681,202 @@ class TestListAGMs:
         assert str(agm1.id) in ids
         assert str(agm2.id) in ids
 
+    # --- offset / pagination ---
+
+    async def test_offset_returns_second_page(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """offset=1 with limit=1 returns a different meeting than offset=0."""
+        b = Building(name="AGM Offset Building", manager_email="agmoffset@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        for i in range(3):
+            db_session.add(
+                GeneralMeeting(
+                    building_id=b.id,
+                    title=f"AGM Offset Meeting {i}",
+                    status=GeneralMeetingStatus.open,
+                    meeting_at=meeting_dt(),
+                    voting_closes_at=closing_dt(),
+                )
+            )
+        await db_session.commit()
+
+        first = await client.get(
+            "/api/admin/general-meetings?name=AGM+Offset+Meeting&limit=1&offset=0"
+        )
+        second = await client.get(
+            "/api/admin/general-meetings?name=AGM+Offset+Meeting&limit=1&offset=1"
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_ids = [m["id"] for m in first.json()]
+        second_ids = [m["id"] for m in second.json()]
+        assert first_ids != second_ids
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/general-meetings/count
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestCountGeneralMeetings:
+    # --- Happy path ---
+
+    async def test_returns_total_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """GET /api/admin/general-meetings/count returns {"count": N}."""
+        b = Building(name="Count AGM Building", manager_email="countb@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        db_session.add(
+            GeneralMeeting(
+                building_id=b.id,
+                title="Count AGM A",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        db_session.add(
+            GeneralMeeting(
+                building_id=b.id,
+                title="Count AGM B",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/admin/general-meetings/count")
+        assert response.status_code == 200
+        data = response.json()
+        assert "count" in data
+        assert data["count"] >= 2
+
+    async def test_count_matches_list_length(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """count endpoint matches the number of items returned by the list endpoint."""
+        list_resp = await client.get("/api/admin/general-meetings")
+        count_resp = await client.get("/api/admin/general-meetings/count")
+        assert list_resp.status_code == 200
+        assert count_resp.status_code == 200
+        assert count_resp.json()["count"] == len(list_resp.json())
+
+    # --- name filter ---
+
+    async def test_name_filter_returns_filtered_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="Count AGM Filter Building", manager_email="cafb@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        db_session.add(
+            GeneralMeeting(
+                building_id=b.id,
+                title="UniqueCountTitle X9Z7W",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        db_session.add(
+            GeneralMeeting(
+                building_id=b.id,
+                title="Other Meeting Entirely",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/admin/general-meetings/count?name=UniqueCountTitle+X9Z7W")
+        assert response.status_code == 200
+        assert response.json()["count"] == 1
+
+    async def test_name_filter_no_match_returns_zero(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        response = await client.get(
+            "/api/admin/general-meetings/count?name=ZZZ-impossible-match-999"
+        )
+        assert response.status_code == 200
+        assert response.json()["count"] == 0
+
+    async def test_name_filter_case_insensitive(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b = Building(name="CaseCountAGM Building", manager_email="ccab@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        db_session.add(
+            GeneralMeeting(
+                building_id=b.id,
+                title="CaseCountTitle Meeting",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        await db_session.commit()
+
+        response = await client.get("/api/admin/general-meetings/count?name=casecounttitle")
+        assert response.status_code == 200
+        assert response.json()["count"] >= 1
+
+    # --- building_id filter ---
+
+    async def test_building_id_filter_returns_filtered_count(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        b1 = Building(name="CountBld1", manager_email="cb1@test.com")
+        b2 = Building(name="CountBld2", manager_email="cb2@test.com")
+        db_session.add_all([b1, b2])
+        await db_session.flush()
+        db_session.add(
+            GeneralMeeting(
+                building_id=b1.id,
+                title="CountBld1 Meeting",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        db_session.add(
+            GeneralMeeting(
+                building_id=b2.id,
+                title="CountBld2 Meeting",
+                status=GeneralMeetingStatus.open,
+                meeting_at=meeting_dt(),
+                voting_closes_at=closing_dt(),
+            )
+        )
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/count?building_id={b1.id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] >= 1
+        # Confirm it does not include b2's meeting
+        all_response = await client.get("/api/admin/general-meetings/count")
+        assert all_response.json()["count"] > data["count"]
+
+    # --- Boundary values ---
+
+    async def test_empty_name_filter_counts_all(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        list_resp = await client.get("/api/admin/general-meetings")
+        count_resp = await client.get("/api/admin/general-meetings/count?name=")
+        assert list_resp.status_code == 200
+        assert count_resp.status_code == 200
+        assert count_resp.json()["count"] == len(list_resp.json())
+
 
 # ---------------------------------------------------------------------------
 # GET /api/admin/general-meetings/{agm_id}
