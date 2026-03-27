@@ -4437,6 +4437,85 @@ class TestMotionManagement:
         assert motion is not None
         assert motion.motion_number == "0"
 
+    # --- RR2-02: auto-assign avoids conflict with manual numeric motion_number ---
+
+    async def test_rr2_02_auto_assign_avoids_conflict_with_manual_number(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR2-02: When an existing motion has motion_number='1' manually set,
+        auto-assigning a second motion should use max+1 = '2', not display_order='1',
+        which would have caused a 409 unique constraint violation."""
+        agm = await self._create_meeting(db_session, "RR202Conflict")
+        # First: add a motion with explicit motion_number="1"
+        r1 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Manual Number One", "motion_number": "1"},
+        )
+        assert r1.status_code == 201
+        assert r1.json()["motion_number"] == "1"
+
+        # Second: add a motion without specifying motion_number — display_order would be 1
+        # which equals the manually set "1", causing a 409 under the old logic.
+        # The new logic uses max(numeric motion_numbers) + 1 = 2, avoiding the conflict.
+        r2 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Auto Assigned After Manual"},
+        )
+        assert r2.status_code == 201
+        data = r2.json()
+        assert data["display_order"] == 1  # display_order is still 1
+        assert data["motion_number"] == "2"  # but motion_number skips to 2 to avoid conflict
+
+    async def test_rr2_02_auto_assign_with_non_numeric_existing_numbers_falls_back(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR2-02: When existing motion_numbers are all non-numeric (e.g. 'A', 'B'),
+        auto-assign falls back to str(display_order)."""
+        agm = await self._create_meeting(db_session, "RR202NonNumeric")
+        # Add motion with non-numeric motion_number
+        r1 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Alpha Motion", "motion_number": "A"},
+        )
+        assert r1.status_code == 201
+        assert r1.json()["motion_number"] == "A"
+
+        # Auto-assign: no numeric motion_numbers exist → falls back to display_order
+        r2 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Auto After Non-numeric"},
+        )
+        assert r2.status_code == 201
+        data = r2.json()
+        # Falls back to str(display_order) = "1" since "A" is non-numeric
+        assert data["motion_number"] == str(data["display_order"])
+
+    async def test_rr2_02_auto_assign_mixed_numeric_non_numeric(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR2-02: When both numeric and non-numeric motion_numbers exist,
+        auto-assign uses max(numeric) + 1."""
+        agm = await self._create_meeting(db_session, "RR202Mixed")
+        # Add motion with non-numeric number
+        r1 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "SR Motion", "motion_number": "SR-1"},
+        )
+        assert r1.status_code == 201
+        # Add motion with numeric number "3"
+        r2 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Numeric Three", "motion_number": "3"},
+        )
+        assert r2.status_code == 201
+        # Auto-assign: max numeric = 3, so next = 4
+        r3 = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/motions",
+            json={"title": "Auto After Mixed"},
+        )
+        assert r3.status_code == 201
+        assert r3.json()["motion_number"] == "4"
+
     # --- Happy path (update) ---
 
     async def test_update_motion_all_fields_returns_200(

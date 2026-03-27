@@ -79,7 +79,7 @@ export function AuthForm({
         {step === "email" && (
           <form onSubmit={handleRequestOtp} noValidate>
             <div className="field">
-              <label className="field__label" htmlFor="email">Email address</label>
+              <label className="field__label field__label--required" htmlFor="email">Email address</label>
               <input
                 id="email"
                 className="field__input"
@@ -88,6 +88,8 @@ export function AuthForm({
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!emailError}
                 aria-describedby={emailError ? "email-error" : undefined}
+                aria-required="true"
+                required
                 placeholder="your@email.com"
               />
               {emailError && (
@@ -116,7 +118,7 @@ export function AuthForm({
         {step === "code" && (
           <form onSubmit={handleVerify} noValidate>
             <div className="field">
-              <label className="field__label" htmlFor="otp-code">Verification code</label>
+              <label className="field__label field__label--required" htmlFor="otp-code">Verification code</label>
               <input
                 id="otp-code"
                 className="field__input"
@@ -128,6 +130,8 @@ export function AuthForm({
                 onChange={(e) => setCode(e.target.value)}
                 aria-invalid={!!codeError}
                 aria-describedby={codeError ? "otp-code-error" : undefined}
+                aria-required="true"
+                required
                 placeholder="e.g. ABCD1234"
               />
               {codeError && (

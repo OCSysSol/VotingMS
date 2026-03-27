@@ -88,6 +88,23 @@ describe("AuthForm — step 1 (email)", () => {
     expect(screen.getByText("Failed to send code. Please try again.")).toBeInTheDocument();
   });
 
+  // --- US-ACC-08: Required field markers ---
+  it("email input has aria-required=true", () => {
+    render(<AuthForm {...step1Props()} />);
+    expect(screen.getByLabelText("Email address")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("email input has required attribute", () => {
+    render(<AuthForm {...step1Props()} />);
+    expect(screen.getByLabelText("Email address")).toHaveAttribute("required");
+  });
+
+  it("email label has required CSS modifier class", () => {
+    render(<AuthForm {...step1Props()} />);
+    const label = document.querySelector('label[for="email"]') as HTMLLabelElement;
+    expect(label.classList.contains("field__label--required")).toBe(true);
+  });
+
   // --- No code field on step 1 ---
   it("does not render 'Lot number' field on step 1", () => {
     render(<AuthForm {...step1Props()} />);
@@ -195,6 +212,23 @@ describe("AuthForm — step 2 (code)", () => {
     await user.type(screen.getByLabelText("Verification code"), "ABCD1234");
     await user.click(screen.getByRole("button", { name: "Resend code" }));
     expect(screen.queryByDisplayValue("ABCD1234")).not.toBeInTheDocument();
+  });
+
+  // --- US-ACC-08: Required field markers ---
+  it("verification code input has aria-required=true", () => {
+    render(<AuthForm {...step2Props()} />);
+    expect(screen.getByLabelText("Verification code")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("verification code input has required attribute", () => {
+    render(<AuthForm {...step2Props()} />);
+    expect(screen.getByLabelText("Verification code")).toHaveAttribute("required");
+  });
+
+  it("verification code label shows asterisk marker", () => {
+    render(<AuthForm {...step2Props()} />);
+    const label = document.querySelector('label[for="otp-code"]') as HTMLLabelElement;
+    expect(label.classList.contains("field__label--required")).toBe(true);
   });
 
   // --- autoComplete ---

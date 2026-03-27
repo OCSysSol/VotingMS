@@ -1445,7 +1445,24 @@ async def add_motion_to_meeting(
     # The frontend may send null or "" when the user leaves the field empty — treat both
     # as "no explicit number supplied" and fall back to auto-assign.
     explicit_number = data.motion_number.strip() if data.motion_number is not None else ""
-    assigned_motion_number = explicit_number if explicit_number else str(next_index)
+
+    if not explicit_number:
+        # RR2-02: auto-assign from max(existing numeric motion_numbers) + 1 to avoid
+        # conflicts with manually-set motion numbers that match display_order values.
+        from sqlalchemy import Integer, cast as sa_cast
+        numeric_max_result = await db.execute(
+            select(func.max(func.cast(Motion.motion_number, Integer)))
+            .where(Motion.general_meeting_id == general_meeting_id)
+            .where(Motion.motion_number.regexp_match(r"^\d+$"))
+        )
+        max_numeric = numeric_max_result.scalar_one_or_none()
+        if max_numeric is not None:
+            assigned_motion_number = str(max_numeric + 1)
+        else:
+            # No existing numeric motion numbers — fall back to display_order
+            assigned_motion_number = str(next_index)
+    else:
+        assigned_motion_number = explicit_number
 
     motion = Motion(
         general_meeting_id=general_meeting_id,

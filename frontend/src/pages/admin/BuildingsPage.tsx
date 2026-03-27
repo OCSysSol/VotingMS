@@ -1,21 +1,27 @@
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { listBuildings, getBuildingsCount, createBuilding } from "../../api/admin";
 import type { Building } from "../../types";
 import BuildingTable from "../../components/admin/BuildingTable";
 import BuildingCSVUpload from "../../components/admin/BuildingCSVUpload";
 import Pagination from "../../components/admin/Pagination";
+import { useState } from "react";
 
 const PAGE_SIZE = 20;
 
 export default function BuildingsPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [name, setName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
+
+  // RR2-06: Read page from URL search params; default to 1
+  const pageParam = parseInt(searchParams.get("page") ?? "1", 10);
+  const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
 
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["admin", "buildings", "count", showArchived],
@@ -63,13 +69,23 @@ export default function BuildingsPage() {
     },
   });
 
+  // RR2-06: Update URL search param on page change (use replace to avoid polluting history)
   function handlePageChange(newPage: number) {
-    setPage(newPage);
+    const next = new URLSearchParams(searchParams);
+    if (newPage === 1) {
+      next.delete("page");
+    } else {
+      next.set("page", String(newPage));
+    }
+    setSearchParams(next, { replace: true });
   }
 
   function handleShowArchivedChange(checked: boolean) {
     setShowArchived(checked);
-    setPage(1);
+    // RR2-03: Reset to page 1 when filter changes
+    const next = new URLSearchParams(searchParams);
+    next.delete("page");
+    setSearchParams(next, { replace: true });
   }
 
   function openModal() {
@@ -148,26 +164,30 @@ export default function BuildingsPage() {
             }}
           >
             <h3 className="admin-card__title">New Building</h3>
-            <form onSubmit={handleSubmit}>
+            <form onSubmit={handleSubmit} noValidate>
               <div className="field">
-                <label className="field__label" htmlFor="building-name">Building Name</label>
+                <label className="field__label field__label--required" htmlFor="building-name">Building Name</label>
                 <input
                   id="building-name"
                   className="field__input"
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
+                  aria-required="true"
+                  required
                   placeholder="e.g. Harbour View Tower"
                 />
               </div>
               <div className="field">
-                <label className="field__label" htmlFor="building-manager-email">Manager Email</label>
+                <label className="field__label field__label--required" htmlFor="building-manager-email">Manager Email</label>
                 <input
                   id="building-manager-email"
                   className="field__input"
                   type="email"
                   value={managerEmail}
                   onChange={(e) => setManagerEmail(e.target.value)}
+                  aria-required="true"
+                  required
                   placeholder="e.g. manager@example.com"
                 />
               </div>
@@ -203,14 +223,19 @@ export default function BuildingsPage() {
           totalItems={totalCount}
           pageSize={PAGE_SIZE}
           onPageChange={handlePageChange}
+          isLoading={isLoading}
         />
-        <BuildingTable buildings={buildings} isLoading={isLoading} />
+        {/* RR2-07: Show loading overlay while fetching page change */}
+        <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 0.15s" }}>
+          <BuildingTable buildings={buildings} isLoading={isLoading} />
+        </div>
         <Pagination
           page={safePage}
           totalPages={totalPages}
           totalItems={totalCount}
           pageSize={PAGE_SIZE}
           onPageChange={handlePageChange}
+          isLoading={isLoading}
         />
       </div>
       <BuildingCSVUpload onSuccess={handleCSVSuccess} />
