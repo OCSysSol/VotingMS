@@ -572,4 +572,143 @@ describe("BuildingsPage", () => {
       expect(screen.getByText("Failed to load buildings.")).toBeInTheDocument();
     });
   });
+
+  // --- Sort functionality ---
+
+  it("renders sortable Name and Created At column headers", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
+  });
+
+  it("Created At header shows ▼ indicator by default (desc sort)", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
+    });
+    const createdBtn = screen.getByRole("button", { name: /Created At/ });
+    expect(createdBtn.textContent).toContain("▼");
+  });
+
+  it("clicking Name header updates URL with sort_by=name&sort_dir=asc", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ }).closest("th")).toHaveAttribute("aria-sort", "ascending");
+    });
+  });
+
+  it("clicking Name header again toggles to descending", async () => {
+    const user = userEvent.setup();
+    renderPage("?sort_by=name&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ }).closest("th")).toHaveAttribute("aria-sort", "descending");
+    });
+  });
+
+  it("reads sort_by=name from URL and shows ascending indicator on Name", async () => {
+    renderPage("?sort_by=name&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
+    });
+    const nameBtn = screen.getByRole("button", { name: /Name/ });
+    expect(nameBtn.closest("th")).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("sort change resets page to 1 (sends request without page param)", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/count", () =>
+        HttpResponse.json({ count: 21 })
+      ),
+      http.get("http://localhost:8000/api/admin/buildings", ({ request }) => {
+        const url = new URL(request.url);
+        const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+        const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+        const data = Array.from({ length: 21 }, (_, i) => ({
+          id: `b${i + 1}`,
+          name: `Building ${i + 1}`,
+          manager_email: `b${i + 1}@test.com`,
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        }));
+        return HttpResponse.json(data.slice(offset, offset + limit));
+      })
+    );
+    renderPage("?page=2");
+    await waitFor(() => {
+      expect(screen.getByText("Building 21")).toBeInTheDocument();
+    });
+    // Click Name to change sort — page should reset to 1
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    await waitFor(() => {
+      expect(screen.getByText("Building 1")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Building 21")).not.toBeInTheDocument();
+  });
+
+  it("shows error state when sort_by is invalid and server returns 422", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings", () => {
+        return HttpResponse.json({ detail: "Invalid sort_by value" }, { status: 422 });
+      })
+    );
+    renderPage("?sort_by=INVALID");
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load buildings.")).toBeInTheDocument();
+    });
+  });
+
+  it("clicking same Name column while asc toggles to desc (sortDir=asc branch)", async () => {
+    const user = userEvent.setup();
+    // Start with name asc
+    renderPage("?sort_by=name&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    });
+    // Click same column while asc → toggles to desc
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ }).closest("th")).toHaveAttribute("aria-sort", "descending");
+    });
+  });
+
+  it("clicking same Name column while desc toggles to asc (sortDir=desc branch)", async () => {
+    const user = userEvent.setup();
+    // Start with name desc
+    renderPage("?sort_by=name&sort_dir=desc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    });
+    // Click same column while desc → toggles to asc
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Name/ }).closest("th")).toHaveAttribute("aria-sort", "ascending");
+    });
+  });
+
+  it("clicking Created At from name column uses desc as default direction", async () => {
+    const user = userEvent.setup();
+    // Start with name active
+    renderPage("?sort_by=name&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
+    });
+    // Click Created At (different column, date type → default desc)
+    await user.click(screen.getByRole("button", { name: /Created At/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Created At/ }).closest("th")).toHaveAttribute("aria-sort", "descending");
+    });
+  });
 });

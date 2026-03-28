@@ -1427,3 +1427,147 @@ class TestImportBuildingsExcel:
         )
         assert response.status_code == 422
 
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/buildings — sort_by / sort_dir query params
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestListBuildingsSort:
+    """Tests for sort_by and sort_dir query parameters on GET /api/admin/buildings."""
+
+    # --- Happy path ---
+
+    async def test_sort_by_name_asc_returns_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Buildings sorted by name ascending should be in A→Z order."""
+        # Create two buildings with known names
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Zephyr Tower", "manager_email": "z@test.com"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Alpha Court", "manager_email": "a@test.com"},
+        )
+        response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=asc&is_archived=false")
+        assert response.status_code == 200
+        names = [b["name"] for b in response.json()]
+        assert names == sorted(names)
+
+    async def test_sort_by_name_desc_returns_reverse_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Buildings sorted by name descending should be in Z→A order."""
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Zephyr Tower", "manager_email": "z@test.com"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Alpha Court", "manager_email": "a@test.com"},
+        )
+        response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=desc&is_archived=false")
+        assert response.status_code == 200
+        names = [b["name"] for b in response.json()]
+        assert names == sorted(names, reverse=True)
+
+    async def test_sort_by_created_at_asc_returns_oldest_first(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Buildings sorted by created_at ascending should be oldest first."""
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "First Building", "manager_email": "f@test.com"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Second Building", "manager_email": "s@test.com"},
+        )
+        response = await client.get("/api/admin/buildings?sort_by=created_at&sort_dir=asc&is_archived=false")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 2
+        # created_at values should be non-decreasing
+        created_ats = [b["created_at"] for b in data]
+        assert created_ats == sorted(created_ats)
+
+    async def test_sort_by_created_at_desc_is_default_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Without sort params, buildings should be returned newest first (default)."""
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "BuildingA", "manager_email": "ba@test.com"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "BuildingB", "manager_email": "bb@test.com"},
+        )
+        response = await client.get("/api/admin/buildings?is_archived=false")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 2
+        created_ats = [b["created_at"] for b in data]
+        assert created_ats == sorted(created_ats, reverse=True)
+
+    async def test_sort_by_name_no_sort_dir_defaults_to_desc(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """sort_by=name without sort_dir should use desc (the global default)."""
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Zephyr", "manager_email": "z@test.com"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Alpha", "manager_email": "a@test.com"},
+        )
+        response = await client.get("/api/admin/buildings?sort_by=name&is_archived=false")
+        assert response.status_code == 200
+        names = [b["name"] for b in response.json()]
+        # Default sort_dir=desc → Z first
+        assert names == sorted(names, reverse=True)
+
+    # --- Input validation ---
+
+    async def test_invalid_sort_by_returns_422(self, client: AsyncClient):
+        """An unrecognised sort_by value must be rejected with 422."""
+        response = await client.get("/api/admin/buildings?sort_by=invalid_column")
+        assert response.status_code == 422
+        assert "Invalid sort_by value" in response.json()["detail"]
+
+    async def test_invalid_sort_dir_returns_422(self, client: AsyncClient):
+        """An unrecognised sort_dir value must be rejected with 422."""
+        response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=sideways")
+        assert response.status_code == 422
+        assert "Invalid sort_dir value" in response.json()["detail"]
+
+    async def test_sql_injection_attempt_in_sort_by_returns_422(self, client: AsyncClient):
+        """A SQL injection attempt in sort_by must be rejected before hitting the DB."""
+        response = await client.get("/api/admin/buildings?sort_by=name;DROP TABLE buildings;--")
+        assert response.status_code == 422
+
+    # --- Boundary values ---
+
+    async def test_sort_with_no_matching_name_filter_returns_empty_list(self, client: AsyncClient, db_session: AsyncSession):
+        """sort_by=name with a name filter that matches nothing returns an empty list."""
+        response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=asc&name=ZZZNOMATCH99999")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_sort_with_single_matching_building_returns_one_item(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """sort_by=name with a unique name prefix returns exactly one item."""
+        unique_prefix = "SortBoundaryUniq"
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": f"{unique_prefix} Solo Building", "manager_email": "solo@test.com"},
+        )
+        response = await client.get(f"/api/admin/buildings?sort_by=name&sort_dir=asc&name={unique_prefix}")
+        assert response.status_code == 200
+        assert len(response.json()) == 1

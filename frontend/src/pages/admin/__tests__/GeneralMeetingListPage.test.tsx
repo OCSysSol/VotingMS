@@ -533,6 +533,129 @@ describe("GeneralMeetingListPage", () => {
     expect(screen.getAllByRole("button", { name: "Go to page 2" })[0]).toBeInTheDocument();
   });
 
+  // --- Sort functionality ---
+
+  it("renders sortable Title and Created At column headers", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /Title/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
+  });
+
+  it("Created At header shows ▼ indicator by default (desc sort)", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    const createdBtn = screen.getByRole("button", { name: /Created At/ });
+    expect(createdBtn.textContent).toContain("▼");
+  });
+
+  it("clicking Title header updates sort to title ascending", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Title/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ }).closest("th")).toHaveAttribute("aria-sort", "ascending");
+    });
+  });
+
+  it("clicking Title header again toggles to descending", async () => {
+    const user = userEvent.setup();
+    renderPage("?sort_by=title&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Title/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ }).closest("th")).toHaveAttribute("aria-sort", "descending");
+    });
+  });
+
+  it("clicking Title desc toggles back to ascending (sortDir=desc branch)", async () => {
+    const user = userEvent.setup();
+    renderPage("?sort_by=title&sort_dir=desc");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ })).toBeInTheDocument();
+    });
+    // Click same column while desc → toggles to asc
+    await user.click(screen.getByRole("button", { name: /Title/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Title/ }).closest("th")).toHaveAttribute("aria-sort", "ascending");
+    });
+  });
+
+  it("reads sort_by=title from URL and shows ascending indicator on Title", async () => {
+    renderPage("?sort_by=title&sort_dir=asc");
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    const titleBtn = screen.getByRole("button", { name: /Title/ });
+    expect(titleBtn.closest("th")).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("sort change resets page to 1", async () => {
+    const meetingsData = Array.from({ length: 21 }, (_, i) => ({
+      id: `m${i + 1}`,
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: `Meeting ${i + 1}`,
+      status: "open",
+      meeting_at: "2024-06-01T10:00:00Z",
+      voting_closes_at: "2024-06-01T12:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+    }));
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 21 })
+      ),
+      http.get("http://localhost:8000/api/admin/general-meetings", ({ request }) => {
+        const url = new URL(request.url);
+        const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+        const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
+        return HttpResponse.json(meetingsData.slice(offset, offset + limit));
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("?page=2");
+    await waitFor(() => {
+      expect(screen.getByText("Meeting 21")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Title/ }));
+    await waitFor(() => {
+      expect(screen.getByText("Meeting 1")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Meeting 21")).not.toBeInTheDocument();
+  });
+
+  it("shows error when server returns 422 for invalid sort param", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings", () => {
+        return HttpResponse.json({ detail: "Invalid sort_by value" }, { status: 422 });
+      })
+    );
+    renderPage("?sort_by=INVALID");
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load General Meetings.")).toBeInTheDocument();
+    });
+  });
+
+  it("Status and Building column headers do NOT have sortable buttons", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    // Status th should not contain a sort button
+    // Building th should not contain a sort button
+    expect(screen.queryByRole("button", { name: /^Status$/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Building$/ })).not.toBeInTheDocument();
+  });
+
   // --- RR2-03: filter toggle resets pagination to page 1 ---
 
   it("RR2-03: changing building filter resets page to 1", async () => {
@@ -585,7 +708,7 @@ describe("GeneralMeetingListPage", () => {
     });
 
     // Navigate to page 2 (b1 has 21 meetings → 2 pages)
-    await user.click(screen.getAllByRole("button", { name: "2" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
     await waitFor(() => {
       expect(screen.getByText("Alpha Meeting 21")).toBeInTheDocument();
     });
@@ -650,7 +773,7 @@ describe("GeneralMeetingListPage", () => {
     });
 
     // Navigate to page 2
-    await user.click(screen.getAllByRole("button", { name: "2" })[0]);
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
     await waitFor(() => {
       expect(screen.getByText("Open Meeting 21")).toBeInTheDocument();
     });

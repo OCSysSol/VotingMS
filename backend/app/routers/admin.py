@@ -173,16 +173,27 @@ async def create_building(
     return BuildingOut.model_validate(building)
 
 
+_VALID_BUILDINGS_SORT_BY = {"name", "created_at"}
+_VALID_SORT_DIRS = {"asc", "desc"}
+
+
 @router.get("/buildings", response_model=list[BuildingOut])
 async def list_buildings(
     limit: int = Query(default=100, le=1000),
     offset: int = Query(default=0, ge=0),
     name: str | None = Query(default=None),
     is_archived: bool | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    sort_dir: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[BuildingOut]:
+    if sort_by is not None and sort_by not in _VALID_BUILDINGS_SORT_BY:
+        raise HTTPException(status_code=422, detail="Invalid sort_by value")
+    if sort_dir is not None and sort_dir not in _VALID_SORT_DIRS:
+        raise HTTPException(status_code=422, detail="Invalid sort_dir value")
     buildings = await admin_service.list_buildings(
-        db, limit=limit, offset=offset, name=name, is_archived=is_archived
+        db, limit=limit, offset=offset, name=name, is_archived=is_archived,
+        sort_by=sort_by, sort_dir=sort_dir,
     )
     return [BuildingOut.model_validate(b) for b in buildings]
 
@@ -504,6 +515,9 @@ async def create_general_meeting(
     return GeneralMeetingOut(**meeting_dict)
 
 
+_VALID_MEETINGS_SORT_BY = {"title", "created_at"}
+
+
 @router.get("/general-meetings", response_model=list[GeneralMeetingListItem])
 async def list_general_meetings(
     limit: int = Query(default=100, le=1000),
@@ -511,10 +525,17 @@ async def list_general_meetings(
     name: str | None = Query(default=None),
     building_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    sort_by: str | None = Query(default=None),
+    sort_dir: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> list[GeneralMeetingListItem]:
+    if sort_by is not None and sort_by not in _VALID_MEETINGS_SORT_BY:
+        raise HTTPException(status_code=422, detail="Invalid sort_by value")
+    if sort_dir is not None and sort_dir not in _VALID_SORT_DIRS:
+        raise HTTPException(status_code=422, detail="Invalid sort_dir value")
     items = await admin_service.list_general_meetings(
-        db, limit=limit, offset=offset, name=name, building_id=building_id, status=status
+        db, limit=limit, offset=offset, name=name, building_id=building_id, status=status,
+        sort_by=sort_by, sort_dir=sort_dir,
     )
     return [GeneralMeetingListItem(**item) for item in items]
 

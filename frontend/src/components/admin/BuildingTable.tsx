@@ -1,7 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Building } from "../../types";
 import Pagination from "./Pagination";
+import SortableColumnHeader from "./SortableColumnHeader";
+import type { SortDir } from "./SortableColumnHeader";
 import { formatLocalDateTime } from "../../utils/dateTime";
 
 const PAGE_SIZE = 20;
@@ -9,15 +11,16 @@ const PAGE_SIZE = 20;
 interface BuildingTableProps {
   buildings: Building[];
   isLoading?: boolean;
+  sortBy?: string;
+  sortDir?: SortDir;
+  onSort?: (col: string) => void;
 }
 
-export default function BuildingTable({ buildings, isLoading }: BuildingTableProps) {
+export default function BuildingTable({ buildings, isLoading, sortBy, sortDir, onSort }: BuildingTableProps) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    setPage(1);
-  }, [buildings.length]);
+  const currentSort = sortBy && sortDir ? { column: sortBy, dir: sortDir } : null;
 
   const totalPages = Math.max(1, Math.ceil(buildings.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -40,10 +43,28 @@ export default function BuildingTable({ buildings, isLoading }: BuildingTablePro
       <table className="admin-table">
         <thead>
           <tr>
-            <th>Name</th>
+            {onSort ? (
+              <SortableColumnHeader
+                label="Name"
+                column="name"
+                currentSort={currentSort}
+                onSort={onSort}
+              />
+            ) : (
+              <th>Name</th>
+            )}
             <th>Manager Email</th>
             <th>Status</th>
-            <th>Created At</th>
+            {onSort ? (
+              <SortableColumnHeader
+                label="Created At"
+                column="created_at"
+                currentSort={currentSort}
+                onSort={onSort}
+              />
+            ) : (
+              <th>Created At</th>
+            )}
           </tr>
         </thead>
         <tbody>

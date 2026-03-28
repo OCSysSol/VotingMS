@@ -5,9 +5,16 @@ import { listGeneralMeetings, getGeneralMeetingsCount, listBuildings } from "../
 import type { GeneralMeetingListItem } from "../../api/admin";
 import type { Building } from "../../types";
 import GeneralMeetingTable from "../../components/admin/GeneralMeetingTable";
+import type { SortDir } from "../../components/admin/SortableColumnHeader";
 import Pagination from "../../components/admin/Pagination";
 
 const PAGE_SIZE = 20;
+
+// Text columns default to asc, date columns default to desc
+const DEFAULT_SORT_DIR: Record<string, SortDir> = {
+  title: "asc",
+  created_at: "desc",
+};
 
 export default function GeneralMeetingListPage() {
   const navigate = useNavigate();
@@ -19,6 +26,10 @@ export default function GeneralMeetingListPage() {
   // RR2-06: Read page from URL search params; default to 1
   const pageParam = parseInt(searchParams.get("page") ?? "1", 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
+
+  // Sort state from URL search params
+  const sortBy = searchParams.get("sort_by") ?? "created_at";
+  const sortDir = (searchParams.get("sort_dir") ?? "desc") as SortDir;
 
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus],
@@ -34,13 +45,15 @@ export default function GeneralMeetingListPage() {
   const safePage = Math.min(page, totalPages);
 
   const { data: meetings = [], isLoading, error } = useQuery<GeneralMeetingListItem[]>({
-    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus],
+    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, sortBy, sortDir],
     queryFn: () =>
       listGeneralMeetings({
         limit: PAGE_SIZE,
         offset: (safePage - 1) * PAGE_SIZE,
         building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
+        sort_by: sortBy,
+        sort_dir: sortDir,
       }),
   });
 
@@ -49,17 +62,19 @@ export default function GeneralMeetingListPage() {
     const nextOffset = safePage * PAGE_SIZE;
     if (nextOffset < totalCount) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus],
+        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, sortBy, sortDir],
         queryFn: () =>
           listGeneralMeetings({
             limit: PAGE_SIZE,
             offset: nextOffset,
             building_id: selectedBuildingId || undefined,
             status: selectedStatus || undefined,
+            sort_by: sortBy,
+            sort_dir: sortDir,
           }),
       });
     }
-  }, [safePage, selectedBuildingId, selectedStatus, totalCount, queryClient]);
+  }, [safePage, selectedBuildingId, selectedStatus, totalCount, queryClient, sortBy, sortDir]);
 
   const { data: buildings = [] } = useQuery<Building[]>({
     queryKey: ["admin", "buildings", "list", 1, false],
@@ -99,6 +114,25 @@ export default function GeneralMeetingListPage() {
       next.delete("page");
     } else {
       next.set("page", String(newPage));
+    }
+    setSearchParams(next, { replace: true });
+  }
+
+  function handleSortChange(column: string) {
+    const next = new URLSearchParams(searchParams);
+    // Reset page to 1 on sort change
+    next.delete("page");
+    if (column === sortBy) {
+      // Toggle direction
+      const newDir: SortDir = sortDir === "asc" ? "desc" : "asc";
+      next.set("sort_by", column);
+      next.set("sort_dir", newDir);
+    } else {
+      // New column — use its default direction (all valid columns are in DEFAULT_SORT_DIR)
+      /* v8 ignore next -- "asc" fallback is unreachable: all valid sort columns are in DEFAULT_SORT_DIR */
+      const newDir: SortDir = DEFAULT_SORT_DIR[column] !== undefined ? DEFAULT_SORT_DIR[column] : "asc";
+      next.set("sort_by", column);
+      next.set("sort_dir", newDir);
     }
     setSearchParams(next, { replace: true });
   }
@@ -158,7 +192,13 @@ export default function GeneralMeetingListPage() {
         />
         {/* RR2-07: Show loading overlay while fetching page change */}
         <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 0.15s" }}>
-          <GeneralMeetingTable meetings={meetings} isLoading={isLoading} />
+          <GeneralMeetingTable
+            meetings={meetings}
+            isLoading={isLoading}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSort={handleSortChange}
+          />
         </div>
         <Pagination
           page={safePage}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import LotOwnerTable from "../LotOwnerTable";
 import type { LotOwner } from "../../../types";
@@ -60,12 +60,12 @@ describe("LotOwnerTable", () => {
     expect(onEdit).toHaveBeenCalledWith(lotOwners[0]);
   });
 
-  it("renders table headers including Financial Position and Proxy", () => {
+  it("renders sortable table headers", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
-    expect(screen.getByText("Lot Number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Lot Number/ })).toBeInTheDocument();
     expect(screen.getByText("Email")).toBeInTheDocument();
-    expect(screen.getByText("Unit Entitlement")).toBeInTheDocument();
-    expect(screen.getByText("Financial Position")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Unit Entitlement/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Financial Position/ })).toBeInTheDocument();
     expect(screen.getByText("Proxy")).toBeInTheDocument();
     expect(screen.getByText("Actions")).toBeInTheDocument();
   });
@@ -88,6 +88,142 @@ describe("LotOwnerTable", () => {
   it("shows None when no proxy is nominated", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("None")).toBeInTheDocument();
+  });
+
+  // --- Sort: default state ---
+
+  it("Lot Number column header shows aria-sort='ascending' by default", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const lotNumberBtn = screen.getByRole("button", { name: /Lot Number/ });
+    const th = lotNumberBtn.closest("th");
+    expect(th).toHaveAttribute("aria-sort", "ascending");
+  });
+
+  it("Unit Entitlement and Financial Position show aria-sort='none' by default", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const ueBtn = screen.getByRole("button", { name: /Unit Entitlement/ });
+    const fpBtn = screen.getByRole("button", { name: /Financial Position/ });
+    expect(ueBtn.closest("th")).toHaveAttribute("aria-sort", "none");
+    expect(fpBtn.closest("th")).toHaveAttribute("aria-sort", "none");
+  });
+
+  it("default sort is Lot Number asc — 1A appears before 2B", () => {
+    render(<LotOwnerTable lotOwners={[...lotOwners].reverse()} onEdit={() => {}} />);
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    // First row should be lot 1A (natural sort 1A < 2B)
+    expect(rows[0].textContent).toContain("1A");
+    expect(rows[1].textContent).toContain("2B");
+  });
+
+  // --- Sort: Lot Number ---
+
+  it("clicking Lot Number twice toggles to descending order", async () => {
+    const user = userEvent.setup();
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Lot Number/ });
+    // First click: already ascending → desc
+    await user.click(btn);
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "descending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    expect(rows[0].textContent).toContain("2B");
+    expect(rows[1].textContent).toContain("1A");
+  });
+
+  it("clicking Lot Number a third time toggles back to ascending", async () => {
+    const user = userEvent.setup();
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Lot Number/ });
+    await user.click(btn); // → desc
+    await user.click(btn); // → asc
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    expect(rows[0].textContent).toContain("1A");
+  });
+
+  // --- Sort: Unit Entitlement ---
+
+  it("clicking Unit Entitlement sorts by entitlement ascending", async () => {
+    const user = userEvent.setup();
+    render(<LotOwnerTable lotOwners={[...lotOwners].reverse()} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Unit Entitlement/ });
+    await user.click(btn);
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    // 100 < 200, so lo1 (100) should be first
+    expect(rows[0].textContent).toContain("100");
+    expect(rows[1].textContent).toContain("200");
+  });
+
+  it("clicking Unit Entitlement twice sorts by entitlement descending", async () => {
+    const user = userEvent.setup();
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Unit Entitlement/ });
+    await user.click(btn); // asc
+    await user.click(btn); // desc
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "descending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    // 200 > 100, so lo2 (200) should be first
+    expect(rows[0].textContent).toContain("200");
+  });
+
+  // --- Sort: Financial Position ---
+
+  it("clicking Financial Position sorts with normal < in_arrear (ascending)", async () => {
+    const user = userEvent.setup();
+    const mixed: LotOwner[] = [
+      { ...lotOwners[1] }, // in_arrear first
+      { ...lotOwners[0] }, // normal second
+    ];
+    render(<LotOwnerTable lotOwners={mixed} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Financial Position/ });
+    await user.click(btn);
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "ascending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    // normal (lo1: 1A) should be first
+    expect(rows[0].textContent).toContain("1A");
+    expect(rows[1].textContent).toContain("2B");
+  });
+
+  it("clicking Financial Position twice shows in_arrear lots first (descending)", async () => {
+    const user = userEvent.setup();
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const btn = screen.getByRole("button", { name: /Financial Position/ });
+    await user.click(btn); // asc
+    await user.click(btn); // desc
+    expect(btn.closest("th")).toHaveAttribute("aria-sort", "descending");
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    // in_arrear (lo2: 2B) should be first
+    expect(rows[0].textContent).toContain("2B");
+  });
+
+  // --- Sort resets page to 1 ---
+
+  it("clicking a sort column resets page to 1", async () => {
+    const user = userEvent.setup();
+    const manyLotOwners: LotOwner[] = Array.from({ length: 26 }, (_, i) => ({
+      id: `lo${i + 1}`,
+      building_id: "b1",
+      lot_number: `${String(i + 1).padStart(3, "0")}`,
+      emails: [],
+      unit_entitlement: i + 1,
+      financial_position: "normal" as const,
+      proxy_email: null,
+    }));
+    render(<LotOwnerTable lotOwners={manyLotOwners} onEdit={() => {}} />);
+    // Navigate to page 2
+    await user.click(screen.getAllByRole("button", { name: "Next page" })[0]);
+    expect(screen.getByText("026")).toBeInTheDocument();
+    // Now click a sort column — should reset to page 1
+    await user.click(screen.getByRole("button", { name: /Unit Entitlement/ }));
+    expect(screen.queryByText("026")).not.toBeInTheDocument();
+    expect(screen.getByText("001")).toBeInTheDocument();
   });
 
   // --- Pagination top + bottom ---
@@ -136,5 +272,29 @@ describe("LotOwnerTable", () => {
     expect(tbody.querySelectorAll("tr")).toHaveLength(1);
     expect(screen.getByText("lot-26")).toBeInTheDocument();
     expect(screen.queryByText("lot-1")).not.toBeInTheDocument();
+  });
+
+  // --- Natural sort boundary: numeric lot numbers ---
+
+  it("sorts lot numbers naturally so '10' comes after '9', not before '2'", async () => {
+    const user = userEvent.setup();
+    const numericLots: LotOwner[] = [
+      { id: "a", building_id: "b1", lot_number: "10", emails: [], unit_entitlement: 1, financial_position: "normal", proxy_email: null },
+      { id: "b", building_id: "b1", lot_number: "9", emails: [], unit_entitlement: 2, financial_position: "normal", proxy_email: null },
+      { id: "c", building_id: "b1", lot_number: "2", emails: [], unit_entitlement: 3, financial_position: "normal", proxy_email: null },
+    ];
+    render(<LotOwnerTable lotOwners={numericLots} onEdit={() => {}} />);
+    // Default sort is lot_number asc — numeric order: 2, 9, 10
+    const tbody = document.querySelector("tbody")!;
+    const rows = within(tbody).getAllByRole("row");
+    expect(rows[0].textContent).toContain("2");
+    expect(rows[1].textContent).toContain("9");
+    expect(rows[2].textContent).toContain("10");
+    // Click to desc
+    await user.click(screen.getByRole("button", { name: /Lot Number/ }));
+    const rowsDesc = within(tbody).getAllByRole("row");
+    expect(rowsDesc[0].textContent).toContain("10");
+    expect(rowsDesc[1].textContent).toContain("9");
+    expect(rowsDesc[2].textContent).toContain("2");
   });
 });
