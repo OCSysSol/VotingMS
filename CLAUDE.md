@@ -191,6 +191,29 @@ Multiple fund sections: worst-case across all sections (arrears in any -> `in_ar
 
 ---
 
+## Agent Configuration
+
+These fields are read by the generic agent definitions. Values here override user-level agent defaults.
+
+| Key | Value |
+|-----|-------|
+| `stack` | React (Vite) · FastAPI · PostgreSQL · SQLAlchemy · Alembic |
+| `backend_dir` | `backend` |
+| `frontend_dir` | `frontend` |
+| `test_backend` | `cd backend && TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5433/agm_test uv run pytest tests/ --cov=app --cov-fail-under=100 -q` |
+| `test_frontend` | `cd frontend && npm run test:coverage` |
+| `e2e_command` | `cd frontend && npx playwright test` |
+| `worktree_root` | `/Users/stevensun/personal/agm_survey/.worktree` |
+| `preview_url_pattern` | `https://agm-voting-git-<branch>-ocss.vercel.app` |
+| `schema_migration_tool` | `alembic` |
+| `container_tool` | `podman` |
+| `neon_project_id` | `divine-dust-41291876` |
+| `vercel_project_id` | `prj_qrC03F0jBalhpHV5VLK3IyCRUU6L` |
+| `real_data_patterns` | `"The Vale", "SBT", "Sandridge Bay Towers"` |
+| `test_data_patterns` | `WF*, E2E*, Test*, Delete Test*` |
+
+---
+
 ## Commands
 
 ```bash
