@@ -61,6 +61,7 @@ export interface VoterEntry {
   voter_email?: string;
   lot_number?: string;
   entitlement: number;
+  proxy_email?: string | null;
 }
 
 export interface TallyCategory {

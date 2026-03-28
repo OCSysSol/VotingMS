@@ -1279,13 +1279,19 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
     eligible_lot_owner_ids: set[uuid.UUID] = set(lot_entitlement.keys())
     total_eligible_voters = len(eligible_lot_owner_ids)
 
-    # Load ballot submissions
+    # Load ballot submissions — separate actual votes (is_absent=False) from absent records
     submissions_result = await db.execute(
         select(BallotSubmission).where(BallotSubmission.general_meeting_id == general_meeting_id)
     )
     submissions = list(submissions_result.scalars().all())
-    submitted_lot_owner_ids: set[uuid.UUID] = {s.lot_owner_id for s in submissions}
+    # Only real votes count toward submitted_lot_owner_ids and total_submitted
+    voted_submissions = [s for s in submissions if not s.is_absent]
+    submitted_lot_owner_ids: set[uuid.UUID] = {s.lot_owner_id for s in voted_submissions}
     total_submitted = len(submitted_lot_owner_ids)
+    # Absent submissions keyed by lot_owner_id for email lookup
+    absent_submissions: dict[uuid.UUID, BallotSubmission] = {
+        s.lot_owner_id: s for s in submissions if s.is_absent
+    }
 
     # Load submitted votes (joined with lot owner info via voter_email)
     votes_result = await db.execute(
@@ -1302,23 +1308,31 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             "entitlement_sum": sum(lot_entitlement.get(lid, 0) for lid in lot_owner_ids),
         }
 
-    def _lots(lot_owner_ids: set[uuid.UUID]) -> list[dict]:
+    # Build lot_owner_id -> voter_email and proxy_email from voted submissions
+    lot_owner_to_email: dict[uuid.UUID, str] = {sub.lot_owner_id: sub.voter_email for sub in voted_submissions}
+    lot_owner_to_proxy_email: dict[uuid.UUID, str | None] = {sub.lot_owner_id: sub.proxy_email for sub in voted_submissions}
+
+    def _lots(lot_owner_ids: set[uuid.UUID], category: str) -> list[dict]:
         result_list: list[dict] = []
         for lid in lot_owner_ids:
             info = lot_info.get(lid)
             if info:
-                # Use first email as voter_email for backward compat display
-                voter_email = info["emails"][0] if info["emails"] else ""
+                if category == "absent":
+                    # For absent lots, read the snapshot recorded on close
+                    absent_sub = absent_submissions.get(lid)
+                    voter_email = absent_sub.voter_email if absent_sub else ""
+                    proxy_email_val = None  # absent rows don't expose proxy separately in the list
+                else:
+                    # For voted categories, use the actual auth email from BallotSubmission
+                    voter_email = lot_owner_to_email.get(lid, "")
+                    proxy_email_val = lot_owner_to_proxy_email.get(lid)
                 result_list.append({
                     "voter_email": voter_email,
                     "lot_number": info["lot_number"],
                     "entitlement": info["entitlement"],
+                    "proxy_email": proxy_email_val,
                 })
         return result_list
-
-    # Build per-motion tallies - votes now carry lot_owner_id directly
-    # Also build lot_owner_id -> voter_email from submissions for tally
-    lot_owner_to_email: dict[uuid.UUID, str] = {sub.lot_owner_id: sub.voter_email for sub in submissions}
 
     motion_details = []
     for motion in motions:
@@ -1348,7 +1362,8 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 abstained_ids.add(lot_id)
 
         if get_effective_status(general_meeting) == GeneralMeetingStatus.closed:
-            absent_ids: set[uuid.UUID] = eligible_lot_owner_ids - submitted_lot_owner_ids
+            # Absent lots are those with is_absent BallotSubmissions created at close time
+            absent_ids: set[uuid.UUID] = set(absent_submissions.keys())
         else:
             absent_ids: set[uuid.UUID] = set()
 
@@ -1369,11 +1384,11 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     "not_eligible": _tally(not_eligible_ids),
                 },
                 "voter_lists": {
-                    "yes": _lots(yes_ids),
-                    "no": _lots(no_ids),
-                    "abstained": _lots(abstained_ids),
-                    "absent": _lots(absent_ids),
-                    "not_eligible": _lots(not_eligible_ids),
+                    "yes": _lots(yes_ids, "yes"),
+                    "no": _lots(no_ids, "no"),
+                    "abstained": _lots(abstained_ids, "abstained"),
+                    "absent": _lots(absent_ids, "absent"),
+                    "not_eligible": _lots(not_eligible_ids, "not_eligible"),
                 },
             }
         )
@@ -1698,6 +1713,64 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
             Vote.status == VoteStatus.draft,
         )
     )
+
+    # Create absent BallotSubmission records for lots that did not vote.
+    # These capture contact emails as a snapshot at close time so the export has
+    # the right emails even if lot owner emails are later changed.
+    weights_result = await db.execute(
+        select(GeneralMeetingLotWeight.lot_owner_id).where(
+            GeneralMeetingLotWeight.general_meeting_id == general_meeting_id
+        )
+    )
+    eligible_lot_owner_ids: set[uuid.UUID] = {row[0] for row in weights_result.all()}
+
+    if eligible_lot_owner_ids:
+        subs_result = await db.execute(
+            select(BallotSubmission.lot_owner_id).where(
+                BallotSubmission.general_meeting_id == general_meeting_id,
+                BallotSubmission.is_absent == False,  # noqa: E712
+            )
+        )
+        voted_lot_owner_ids: set[uuid.UUID] = {row[0] for row in subs_result.all()}
+        absent_lot_owner_ids = eligible_lot_owner_ids - voted_lot_owner_ids
+
+        if absent_lot_owner_ids:
+            # Batch-load owner emails for all absent lots
+            emails_result = await db.execute(
+                select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
+                    LotOwnerEmail.lot_owner_id.in_(absent_lot_owner_ids)
+                )
+            )
+            emails_by_owner: dict[uuid.UUID, list[str]] = {}
+            for row in emails_result.all():
+                if row[1]:
+                    emails_by_owner.setdefault(row[0], []).append(row[1])
+
+            # Batch-load proxy emails for all absent lots
+            proxies_result = await db.execute(
+                select(LotProxy.lot_owner_id, LotProxy.proxy_email).where(
+                    LotProxy.lot_owner_id.in_(absent_lot_owner_ids)
+                )
+            )
+            proxy_by_owner: dict[uuid.UUID, str] = {
+                row[0]: row[1] for row in proxies_result.all() if row[1]
+            }
+
+            for lid in absent_lot_owner_ids:
+                owner_emails = emails_by_owner.get(lid, [])
+                proxy_email_val = proxy_by_owner.get(lid)
+                # Deduplicated union: owner emails + proxy email if not already included
+                contact_emails = list(owner_emails)
+                if proxy_email_val and proxy_email_val not in contact_emails:
+                    contact_emails.append(proxy_email_val)
+                voter_email_str = ", ".join(contact_emails)
+                db.add(BallotSubmission(
+                    general_meeting_id=general_meeting_id,
+                    lot_owner_id=lid,
+                    voter_email=voter_email_str,
+                    proxy_email=proxy_email_val,
+                    is_absent=True,
+                ))
 
     # Create EmailDelivery record
     email_delivery = EmailDelivery(
