@@ -1,8 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { GeneralMeetingListItem } from "../../api/admin";
 import StatusBadge from "./StatusBadge";
 import Pagination from "./Pagination";
+import SortableColumnHeader from "./SortableColumnHeader";
+import type { SortDir } from "./SortableColumnHeader";
 import { formatLocalDateTime } from "../../utils/dateTime";
 
 const PAGE_SIZE = 20;
@@ -10,15 +12,16 @@ const PAGE_SIZE = 20;
 interface GeneralMeetingTableProps {
   meetings: GeneralMeetingListItem[];
   isLoading?: boolean;
+  sortBy?: string;
+  sortDir?: SortDir;
+  onSort?: (col: string) => void;
 }
 
-export default function GeneralMeetingTable({ meetings, isLoading }: GeneralMeetingTableProps) {
+export default function GeneralMeetingTable({ meetings, isLoading, sortBy, sortDir, onSort }: GeneralMeetingTableProps) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    setPage(1);
-  }, [meetings.length]);
+  const currentSort = sortBy && sortDir ? { column: sortBy, dir: sortDir } : null;
 
   const totalPages = Math.max(1, Math.ceil(meetings.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -42,20 +45,39 @@ export default function GeneralMeetingTable({ meetings, isLoading }: GeneralMeet
         <thead>
           <tr>
             <th>Building</th>
-            <th>Title</th>
+            {onSort ? (
+              <SortableColumnHeader
+                label="Title"
+                column="title"
+                currentSort={currentSort}
+                onSort={onSort}
+              />
+            ) : (
+              <th>Title</th>
+            )}
             <th>Status</th>
             <th>Meeting At</th>
             <th>Voting Closes At</th>
+            {onSort ? (
+              <SortableColumnHeader
+                label="Created At"
+                column="created_at"
+                currentSort={currentSort}
+                onSort={onSort}
+              />
+            ) : (
+              <th>Created At</th>
+            )}
           </tr>
         </thead>
         <tbody>
           {isLoading && !meetings.length ? (
             <tr>
-              <td colSpan={5} className="state-message">Loading General Meetings...</td>
+              <td colSpan={6} className="state-message">Loading General Meetings...</td>
             </tr>
           ) : meetings.length === 0 ? (
             <tr>
-              <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
+              <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
                 No General Meetings found.
               </td>
             </tr>
@@ -74,6 +96,9 @@ export default function GeneralMeetingTable({ meetings, isLoading }: GeneralMeet
                 </td>
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
                   {formatLocalDateTime(meeting.voting_closes_at)}
+                </td>
+                <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
+                  {formatLocalDateTime(meeting.created_at)}
                 </td>
               </tr>
             ))

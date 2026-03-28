@@ -259,6 +259,44 @@ describe("listBuildings with params", () => {
     await listBuildings({ is_archived: true });
     expect(capturedUrl).toContain("is_archived=true");
   });
+
+  it("sends sort_by param when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listBuildings({ sort_by: "name" });
+    expect(capturedUrl).toContain("sort_by=name");
+  });
+
+  it("sends sort_dir param when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listBuildings({ sort_by: "name", sort_dir: "asc" });
+    expect(capturedUrl).toContain("sort_by=name");
+    expect(capturedUrl).toContain("sort_dir=asc");
+  });
+
+  it("does not send sort params when they are undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listBuildings({ limit: 20 });
+    expect(capturedUrl).not.toContain("sort_by");
+    expect(capturedUrl).not.toContain("sort_dir");
+  });
 });
 
 describe("listGeneralMeetings with params", () => {
@@ -338,6 +376,44 @@ describe("listGeneralMeetings with params", () => {
     expect(capturedUrl).toContain("offset=40");
     expect(capturedUrl).toContain("building_id=b-1");
     expect(capturedUrl).toContain("status=closed");
+  });
+
+  it("sends sort_by param when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listGeneralMeetings({ sort_by: "title" });
+    expect(capturedUrl).toContain("sort_by=title");
+  });
+
+  it("sends sort_dir param when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listGeneralMeetings({ sort_by: "title", sort_dir: "asc" });
+    expect(capturedUrl).toContain("sort_by=title");
+    expect(capturedUrl).toContain("sort_dir=asc");
+  });
+
+  it("does not send sort params when they are undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listGeneralMeetings({ limit: 20 });
+    expect(capturedUrl).not.toContain("sort_by");
+    expect(capturedUrl).not.toContain("sort_dir");
   });
 });
 

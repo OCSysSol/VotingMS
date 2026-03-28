@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import BuildingTable from "../BuildingTable";
 import type { Building } from "../../../types";
+import type { SortDir } from "../SortableColumnHeader";
 import { ADMIN_BUILDINGS } from "../../../../tests/msw/handlers";
 
 const mockNavigate = vi.fn();
@@ -18,7 +19,13 @@ vi.mock("react-router-dom", async () => {
 // Use the first two active (non-archived) buildings from the shared MSW fixture.
 const buildings: Building[] = ADMIN_BUILDINGS.filter((b) => !b.is_archived);
 
-function renderBuildingTable(props: { buildings: Building[]; isLoading?: boolean }) {
+function renderBuildingTable(props: {
+  buildings: Building[];
+  isLoading?: boolean;
+  sortBy?: string;
+  sortDir?: SortDir;
+  onSort?: (col: string) => void;
+}) {
   return render(
     <MemoryRouter>
       <BuildingTable {...props} />
@@ -59,7 +66,7 @@ describe("BuildingTable", () => {
     expect(mockNavigate).toHaveBeenCalledWith("/admin/buildings/b1");
   });
 
-  it("renders table headers", () => {
+  it("renders static table headers when no onSort prop provided", () => {
     renderBuildingTable({ buildings });
     expect(screen.getByText("Name")).toBeInTheDocument();
     expect(screen.getByText("Manager Email")).toBeInTheDocument();
@@ -86,41 +93,73 @@ describe("BuildingTable", () => {
     expect(screen.queryByText("Archived")).not.toBeInTheDocument();
   });
 
-  it("resets to page 1 when buildings list length changes", async () => {
+  // --- Sort props ---
+
+  it("renders sortable Name header when onSort is provided", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
+  });
+
+  it("calls onSort with 'name' when Name header button is clicked", async () => {
     const user = userEvent.setup();
-    // Build 21 buildings so page 2 exists (PAGE_SIZE = 20)
-    const manyBuildings: Building[] = Array.from({ length: 21 }, (_, i) => ({
-      id: `b${i + 1}`,
-      name: `Building ${i + 1}`,
-      manager_email: `mgr${i + 1}@example.com`,
-      is_archived: false,
-      created_at: "2024-01-01T00:00:00Z",
-    }));
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    await user.click(screen.getByRole("button", { name: /Name/ }));
+    expect(onSort).toHaveBeenCalledWith("name");
+  });
 
-    const { rerender } = render(
-      <MemoryRouter>
-        <BuildingTable buildings={manyBuildings} />
-      </MemoryRouter>
-    );
+  it("calls onSort with 'created_at' when Created At header button is clicked", async () => {
+    const user = userEvent.setup();
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "name", sortDir: "asc", onSort });
+    await user.click(screen.getByRole("button", { name: /Created At/ }));
+    expect(onSort).toHaveBeenCalledWith("created_at");
+  });
 
-    // Navigate to page 2 via the first (top) page-2 button
-    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
-    // Confirm we're on page 2 (Building 21 is visible, Building 1 is not)
-    expect(screen.getByText("Building 21")).toBeInTheDocument();
-    expect(screen.queryByText("Building 1")).not.toBeInTheDocument();
+  it("shows ▲ on active name column when sortDir is asc", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "name", sortDir: "asc", onSort });
+    const nameBtn = screen.getByRole("button", { name: /Name/ });
+    expect(nameBtn.textContent).toContain("▲");
+  });
 
-    // Re-render with a shorter list (only 1 page worth)
-    const fewBuildings: Building[] = manyBuildings.slice(0, 5);
-    rerender(
-      <MemoryRouter>
-        <BuildingTable buildings={fewBuildings} />
-      </MemoryRouter>
-    );
+  it("shows ▼ on active created_at column when sortDir is desc", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    const createdBtn = screen.getByRole("button", { name: /Created At/ });
+    expect(createdBtn.textContent).toContain("▼");
+  });
 
-    // Page should have reset to 1 — Building 1 is now visible
-    expect(screen.getByText("Building 1")).toBeInTheDocument();
-    // Pagination controls should be gone (only 1 page)
-    expect(screen.queryByRole("button", { name: "Go to page 2" })).not.toBeInTheDocument();
+  it("shows ⇅ on inactive column", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    const nameBtn = screen.getByRole("button", { name: /Name/ });
+    expect(nameBtn.textContent).toContain("⇅");
+  });
+
+  it("active th has aria-sort='descending'", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    const createdBtn = screen.getByRole("button", { name: /Created At/ });
+    const th = createdBtn.closest("th");
+    expect(th).toHaveAttribute("aria-sort", "descending");
+  });
+
+  it("inactive th has aria-sort='none'", () => {
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    const nameBtn = screen.getByRole("button", { name: /Name/ });
+    const th = nameBtn.closest("th");
+    expect(th).toHaveAttribute("aria-sort", "none");
+  });
+
+  it("renders static headers when onSort is undefined (no sortable buttons)", () => {
+    renderBuildingTable({ buildings });
+    // Should NOT have sort buttons
+    expect(screen.queryByRole("button", { name: /Name/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Created At/ })).not.toBeInTheDocument();
   });
 
   // --- Pagination top + bottom ---
@@ -144,5 +183,63 @@ describe("BuildingTable", () => {
     const nextButtons = screen.getAllByRole("button", { name: "Next page" });
     expect(prevButtons).toHaveLength(2);
     expect(nextButtons).toHaveLength(2);
+  });
+
+  it("renders only the first 20 buildings on page 1 of a 21-item list", () => {
+    const manyBuildings: Building[] = Array.from({ length: 21 }, (_, i) => ({
+      id: `b${i + 1}`,
+      name: `Building ${i + 1}`,
+      manager_email: `mgr${i + 1}@example.com`,
+      is_archived: false,
+      created_at: "2024-01-01T00:00:00Z",
+    }));
+    renderBuildingTable({ buildings: manyBuildings });
+    expect(screen.getByText("Building 1")).toBeInTheDocument();
+    expect(screen.getByText("Building 20")).toBeInTheDocument();
+    expect(screen.queryByText("Building 21")).not.toBeInTheDocument();
+  });
+
+  it("renders the 21st building when navigating to page 2", async () => {
+    const user = userEvent.setup();
+    const manyBuildings: Building[] = Array.from({ length: 21 }, (_, i) => ({
+      id: `b${i + 1}`,
+      name: `Building ${i + 1}`,
+      manager_email: `mgr${i + 1}@example.com`,
+      is_archived: false,
+      created_at: "2024-01-01T00:00:00Z",
+    }));
+    renderBuildingTable({ buildings: manyBuildings });
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
+    expect(screen.getByText("Building 21")).toBeInTheDocument();
+    expect(screen.queryByText("Building 1")).not.toBeInTheDocument();
+  });
+
+  it("safePage clamps to totalPages when page exceeds available pages after list shrinks", async () => {
+    const user = userEvent.setup();
+    const manyBuildings: Building[] = Array.from({ length: 21 }, (_, i) => ({
+      id: `b${i + 1}`,
+      name: `Building ${i + 1}`,
+      manager_email: `mgr${i + 1}@example.com`,
+      is_archived: false,
+      created_at: "2024-01-01T00:00:00Z",
+    }));
+    const { rerender } = render(
+      <MemoryRouter>
+        <BuildingTable buildings={manyBuildings} />
+      </MemoryRouter>
+    );
+    // Navigate to page 2
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
+    expect(screen.getByText("Building 21")).toBeInTheDocument();
+
+    // Re-render with a shorter list — safePage should clamp to 1
+    const fewBuildings = manyBuildings.slice(0, 5);
+    rerender(
+      <MemoryRouter>
+        <BuildingTable buildings={fewBuildings} />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("Building 1")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Go to page 2" })).not.toBeInTheDocument();
   });
 });

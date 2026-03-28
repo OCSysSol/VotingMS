@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { listBuildings, getBuildingsCount, createBuilding } from "../../api/admin";
 import type { Building } from "../../types";
 import BuildingTable from "../../components/admin/BuildingTable";
+import type { SortDir } from "../../components/admin/SortableColumnHeader";
 import BuildingCSVUpload from "../../components/admin/BuildingCSVUpload";
 import Pagination from "../../components/admin/Pagination";
 import { useState } from "react";
@@ -12,6 +13,12 @@ const FOCUSABLE_SELECTORS =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const PAGE_SIZE = 20;
+
+// Text columns default to asc, date columns default to desc
+const DEFAULT_SORT_DIR: Record<string, SortDir> = {
+  name: "asc",
+  created_at: "desc",
+};
 
 export default function BuildingsPage() {
   const queryClient = useQueryClient();
@@ -40,6 +47,10 @@ export default function BuildingsPage() {
   const pageParam = parseInt(searchParams.get("page") ?? "1", 10);
   const page = isNaN(pageParam) || pageParam < 1 ? 1 : pageParam;
 
+  // Sort state from URL search params
+  const sortBy = searchParams.get("sort_by") ?? "created_at";
+  const sortDir = (searchParams.get("sort_dir") ?? "desc") as SortDir;
+
   const { data: countData } = useQuery<{ count: number }>({
     queryKey: ["admin", "buildings", "count", showArchived],
     queryFn: () => getBuildingsCount({ is_archived: showArchived ? undefined : false }),
@@ -50,12 +61,14 @@ export default function BuildingsPage() {
   const safePage = Math.min(page, totalPages);
 
   const { data: buildings = [], isLoading, error } = useQuery<Building[]>({
-    queryKey: ["admin", "buildings", "list", safePage, showArchived],
+    queryKey: ["admin", "buildings", "list", safePage, showArchived, sortBy, sortDir],
     queryFn: () =>
       listBuildings({
         limit: PAGE_SIZE,
         offset: (safePage - 1) * PAGE_SIZE,
         is_archived: showArchived ? undefined : false,
+        sort_by: sortBy,
+        sort_dir: sortDir,
       }),
   });
 
@@ -64,16 +77,18 @@ export default function BuildingsPage() {
     const nextOffset = safePage * PAGE_SIZE;
     if (nextOffset < totalCount) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "buildings", "list", safePage + 1, showArchived],
+        queryKey: ["admin", "buildings", "list", safePage + 1, showArchived, sortBy, sortDir],
         queryFn: () =>
           listBuildings({
             limit: PAGE_SIZE,
             offset: nextOffset,
             is_archived: showArchived ? undefined : false,
+            sort_by: sortBy,
+            sort_dir: sortDir,
           }),
       });
     }
-  }, [safePage, showArchived, totalCount, queryClient]);
+  }, [safePage, showArchived, totalCount, queryClient, sortBy, sortDir]);
 
   const mutation = useMutation<Building, Error, { name: string; manager_email: string }>({
     mutationFn: (data) => createBuilding(data),
@@ -102,6 +117,25 @@ export default function BuildingsPage() {
     // RR2-03: Reset to page 1 when filter changes
     const next = new URLSearchParams(searchParams);
     next.delete("page");
+    setSearchParams(next, { replace: true });
+  }
+
+  function handleSortChange(column: string) {
+    const next = new URLSearchParams(searchParams);
+    // Reset page to 1 on sort change
+    next.delete("page");
+    if (column === sortBy) {
+      // Toggle direction
+      const newDir: SortDir = sortDir === "asc" ? "desc" : "asc";
+      next.set("sort_by", column);
+      next.set("sort_dir", newDir);
+    } else {
+      // New column — use its default direction (all valid columns are in DEFAULT_SORT_DIR)
+      /* v8 ignore next -- "asc" fallback is unreachable: all valid sort columns are in DEFAULT_SORT_DIR */
+      const newDir: SortDir = DEFAULT_SORT_DIR[column] !== undefined ? DEFAULT_SORT_DIR[column] : "asc";
+      next.set("sort_by", column);
+      next.set("sort_dir", newDir);
+    }
     setSearchParams(next, { replace: true });
   }
 
@@ -267,7 +301,13 @@ export default function BuildingsPage() {
         />
         {/* RR2-07: Show loading overlay while fetching page change */}
         <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 0.15s" }}>
-          <BuildingTable buildings={buildings} isLoading={isLoading} />
+          <BuildingTable
+            buildings={buildings}
+            isLoading={isLoading}
+            sortBy={sortBy}
+            sortDir={sortDir}
+            onSort={handleSortChange}
+          />
         </div>
         <Pagination
           page={safePage}

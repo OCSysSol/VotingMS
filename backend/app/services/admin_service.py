@@ -242,14 +242,29 @@ async def create_building(name: str, manager_email: str, db: AsyncSession) -> Bu
     return building
 
 
+_BUILDINGS_SORT_COLUMNS = {
+    "name": Building.name,
+    "created_at": Building.created_at,
+}
+
+
+def _buildings_order_clause(sort_by: str | None, sort_dir: str | None):
+    col = _BUILDINGS_SORT_COLUMNS.get(sort_by or "created_at", Building.created_at)
+    if (sort_dir or "desc") == "asc":
+        return col.asc()
+    return col.desc()
+
+
 async def list_buildings(
     db: AsyncSession,
     limit: int = 100,
     offset: int = 0,
     name: str | None = None,
     is_archived: bool | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
 ) -> list[Building]:
-    q = select(Building).order_by(Building.created_at.desc())
+    q = select(Building).order_by(_buildings_order_clause(sort_by, sort_dir))
     if name is not None:
         q = q.where(func.lower(Building.name).contains(name.lower()))
     if is_archived is not None:
@@ -1097,6 +1112,19 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
     }
 
 
+_MEETINGS_SORT_COLUMNS = {
+    "title": GeneralMeeting.title,
+    "created_at": GeneralMeeting.created_at,
+}
+
+
+def _meetings_order_clause(sort_by: str | None, sort_dir: str | None):
+    col = _MEETINGS_SORT_COLUMNS.get(sort_by or "created_at", GeneralMeeting.created_at)
+    if (sort_dir or "desc") == "asc":
+        return col.asc()
+    return col.desc()
+
+
 async def list_general_meetings(
     db: AsyncSession,
     limit: int = 100,
@@ -1104,11 +1132,13 @@ async def list_general_meetings(
     name: str | None = None,
     building_id: uuid.UUID | None = None,
     status: str | None = None,
+    sort_by: str | None = None,
+    sort_dir: str | None = None,
 ) -> list[dict]:
     q = (
         select(GeneralMeeting, Building.name.label("building_name"))
         .join(Building, GeneralMeeting.building_id == Building.id)
-        .order_by(GeneralMeeting.created_at.desc())
+        .order_by(_meetings_order_clause(sort_by, sort_dir))
     )
     if name is not None:
         q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))

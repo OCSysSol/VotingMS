@@ -5499,3 +5499,135 @@ class TestEmailFailureDuringClose:
         )
         status_value = result.scalar_one_or_none()
         assert status_value == EmailDeliveryStatus.pending
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/general-meetings — sort_by / sort_dir query params
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestListGeneralMeetingsSort:
+    """Tests for sort_by and sort_dir query parameters on GET /api/admin/general-meetings."""
+
+    def _agm_payload(self, building_id, title: str) -> dict:
+        return {
+            "building_id": str(building_id),
+            "title": title,
+            "meeting_at": meeting_dt().isoformat(),
+            "voting_closes_at": closing_dt().isoformat(),
+            "motions": [
+                {
+                    "title": "Motion 1",
+                    "description": None,
+                    "display_order": 1,
+                    "motion_number": None,
+                    "motion_type": "general",
+                }
+            ],
+        }
+
+    # --- Happy path ---
+
+    async def test_sort_by_title_asc_returns_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession, building
+    ):
+        """Meetings sorted by title ascending should be in A→Z order."""
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "Zeta Meeting"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "Alpha Meeting"))
+        # Need a second building for second meeting (AGM already exists for building)
+        b2_resp = await client.post(
+            "/api/admin/buildings",
+            json={"name": "Sort Test Building 2", "manager_email": "s2@test.com"},
+        )
+        b2_id = b2_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Alpha Meeting 2"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=title&sort_dir=asc")
+        assert response.status_code == 200
+        titles = [m["title"] for m in response.json()]
+        assert titles == sorted(titles)
+
+    async def test_sort_by_title_desc_returns_reverse_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession, building
+    ):
+        """Meetings sorted by title descending should be in Z→A order."""
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "Zeta Meeting"))
+        b2_resp = await client.post(
+            "/api/admin/buildings",
+            json={"name": "Sort Test Building 3", "manager_email": "s3@test.com"},
+        )
+        b2_id = b2_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Alpha Meeting"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=title&sort_dir=desc")
+        assert response.status_code == 200
+        titles = [m["title"] for m in response.json()]
+        assert titles == sorted(titles, reverse=True)
+
+    async def test_sort_by_created_at_asc_returns_oldest_first(
+        self, client: AsyncClient, db_session: AsyncSession, building
+    ):
+        """Meetings sorted by created_at ascending should be oldest first."""
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "First Meeting"))
+        b2_resp = await client.post(
+            "/api/admin/buildings",
+            json={"name": "Sort Test Building 4", "manager_email": "s4@test.com"},
+        )
+        b2_id = b2_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Second Meeting"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=created_at&sort_dir=asc")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 2
+        created_ats = [m["created_at"] for m in data]
+        assert created_ats == sorted(created_ats)
+
+    async def test_default_sort_returns_newest_first(
+        self, client: AsyncClient, db_session: AsyncSession, building
+    ):
+        """Without sort params, meetings should be returned newest first (default)."""
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "Meeting Default"))
+        response = await client.get("/api/admin/general-meetings")
+        assert response.status_code == 200
+        data = response.json()
+        if len(data) >= 2:
+            created_ats = [m["created_at"] for m in data]
+            assert created_ats == sorted(created_ats, reverse=True)
+
+    # --- Input validation ---
+
+    async def test_invalid_sort_by_returns_422(self, client: AsyncClient):
+        """An unrecognised sort_by value must be rejected with 422."""
+        response = await client.get("/api/admin/general-meetings?sort_by=status")
+        assert response.status_code == 422
+        assert "Invalid sort_by value" in response.json()["detail"]
+
+    async def test_invalid_sort_dir_returns_422(self, client: AsyncClient):
+        """An unrecognised sort_dir value must be rejected with 422."""
+        response = await client.get("/api/admin/general-meetings?sort_by=title&sort_dir=random")
+        assert response.status_code == 422
+        assert "Invalid sort_dir value" in response.json()["detail"]
+
+    async def test_sql_injection_attempt_in_sort_by_returns_422(self, client: AsyncClient):
+        """A SQL injection attempt in sort_by must be rejected before hitting the DB."""
+        response = await client.get("/api/admin/general-meetings?sort_by=title;DROP TABLE general_meetings;--")
+        assert response.status_code == 422
+
+    # --- Boundary values ---
+
+    async def test_sort_with_no_meetings_returns_empty_list(self, client: AsyncClient, db_session: AsyncSession):
+        """sort_by=title on an empty result set returns an empty list without error."""
+        response = await client.get("/api/admin/general-meetings?sort_by=title&sort_dir=asc&building_id=00000000-0000-0000-0000-000000000000")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    # --- Edge cases ---
+
+    async def test_sort_dir_only_without_sort_by_is_accepted(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """sort_dir without sort_by uses the default column (created_at)."""
+        response = await client.get("/api/admin/general-meetings?sort_dir=asc")
+        assert response.status_code == 200

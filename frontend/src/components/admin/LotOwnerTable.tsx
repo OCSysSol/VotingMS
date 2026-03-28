@@ -1,8 +1,12 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { LotOwner } from "../../types";
 import Pagination from "./Pagination";
+import SortableColumnHeader from "./SortableColumnHeader";
+import type { SortDir } from "./SortableColumnHeader";
 
 const PAGE_SIZE = 25;
+
+type LotOwnerSortColumn = "lot_number" | "unit_entitlement" | "financial_position";
 
 interface LotOwnerTableProps {
   lotOwners: LotOwner[];
@@ -31,18 +35,59 @@ function FinancialPositionBadge({ position }: { position: string }) {
   return <span style={{ color: "var(--text-muted, #888)", fontSize: "0.875rem" }}>Normal</span>;
 }
 
+function compareFinancialPosition(a: string, b: string): number {
+  // normal < in_arrear (0 < 1)
+  const order: Record<string, number> = { normal: 0, in_arrear: 1 };
+  return (order[a] ?? 0) - (order[b] ?? 0);
+}
+
 export default function LotOwnerTable({ lotOwners, onEdit, isLoading }: LotOwnerTableProps) {
   const [page, setPage] = useState(1);
+  const [sortState, setSortState] = useState<{ column: LotOwnerSortColumn; dir: SortDir }>({
+    column: "lot_number",
+    dir: "asc",
+  });
 
-  const totalPages = Math.max(1, Math.ceil(lotOwners.length / PAGE_SIZE));
+  const sorted = useMemo(() => {
+    const copy = [...lotOwners];
+    copy.sort((a, b) => {
+      let cmp = 0;
+      if (sortState.column === "lot_number") {
+        cmp = a.lot_number.localeCompare(b.lot_number, undefined, { numeric: true });
+      } else if (sortState.column === "unit_entitlement") {
+        cmp = (a.unit_entitlement ?? 0) - (b.unit_entitlement ?? 0);
+      } else if (sortState.column === "financial_position") {
+        cmp = compareFinancialPosition(a.financial_position, b.financial_position);
+      }
+      return sortState.dir === "asc" ? cmp : -cmp;
+    });
+    return copy;
+  }, [lotOwners, sortState]);
+
+  function handleSort(column: string) {
+    const col = column as LotOwnerSortColumn;
+    setSortState((prev) => {
+      if (prev.column === col) {
+        return { column: col, dir: prev.dir === "asc" ? "desc" : "asc" };
+      }
+      // Default direction for new column
+      const newDir: SortDir = col === "unit_entitlement" ? "asc" : "asc";
+      return { column: col, dir: newDir };
+    });
+    setPage(1);
+  }
+
+  const currentSort = { column: sortState.column, dir: sortState.dir };
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
-  const visible = lotOwners.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const visible = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const paginationControls = totalPages > 1 ? (
     <Pagination
       page={safePage}
       totalPages={totalPages}
-      totalItems={lotOwners.length}
+      totalItems={sorted.length}
       pageSize={PAGE_SIZE}
       onPageChange={setPage}
     />
@@ -55,10 +100,25 @@ export default function LotOwnerTable({ lotOwners, onEdit, isLoading }: LotOwner
       <table className="admin-table">
         <thead>
           <tr>
-            <th>Lot Number</th>
+            <SortableColumnHeader
+              label="Lot Number"
+              column="lot_number"
+              currentSort={currentSort}
+              onSort={handleSort}
+            />
             <th>Email</th>
-            <th>Unit Entitlement</th>
-            <th>Financial Position</th>
+            <SortableColumnHeader
+              label="Unit Entitlement"
+              column="unit_entitlement"
+              currentSort={currentSort}
+              onSort={handleSort}
+            />
+            <SortableColumnHeader
+              label="Financial Position"
+              column="financial_position"
+              currentSort={currentSort}
+              onSort={handleSort}
+            />
             <th>Proxy</th>
             <th>Actions</th>
           </tr>

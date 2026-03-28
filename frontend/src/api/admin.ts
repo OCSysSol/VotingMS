@@ -242,6 +242,8 @@ export interface ListBuildingsParams {
   offset?: number;
   name?: string;
   is_archived?: boolean;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export async function listBuildings(params?: ListBuildingsParams): Promise<Building[]> {
@@ -250,6 +252,8 @@ export async function listBuildings(params?: ListBuildingsParams): Promise<Build
   if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   if (params?.name !== undefined) qs.set("name", params.name);
   if (params?.is_archived !== undefined) qs.set("is_archived", String(params.is_archived));
+  if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
+  if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
   const query = qs.toString();
   return apiFetch<Building[]>(`/api/admin/buildings${query ? `?${query}` : ""}`);
 }
@@ -390,6 +394,8 @@ export interface ListGeneralMeetingsParams {
   name?: string;
   building_id?: string;
   status?: string;
+  sort_by?: string;
+  sort_dir?: "asc" | "desc";
 }
 
 export async function listGeneralMeetings(params?: ListGeneralMeetingsParams): Promise<GeneralMeetingListItem[]> {
@@ -399,6 +405,8 @@ export async function listGeneralMeetings(params?: ListGeneralMeetingsParams): P
   if (params?.name !== undefined) qs.set("name", params.name);
   if (params?.building_id !== undefined) qs.set("building_id", params.building_id);
   if (params?.status !== undefined) qs.set("status", params.status);
+  if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
+  if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
   const query = qs.toString();
   return apiFetch<GeneralMeetingListItem[]>(`/api/admin/general-meetings${query ? `?${query}` : ""}`);
 }
