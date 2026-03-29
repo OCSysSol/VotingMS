@@ -31,7 +31,7 @@ describe("MotionEditor", () => {
     await user.click(screen.getByRole("button", { name: "+ Add Motion" }));
     expect(onChange).toHaveBeenCalledWith([
       ...initialMotions,
-      { title: "", description: "", motion_number: "", motion_type: "general", option_limit: "1", options: [{ text: "" }, { text: "" }] },
+      { title: "", description: "", motion_number: "", motion_type: "general", is_multi_choice: false, option_limit: "1", options: [{ text: "" }, { text: "" }] },
     ]);
   });
 
@@ -104,21 +104,61 @@ describe("MotionEditor", () => {
     expect(lastCall[0].motion_number).toBe("1");
   });
 
-  // --- Multi-choice motion type ---
+  // --- Motion Type select only has General and Special ---
 
-  it("shows multi_choice option in Motion Type dropdown", () => {
+  it("Motion Type dropdown only has General and Special options", () => {
     render(<MotionEditor motions={initialMotions} onChange={() => {}} />);
     const selects = screen.getAllByLabelText("Motion Type") as HTMLSelectElement[];
     const options = Array.from(selects[0].options).map((o) => o.value);
-    expect(options).toContain("multi_choice");
+    expect(options).toEqual(["general", "special"]);
+    expect(options).not.toContain("multi_choice");
   });
 
-  it("shows option limit and options fields when motion_type is multi_choice", () => {
+  // --- Multi-choice checkbox ---
+
+  it("renders Multi-choice question format checkbox unchecked by default", () => {
+    render(<MotionEditor motions={initialMotions} onChange={() => {}} />);
+    const checkboxes = screen.getAllByRole("checkbox") as HTMLInputElement[];
+    expect(checkboxes[0].checked).toBe(false);
+  });
+
+  it("calls onChange with is_multi_choice true when checkbox is checked", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(<MotionEditor motions={initialMotions} onChange={onChange} />);
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[0]);
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(lastCall[0].is_multi_choice).toBe(true);
+  });
+
+  it("calls onChange with is_multi_choice false when checkbox is unchecked", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const motionWithMultiChoice: MotionFormEntry = {
+      title: "Election",
+      description: "",
+      motion_number: "",
+      motion_type: "general",
+      is_multi_choice: true,
+      option_limit: "1",
+      options: [{ text: "Alice" }, { text: "Bob" }],
+    };
+    render(<MotionEditor motions={[motionWithMultiChoice]} onChange={onChange} />);
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+    await user.click(checkbox);
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(lastCall[0].is_multi_choice).toBe(false);
+  });
+
+  it("shows option limit and options fields when is_multi_choice is true", () => {
     const mcMotion: MotionFormEntry = {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "2",
       options: [{ text: "Alice" }, { text: "Bob" }, { text: "Carol" }],
     };
@@ -129,7 +169,7 @@ describe("MotionEditor", () => {
     expect(screen.getByDisplayValue("Carol")).toBeInTheDocument();
   });
 
-  it("does not show option fields for general motion type", () => {
+  it("does not show option fields when is_multi_choice is false", () => {
     render(<MotionEditor motions={initialMotions} onChange={() => {}} />);
     expect(screen.queryByLabelText("Max selections per voter")).not.toBeInTheDocument();
   });
@@ -141,7 +181,8 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }],
     };
@@ -159,7 +200,8 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }],
     };
@@ -180,7 +222,8 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }],
     };
@@ -198,7 +241,8 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }, { text: "Carol" }],
     };
@@ -216,7 +260,8 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: "",
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }],
     };
@@ -224,22 +269,13 @@ describe("MotionEditor", () => {
     expect(screen.queryByRole("button", { name: /Remove motion 1 option/ })).not.toBeInTheDocument();
   });
 
-  it("selects multi_choice from dropdown and calls onChange", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<MotionEditor motions={initialMotions} onChange={onChange} />);
-    const selects = screen.getAllByLabelText("Motion Type");
-    await user.selectOptions(selects[0], "multi_choice");
-    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
-    expect(lastCall[0].motion_type).toBe("multi_choice");
-  });
-
   it("shows option_limit value from motion when not null", () => {
     const mcMotion: MotionFormEntry = {
       title: "Election",
       description: "",
       motion_number: null,
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "3",  // non-null
       options: [{ text: "Alice" }, { text: "Bob" }],
     };
@@ -265,12 +301,52 @@ describe("MotionEditor", () => {
       title: "Election",
       description: "",
       motion_number: null,
-      motion_type: "multi_choice",
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: "1",
       options: [{ text: "Alice" }, { text: "Bob" }],  // non-null options array
     };
     render(<MotionEditor motions={[mcMotion]} onChange={() => {}} />);
     expect(screen.getByDisplayValue("Alice")).toBeInTheDocument();  // uses real options
     expect(screen.getByDisplayValue("Bob")).toBeInTheDocument();
+  });
+
+  it("renders is_multi_choice checkbox as checked when is_multi_choice is true", () => {
+    const mcMotion: MotionFormEntry = {
+      title: "Election",
+      description: "",
+      motion_number: null,
+      motion_type: "special",
+      is_multi_choice: true,
+      option_limit: "1",
+      options: [{ text: "Alice" }, { text: "Bob" }],
+    };
+    render(<MotionEditor motions={[mcMotion]} onChange={() => {}} />);
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(true);
+  });
+
+  it("can combine special resolution type with multi-choice question format", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const specialMotion: MotionFormEntry = {
+      title: "Special Election",
+      description: "",
+      motion_number: "",
+      motion_type: "special",
+      is_multi_choice: false,
+    };
+    render(<MotionEditor motions={[specialMotion]} onChange={onChange} />);
+    // Check that motion_type select shows "special"
+    const select = screen.getByLabelText("Motion Type") as HTMLSelectElement;
+    expect(select.value).toBe("special");
+    // Check checkbox is unchecked
+    const checkbox = screen.getByRole("checkbox") as HTMLInputElement;
+    expect(checkbox.checked).toBe(false);
+    // Enable multi-choice
+    await user.click(checkbox);
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1][0];
+    expect(lastCall[0].motion_type).toBe("special");
+    expect(lastCall[0].is_multi_choice).toBe(true);
   });
 });

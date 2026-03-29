@@ -21,7 +21,7 @@ export default function CreateGeneralMeetingForm() {
   const [title, setTitle] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
   const [votingClosesAt, setVotingClosesAt] = useState("");
-  const [motions, setMotions] = useState<MotionFormEntry[]>([{ title: "", description: "", motion_number: "", motion_type: "general" }]);
+  const [motions, setMotions] = useState<MotionFormEntry[]>([{ title: "", description: "", motion_number: "", motion_type: "general", is_multi_choice: false }]);
   const [formError, setFormError] = useState<string | null>(null);
 
   const mutation = useMutation<GeneralMeetingOut, Error, GeneralMeetingCreateRequest>({
@@ -48,7 +48,7 @@ export default function CreateGeneralMeetingForm() {
         setFormError(`Motion ${i + 1} title is required.`);
         return;
       }
-      if (motions[i].motion_type === "multi_choice") {
+      if (motions[i].is_multi_choice) {
         const validOpts = (motions[i].options ?? []).filter((o: { text: string }) => o.text.trim());
         if (validOpts.length < 2) {
           setFormError(`Motion ${i + 1}: multi-choice requires at least 2 options.`);
@@ -78,8 +78,9 @@ export default function CreateGeneralMeetingForm() {
           display_order: i + 1,
           motion_number: m.motion_number?.trim() || null,
           motion_type: m.motion_type,
+          is_multi_choice: m.is_multi_choice ?? false,
         };
-        if (m.motion_type === "multi_choice") {
+        if (m.is_multi_choice) {
           const validOpts = (m.options ?? []).filter((o: { text: string }) => o.text.trim());
           return {
             ...base,
