@@ -5,6 +5,7 @@ export interface MotionFormEntry {
   description: string;
   motion_number: string | null;
   motion_type: MotionType;
+  is_multi_choice?: boolean;
   option_limit?: string;
   options?: Array<{ text: string }>;
 }
@@ -16,7 +17,7 @@ interface MotionEditorProps {
 
 export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
   function addMotion() {
-    onChange([...motions, { title: "", description: "", motion_number: "", motion_type: "general", option_limit: "1", options: [{ text: "" }, { text: "" }] }]);
+    onChange([...motions, { title: "", description: "", motion_number: "", motion_type: "general", is_multi_choice: false, option_limit: "1", options: [{ text: "" }, { text: "" }] }]);
   }
 
   function removeMotion(index: number) {
@@ -25,6 +26,10 @@ export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
 
   function updateMotion(index: number, field: keyof MotionFormEntry, value: string) {
     onChange(motions.map((m, i) => i === index ? { ...m, [field]: value } : m));
+  }
+
+  function updateIsMultiChoice(index: number, checked: boolean) {
+    onChange(motions.map((m, i) => i === index ? { ...m, is_multi_choice: checked } : m));
   }
 
   function updateOption(motionIndex: number, optionIndex: number, text: string) {
@@ -102,10 +107,20 @@ export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
             >
               <option value="general">General</option>
               <option value="special">Special</option>
-              <option value="multi_choice">Multi-Choice</option>
             </select>
           </div>
-          {motion.motion_type === "multi_choice" && (
+          <div className="field" style={{ marginBottom: 8 }}>
+            <label className="field__label" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                id={`motion-is-multi-choice-${index}`}
+                type="checkbox"
+                checked={motion.is_multi_choice ?? false}
+                onChange={(e) => updateIsMultiChoice(index, e.target.checked)}
+              />
+              Multi-choice question format
+            </label>
+          </div>
+          {motion.is_multi_choice && (
             <>
               <div className="field" style={{ marginBottom: 8 }}>
                 <label className="field__label" htmlFor={`motion-option-limit-${index}`}>Max selections per voter</label>

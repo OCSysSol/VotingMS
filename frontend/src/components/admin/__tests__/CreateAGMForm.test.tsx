@@ -251,18 +251,13 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     await fillAndSubmit(user);
 
-    // Change motion type to multi_choice
-    const motionTypeSelects = screen.getAllByLabelText("Motion Type");
-    await user.selectOptions(motionTypeSelects[0], "multi_choice");
+    // Enable multi-choice via checkbox
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
 
     // Fill motion title
     await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
 
-    // Remove the second option (only 1 remains after removing one from the default 2)
-    const removeOptBtn = screen.queryByRole("button", { name: /Remove motion 1 option 2/i });
-    if (removeOptBtn) {
-      // Can't remove when there are exactly 2 options
-    }
     // Just attempt to submit with empty options
     // (options default to 2 empty strings, which won't pass validation since they're empty)
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
@@ -274,9 +269,9 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     await fillAndSubmit(user);
 
-    // Change motion type to multi_choice
-    const motionTypeSelects = screen.getAllByLabelText("Motion Type");
-    await user.selectOptions(motionTypeSelects[0], "multi_choice");
+    // Enable multi-choice via checkbox
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
     await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
 
     // Fill both options
@@ -298,9 +293,9 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     await fillAndSubmit(user);
 
-    // Change motion type to multi_choice
-    const motionTypeSelects = screen.getAllByLabelText("Motion Type");
-    await user.selectOptions(motionTypeSelects[0], "multi_choice");
+    // Enable multi-choice via checkbox
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
     await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
 
     // Fill both options
@@ -322,9 +317,9 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     await fillAndSubmit(user);
 
-    // Change motion type to multi_choice
-    const motionTypeSelects = screen.getAllByLabelText("Motion Type");
-    await user.selectOptions(motionTypeSelects[0], "multi_choice");
+    // Enable multi-choice via checkbox
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
     await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
 
     // Fill both options
