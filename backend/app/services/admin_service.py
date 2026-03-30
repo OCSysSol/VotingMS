@@ -338,8 +338,9 @@ async def archive_building(building_id: uuid.UUID, db: AsyncSession) -> Building
                     LotOwner.building_id != building_id,
                     Building.is_archived == False,  # noqa: E712
                 )
+                .limit(1)
             )
-            other = other_result.scalar_one_or_none()
+            other = other_result.scalars().first()
             if other is not None:
                 found_in_other = True
                 break
