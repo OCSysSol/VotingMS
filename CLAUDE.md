@@ -1,6 +1,5 @@
 > **For any feature, bug fix, or task — invoke the `/orchestrate-feature-dev` skill as the entry point.**
 > The skill runs in the main session and coordinates all sub-agents (design, implement, test, cleanup) via the `Agent` tool.
-> See `.claude/skills/orchestrate-feature-dev/SKILL.md` for the full protocol.
 
 ---
 
