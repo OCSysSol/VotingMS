@@ -510,8 +510,9 @@ describe("MotionManagementTable", () => {
       ],
     });
     renderTable({ motions: [MC_MOTION] });
-    const indicator = screen.getByLabelText("Voting mechanism: Multi-choice (3 options)");
-    expect(indicator).toHaveTextContent("Multi-choice (3 options)");
+    const indicator = screen.getByLabelText("Multi-choice motion");
+    expect(indicator).toHaveClass("motion-type-badge--multi_choice");
+    expect(indicator).toHaveTextContent("Multi-Choice (3)");
   });
 
   it("shows secondary multi-choice indicator without count when options is empty", () => {
@@ -522,9 +523,10 @@ describe("MotionManagementTable", () => {
       options: [],
     });
     renderTable({ motions: [MC_NO_OPTS] });
-    const indicator = screen.getByLabelText("Voting mechanism: Multi-choice");
-    expect(indicator).toHaveTextContent("Multi-choice");
-    expect(indicator).not.toHaveTextContent("options");
+    const indicator = screen.getByLabelText("Multi-choice motion");
+    expect(indicator).toHaveClass("motion-type-badge--multi_choice");
+    expect(indicator).toHaveTextContent("Multi-Choice");
+    expect(indicator).not.toHaveTextContent("(");
   });
 
   it("does not show multi-choice indicator for standard single-choice motions", () => {

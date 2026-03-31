@@ -77,7 +77,7 @@ const mcMotionFixture: MotionDetail = {
   description: null,
   display_order: 3,
   motion_number: null,
-  motion_type: "multi_choice" as const,
+  motion_type: "general" as const,
   is_multi_choice: true,
   is_visible: true,
   option_limit: 2,
@@ -427,9 +427,12 @@ describe("AGMReportView", () => {
 
   it("renders Multi-Choice badge for multi_choice motion", () => {
     render(<AGMReportView motions={[mcMotionFixture]} />);
-    const badge = screen.getByLabelText("Motion type: Multi-Choice");
-    expect(badge).toBeInTheDocument();
-    expect(badge).toHaveClass("motion-type-badge--multi_choice");
+    const typeBadge = screen.getByLabelText("Motion type: General");
+    expect(typeBadge).toBeInTheDocument();
+    expect(typeBadge).toHaveClass("motion-type-badge--general");
+    const mcBadge = screen.getByLabelText("Multi-choice motion");
+    expect(mcBadge).toBeInTheDocument();
+    expect(mcBadge).toHaveClass("motion-type-badge--multi_choice");
   });
 
   it("renders per-option tally rows for multi_choice motion", () => {

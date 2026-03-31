@@ -94,11 +94,14 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
               {motion.motion_number?.trim() || String(motion.display_order)}. {motion.title}
             </h3>
             <span
-              className={`motion-type-badge motion-type-badge--${motion.motion_type}`}
-              aria-label={`Motion type: ${motion.motion_type === "special" ? "Special" : motion.is_multi_choice === true ? "Multi-Choice" : "General"}`}
+              className={`motion-type-badge motion-type-badge--${motion.motion_type === "special" ? "special" : "general"}`}
+              aria-label={`Motion type: ${motion.motion_type === "special" ? "Special" : "General"}`}
             >
-              {motion.motion_type === "special" ? "Special" : motion.is_multi_choice === true ? "Multi-Choice" : "General"}
+              {motion.motion_type === "special" ? "Special" : "General"}
             </span>
+            {motion.is_multi_choice === true && (
+              <span className="motion-type-badge motion-type-badge--multi_choice" aria-label="Multi-choice motion">Multi-Choice</span>
+            )}
             {!motion.is_visible && (
               <span className="motion-type-badge motion-type-badge--hidden" aria-label="Motion is hidden from voters">
                 Hidden
