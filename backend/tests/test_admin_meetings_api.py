@@ -2102,6 +2102,104 @@ class TestStartGeneralMeeting:
 
 
 # ---------------------------------------------------------------------------
+# RR3-41: Meeting status transition — open → closed blocks vote submissions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestMeetingStatusTransition:
+    """RR3-41: Verify that closing a meeting blocks further vote submissions."""
+
+    async def _setup_open_meeting_with_voter(
+        self, db_session: AsyncSession
+    ):
+        """Create an open meeting with one lot owner ready to vote."""
+        b = Building(name="RR341 Transition Building", manager_email="rr341trans@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        from app.models.lot_owner_email import LotOwnerEmail
+        lo = LotOwner(building_id=b.id, lot_number="T01", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+
+        email = LotOwnerEmail(lot_owner_id=lo.id, email="voter.trans@test.com")
+        db_session.add(email)
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="RR341 Transition AGM",
+            status=GeneralMeetingStatus.open,
+            meeting_at=datetime.now(UTC) - timedelta(hours=1),
+            voting_closes_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=100,
+        )
+        db_session.add(weight)
+
+        motion = Motion(
+            general_meeting_id=agm.id,
+            title="RR341 Test Motion",
+            display_order=1,
+            is_visible=True,
+        )
+        db_session.add(motion)
+        await db_session.commit()
+
+        return agm, lo, motion
+
+    async def test_close_then_submit_returns_403(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR3-41: After open→closed transition, a new vote submission must return 403."""
+        from app.models.lot_owner_email import LotOwnerEmail
+
+        agm, lo, motion = await self._setup_open_meeting_with_voter(db_session)
+
+        # Close the meeting
+        close_resp = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert close_resp.status_code == 200
+        assert close_resp.json()["status"] == "closed"
+
+        # Attempt to submit a ballot after close — must be blocked with 403.
+        # Create a valid session so the auth check passes; only the meeting-closed check should block.
+        from app.services.auth_service import _sign_token
+        from app.models.session_record import SessionRecord
+        import secrets
+        from datetime import UTC, datetime, timedelta
+
+        raw_token = secrets.token_urlsafe(32)
+        session_rec = SessionRecord(
+            session_token=raw_token,
+            voter_email="voter.trans@test.com",
+            building_id=agm.building_id,
+            general_meeting_id=agm.id,
+            expires_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        db_session.add(session_rec)
+        await db_session.commit()
+        signed_token = _sign_token(raw_token)
+
+        submit_resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(motion.id), "choice": "yes"}],
+                "multi_choice_votes": [],
+            },
+            headers={"Authorization": f"Bearer {signed_token}"},
+        )
+        assert submit_resp.status_code == 403
+        assert "closed" in submit_resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
 # POST /api/admin/general-meetings/{agm_id}/resend-report
 # ---------------------------------------------------------------------------
 
@@ -2463,7 +2561,8 @@ class TestResetAGMBallots:
         unauth_app.dependency_overrides[get_db] = override_get_db
 
         async with AsyncClient(
-            transport=ASGITransport(app=unauth_app), base_url="http://test"
+            transport=ASGITransport(app=unauth_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauth_client:
             response = await unauth_client.delete(f"/api/admin/general-meetings/{agm.id}/ballots")
         assert response.status_code == 401
@@ -3316,7 +3415,8 @@ class TestDeleteGeneralMeeting:
         """DELETE without admin credentials returns 401."""
         from app.main import app as fastapi_app
         async with AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauthenticated_client:
             agm = await self._create_meeting(db_session, "DeleteUnauth", GeneralMeetingStatus.closed)
             response = await unauthenticated_client.delete(f"/api/admin/general-meetings/{agm.id}")
@@ -4085,7 +4185,8 @@ class TestToggleMotionVisibility:
             db_session, "UnauthVis"
         )
         async with AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauthenticated_client:
             response = await unauthenticated_client.patch(
                 f"/api/admin/motions/{motion.id}/visibility",
@@ -4222,7 +4323,7 @@ class TestMotionManagement:
         label: str,
         status: GeneralMeetingStatus = GeneralMeetingStatus.open,
         is_visible: bool = False,
-        order_index: int = 0,
+        order_index: int = 1,
     ) -> tuple[GeneralMeeting, Motion]:
         agm = await self._create_meeting(db_session, label, status)
         motion = Motion(
@@ -4286,13 +4387,13 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Second motion gets display_order = max + 1."""
-        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=0)
+        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=1)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Motion"},
         )
         assert response.status_code == 201
-        assert response.json()["display_order"] == 1
+        assert response.json()["display_order"] == 2
 
     async def test_add_multiple_motions_sequential_order_indexes(
         self, client: AsyncClient, db_session: AsyncSession
@@ -4530,7 +4631,8 @@ class TestMotionManagement:
         from app.main import app as fastapi_app
         agm = await self._create_meeting(db_session, "AddUnauth")
         async with AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauthenticated_client:
             response = await unauthenticated_client.post(
                 f"/api/admin/general-meetings/{agm.id}/motions",
@@ -4917,7 +5019,8 @@ class TestMotionManagement:
         from app.main import app as fastapi_app
         _agm, motion = await self._create_meeting_with_motion(db_session, "UpdateUnauth")
         async with AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauthenticated_client:
             response = await unauthenticated_client.patch(
                 f"/api/admin/motions/{motion.id}",
@@ -4999,11 +5102,11 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Deleting one motion does not affect remaining motions (no renumbering)."""
-        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=0)
+        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=1)
         motion_b = Motion(
             general_meeting_id=agm.id,
             title="Motion B",
-            display_order=1,
+            display_order=2,
             is_visible=False,
         )
         db_session.add(motion_b)
@@ -5015,7 +5118,7 @@ class TestMotionManagement:
         result = await db_session.execute(select(Motion).where(Motion.id == motion_b.id))
         surviving = result.scalar_one_or_none()
         assert surviving is not None
-        assert surviving.display_order == 1  # Not renumbered
+        assert surviving.display_order == 2  # Not renumbered
 
     # --- State / precondition errors (delete) ---
 
@@ -5057,7 +5160,8 @@ class TestMotionManagement:
         from app.main import app as fastapi_app
         _agm, motion = await self._create_meeting_with_motion(db_session, "DeleteUnauth")
         async with AsyncClient(
-            transport=ASGITransport(app=fastapi_app), base_url="http://test"
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
         ) as unauthenticated_client:
             response = await unauthenticated_client.delete(f"/api/admin/motions/{motion.id}")
             assert response.status_code == 401
@@ -5373,7 +5477,8 @@ class TestConcurrentBallotSubmission:
 
         async def _submit() -> int:
             async with AsyncClient(
-                transport=ASGITransport(app=real_app), base_url="http://test"
+                transport=ASGITransport(app=real_app), base_url="http://test",
+                headers={"X-Requested-With": "XMLHttpRequest"},
             ) as c:
                 r = await c.post(
                     f"/api/general-meeting/{agm_id}/submit",

@@ -1027,6 +1027,36 @@ class TestArchiveBuilding:
         await db_session.refresh(lo)
         assert lo.is_archived is True
 
+    async def test_archive_removes_building_from_active_list(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR3-41: Archiving a building removes it from the active (?is_archived=false) list."""
+        b = Building(name="RR341 Archive Active List", manager_email="rr341al@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        # Verify it appears in active list before archive
+        pre_resp = await client.get("/api/admin/buildings?is_archived=false")
+        assert pre_resp.status_code == 200
+        names_before = [x["name"] for x in pre_resp.json()]
+        assert b.name in names_before
+
+        # Archive it
+        archive_resp = await client.post(f"/api/admin/buildings/{b.id}/archive")
+        assert archive_resp.status_code == 200
+
+        # Should no longer appear in active list
+        post_resp = await client.get("/api/admin/buildings?is_archived=false")
+        assert post_resp.status_code == 200
+        names_after = [x["name"] for x in post_resp.json()]
+        assert b.name not in names_after
+
+        # Should appear in archived list
+        arch_resp = await client.get("/api/admin/buildings?is_archived=true")
+        assert arch_resp.status_code == 200
+        archived_names = [x["name"] for x in arch_resp.json()]
+        assert b.name in archived_names
+
 
 # ---------------------------------------------------------------------------
 # PATCH /api/admin/buildings/{id}

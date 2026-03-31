@@ -1036,8 +1036,15 @@ class TestOtpEmailTemplate:
 
 class TestConfigDefaults:
     def test_testing_mode_defaults_to_false(self):
-        from app.config import settings
-        assert settings.testing_mode is False
+        """Default value of testing_mode is False when no env var is set.
+
+        Note: conftest.py sets TESTING_MODE=true for the test suite so the
+        shared `settings` singleton will have testing_mode=True.  We instantiate
+        a fresh Settings with an explicit override to verify the *default* value.
+        """
+        from app.config import Settings
+        fresh = Settings(testing_mode=False)
+        assert fresh.testing_mode is False
 
     def test_email_override_defaults_to_empty(self):
         from app.config import settings

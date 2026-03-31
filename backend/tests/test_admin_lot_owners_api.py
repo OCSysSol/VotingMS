@@ -332,9 +332,25 @@ class TestImportLotOwners:
         assert response.status_code == 200
         assert response.json()["imported"] == 1
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_minimum_one_accepted(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement must be > 0; minimum valid value is 1."""
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [["MINONE1", "minone@test.com", "1"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 200
+        assert response.json()["imported"] == 1
+
+    async def test_unit_entitlement_zero_rejected(
+        self, client: AsyncClient, building: Building
+    ):
+        """RR3-37: unit_entitlement=0 is rejected (must be > 0)."""
         csv_data = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [["ZERO1", "zero@test.com", "0"]],
@@ -343,8 +359,8 @@ class TestImportLotOwners:
             f"/api/admin/buildings/{building.id}/lot-owners/import",
             files={"file": ("owners.csv", csv_data, "text/csv")},
         )
-        assert response.status_code == 200
-        assert response.json()["imported"] == 1
+        assert response.status_code == 422
+        assert any("> 0" in str(e) or "must be" in str(e) for e in response.json()["detail"])
 
     # --- Input validation ---
 
@@ -582,6 +598,24 @@ class TestImportLotOwners:
         assert owners["OLD1"]["unit_entitlement"] == 200
         assert "NEW1" in owners
 
+    async def test_import_with_headers_but_zero_data_rows(
+        self, client: AsyncClient, building: Building
+    ):
+        """RR3-41: CSV with all required headers but zero data rows returns 200 with
+        imported=0 and emails=0 (not an error — empty import is valid)."""
+        csv_data = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [],  # zero data rows
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["imported"] == 0
+        assert data["emails"] == 0
+
 
 # ---------------------------------------------------------------------------
 # POST /api/admin/buildings/{building_id}/lot-owners
@@ -628,15 +662,26 @@ class TestAddLotOwner:
         data = response.json()
         assert data["emails"] == []
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected; must be > 0."""
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners",
             json={"lot_number": "ZERO01", "emails": [], "unit_entitlement": 0},
         )
+        assert response.status_code == 422
+
+    async def test_unit_entitlement_one_accepted(
+        self, client: AsyncClient, building: Building
+    ):
+        """RR3-37: unit_entitlement=1 (minimum positive) is accepted."""
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={"lot_number": "ONE01", "emails": [], "unit_entitlement": 1},
+        )
         assert response.status_code == 201
-        assert response.json()["unit_entitlement"] == 0
+        assert response.json()["unit_entitlement"] == 1
 
     async def test_email_normalised_to_lowercase(
         self, client: AsyncClient, building: Building
@@ -774,9 +819,10 @@ class TestUpdateLotOwner:
 
     # --- Boundary values ---
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected on update (must be > 0)."""
         lo = LotOwner(
             building_id=building.id,
             lot_number="UPD05",
@@ -790,8 +836,27 @@ class TestUpdateLotOwner:
             f"/api/admin/lot-owners/{lo.id}",
             json={"unit_entitlement": 0},
         )
+        assert response.status_code == 422
+
+    async def test_unit_entitlement_one_accepted(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """RR3-37: unit_entitlement=1 (minimum positive) is accepted on update."""
+        lo = LotOwner(
+            building_id=building.id,
+            lot_number="UPD05B",
+            unit_entitlement=100,
+        )
+        db_session.add(lo)
+        await db_session.commit()
+        await db_session.refresh(lo)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}",
+            json={"unit_entitlement": 1},
+        )
         assert response.status_code == 200
-        assert response.json()["unit_entitlement"] == 0
+        assert response.json()["unit_entitlement"] == 1
 
     # --- Input validation ---
 

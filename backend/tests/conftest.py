@@ -18,6 +18,11 @@ import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
+# US-IAS-05: Enable testing mode so the CSRF middleware is skipped in tests.
+# This must be set BEFORE any app module is imported so the Settings singleton
+# picks up the env var.  The CSRF middleware skips its check when testing_mode=True.
+os.environ.setdefault("TESTING_MODE", "true")
+
 import asyncpg
 import openpyxl
 import pytest
@@ -244,9 +249,15 @@ def closing_dt() -> datetime:
 
 @pytest_asyncio.fixture
 async def client(app):
-    """HTTP client that shares the test db_session with the app (via conftest app fixture)."""
+    """HTTP client that shares the test db_session with the app (via conftest app fixture).
+
+    Includes X-Requested-With header by default so all tests pass the CSRF check
+    (US-IAS-05 CSRFMiddleware requires this header on state-changing requests).
+    """
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"X-Requested-With": "XMLHttpRequest"},
     ) as ac:
         yield ac
 

@@ -319,6 +319,110 @@ class TestMain:
             response = await client.get("/api/nonexistent-xyz-endpoint")
         assert response.status_code == 404
 
+    async def test_request_id_header_present_on_response(self):
+        """RR3-38: Every response includes X-Request-ID header with a UUID value."""
+        from app.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as client:
+            response = await client.get("/api/health/live")
+        assert response.status_code == 200
+        assert "X-Request-ID" in response.headers
+        # Should be a valid UUID
+        import uuid as _uuid
+        _uuid.UUID(response.headers["X-Request-ID"])  # raises ValueError if not UUID
+
+    async def test_csrf_middleware_blocks_post_without_header(self):
+        """US-IAS-05: POST without X-Requested-With returns 403 when testing_mode=False."""
+        import app.main as main_module
+        from app.config import Settings
+        from app.main import create_app
+
+        # Temporarily disable testing_mode to exercise CSRF enforcement.
+        # conftest.py sets TESTING_MODE=true for all other tests; this test
+        # explicitly overrides it to verify CSRF is enforced in production mode.
+        prod_settings = Settings(testing_mode=False)
+        csrf_app = create_app()
+        original_settings = main_module.settings
+        main_module.settings = prod_settings
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=csrf_app), base_url="http://test"
+                # Intentionally no X-Requested-With header
+            ) as client:
+                response = await client.post("/api/auth/verify", json={})
+            assert response.status_code == 403
+            assert "CSRF" in response.json()["detail"]
+        finally:
+            main_module.settings = original_settings
+
+    async def test_csrf_middleware_allows_post_with_header_in_production_mode(self):
+        """US-IAS-05: POST with X-Requested-With passes through CSRF when testing_mode=False."""
+        import app.main as main_module
+        from app.config import Settings
+        from app.main import create_app
+
+        prod_settings = Settings(testing_mode=False)
+        csrf_app = create_app()
+        original_settings = main_module.settings
+        main_module.settings = prod_settings
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=csrf_app), base_url="http://test",
+                headers={"X-Requested-With": "XMLHttpRequest"},
+            ) as client:
+                response = await client.post("/api/auth/verify", json={})
+            # 422 means the request passed CSRF and reached the route handler
+            assert response.status_code == 422
+        finally:
+            main_module.settings = original_settings
+
+    async def test_csrf_middleware_allows_post_with_header(self):
+        """US-IAS-05: POST with X-Requested-With is passed through to the route handler."""
+        from app.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as client:
+            # /api/auth/verify with a bad payload will return 422 (not 403 from CSRF)
+            response = await client.post("/api/auth/verify", json={})
+        # A 422 (validation error) means the request passed CSRF and reached the route
+        assert response.status_code == 422
+
+    async def test_csrf_middleware_allows_get(self):
+        """US-IAS-05: GET requests are not subject to CSRF check."""
+        from app.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+            # Intentionally no X-Requested-With header on GET
+        ) as client:
+            response = await client.get("/api/health/live")
+        assert response.status_code == 200
+
+    async def test_csrf_middleware_exempts_admin_login(self):
+        """US-IAS-05: Admin login endpoint is exempt from CSRF check."""
+        from app.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+            # Intentionally no X-Requested-With header
+        ) as client:
+            response = await client.post("/api/admin/auth/login", json={"username": "x", "password": "y"})
+        # Should reach the route handler (not blocked by CSRF) — returns 500 due to unhashed password
+        # config, but NOT a 403 CSRF error
+        assert response.status_code != 403
+
+    def test_csrf_middleware_present(self):
+        """US-IAS-05: CSRFMiddleware is registered in the app middleware stack."""
+        from app.main import CSRFMiddleware, app
+
+        middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
+        assert CSRFMiddleware in middleware_classes
+
 
 # ---------------------------------------------------------------------------
 # app.config — RR3-17: admin_password bcrypt format validator

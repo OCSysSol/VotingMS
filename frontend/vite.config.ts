@@ -73,6 +73,9 @@ export default defineConfig({
         "src/components/admin/Pagination.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/admin/BuildingsPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/admin/GeneralMeetingListPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // Wave 5 code quality (US-CQM-03)
+        "src/components/vote/LotSelectionSection.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/components/vote/SubmitSection.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

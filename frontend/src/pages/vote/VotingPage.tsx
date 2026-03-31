@@ -22,6 +22,8 @@ import { CountdownTimer } from "../../components/vote/CountdownTimer";
 import { SubmitDialog } from "../../components/vote/SubmitDialog";
 import { MixedSelectionWarningDialog } from "../../components/vote/MixedSelectionWarningDialog";
 import { ClosedBanner } from "../../components/vote/ClosedBanner";
+import { LotSelectionSection } from "../../components/vote/LotSelectionSection";
+import { SubmitSection } from "../../components/vote/SubmitSection";
 import { useServerTime } from "../../hooks/useServerTime";
 import { formatLocalDateTime } from "../../utils/dateTime";
 
@@ -494,113 +496,23 @@ export function VotingPage() {
   // Sidebar is only rendered for multi-lot voters (single-lot voters see motions full-width)
   const showSidebar = isMultiLot && allLots.length > 0;
 
-  // Lot list content — shared between desktop sidebar and mobile drawer
+  // Lot list content — shared between desktop sidebar and mobile drawer (US-CQM-03)
   const lotListContent = showSidebar ? (
-    <div className="lot-selection">
-      <h2 className="lot-selection__title">Your Lots</h2>
-      <p className="lot-selection__subtitle">
-        {allSubmitted
-          ? "All lots have been submitted."
-          : `You are voting for ${votingCount} lot${votingCount !== 1 ? "s" : ""}.`}
-      </p>
-
-      <div className="lot-shortcut-buttons">
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={handleSelectAll}
-          aria-label="Select all lots"
-        >
-          Select All
-        </button>
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={handleDeselectAll}
-          aria-label="Deselect all lots"
-        >
-          Deselect All
-        </button>
-        {hasProxyLot && (
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={handleSelectProxy}
-            aria-label="Select proxy lots only"
-          >
-            Select Proxy Lots
-          </button>
-        )}
-        {hasProxyLot && (
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={handleSelectOwned}
-            aria-label="Select owned lots only"
-          >
-            Select Owned Lots
-          </button>
-        )}
-      </div>
-
-      <ul className="lot-selection__list" role="list">
-        {allLots.map((lot) => (
-          <li
-            key={lot.lot_owner_id}
-            className={`lot-selection__item${isLotSubmitted(lot) ? " lot-selection__item--submitted" : ""}`}
-            aria-disabled={isLotSubmitted(lot) ? "true" : undefined}
-          >
-            <label
-              htmlFor={`lot-checkbox-${lot.lot_owner_id}`}
-              className="lot-selection__label"
-            >
-              <input
-                type="checkbox"
-                id={`lot-checkbox-${lot.lot_owner_id}`}
-                className="lot-selection__checkbox"
-                checked={selectedIds.has(lot.lot_owner_id)}
-                disabled={isLotSubmitted(lot)}
-                onChange={() => handleToggle(lot.lot_owner_id)}
-              />
-
-              <span className="lot-selection__lot-number">Lot {lot.lot_number}</span>
-            </label>
-
-            {lot.is_proxy && (
-              <span className="lot-selection__badge lot-selection__badge--proxy">
-                via Proxy
-              </span>
-            )}
-
-            {lot.financial_position === "in_arrear" && (
-              <span className="lot-selection__badge lot-selection__badge--arrear">
-                In Arrear
-              </span>
-            )}
-
-            {isLotSubmitted(lot) && (
-              <span className="lot-selection__badge lot-selection__badge--submitted">
-                Already submitted
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {showNoSelectionError && (
-        <p role="alert">Please select at least one lot</p>
-      )}
-
-      {allSubmitted && (
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={handleViewSubmission}
-        >
-          View Submission
-        </button>
-      )}
-    </div>
+    <LotSelectionSection
+      allLots={allLots}
+      selectedIds={selectedIds}
+      allSubmitted={allSubmitted}
+      votingCount={votingCount}
+      hasProxyLot={hasProxyLot}
+      showNoSelectionError={showNoSelectionError}
+      isLotSubmitted={isLotSubmitted}
+      onToggle={handleToggle}
+      onSelectAll={handleSelectAll}
+      onDeselectAll={handleDeselectAll}
+      onSelectProxy={handleSelectProxy}
+      onSelectOwned={handleSelectOwned}
+      onViewSubmission={handleViewSubmission}
+    />
   ) : null;
 
   // Desktop sidebar (hidden on mobile via CSS)
@@ -774,23 +686,19 @@ export function VotingPage() {
                       onMultiChoiceChange={handleMultiChoiceChange}
                     />
                   ))}
-                  {unvotedMotions.length === 0 && !isClosed && !showSidebar && (
-                    <div className="submit-section">
-                      <p className="state-message" data-testid="all-voted-message">
-                        You have voted on all motions.
-                      </p>
-                      <button type="button" className="btn btn--primary" onClick={handleViewSubmission}>
-                        View Submission
-                      </button>
-                    </div>
-                  )}
-                  {unvotedMotions.length > 0 && !isClosed && (
-                    <div className="submit-section">
-                      <button type="button" className="btn btn--primary" onClick={handleSubmitClick}>
-                        Submit ballot
-                      </button>
-                    </div>
-                  )}
+                  {/* RR3-39: aria-live region announces vote status updates to screen readers */}
+                  <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="vote-status-announcer">
+                    {submitMutation.isSuccess ? "Your vote has been saved." : ""}
+                  </div>
+                  {/* US-CQM-03: SubmitSection encapsulates submit/view submission rendering */}
+                  <SubmitSection
+                    unvotedCount={unvotedMotions.length}
+                    isClosed={isClosed}
+                    showSidebar={showSidebar}
+                    isPending={submitMutation.isPending}
+                    onSubmitClick={handleSubmitClick}
+                    onViewSubmission={handleViewSubmission}
+                  />
                 </>
               )}
             </>

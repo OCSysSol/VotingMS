@@ -770,9 +770,10 @@ class TestImportLotOwners:
         assert response.status_code == 200
         assert response.json()["imported"] == 1
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected (must be > 0)."""
         csv_data = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [["ZERO1", "zero@test.com", "0"]],
@@ -781,8 +782,7 @@ class TestImportLotOwners:
             f"/api/admin/buildings/{building.id}/lot-owners/import",
             files={"file": ("owners.csv", csv_data, "text/csv")},
         )
-        assert response.status_code == 200
-        assert response.json()["imported"] == 1
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -1064,15 +1064,15 @@ class TestAddLotOwner:
         data = response.json()
         assert data["emails"] == []
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected (must be > 0)."""
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners",
             json={"lot_number": "ZERO01", "emails": [], "unit_entitlement": 0},
         )
-        assert response.status_code == 201
-        assert response.json()["unit_entitlement"] == 0
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -1197,9 +1197,10 @@ class TestUpdateLotOwner:
 
     # --- Boundary values ---
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected on update (must be > 0)."""
         lo = LotOwner(
             building_id=building.id,
             lot_number="UPD05",
@@ -1213,8 +1214,7 @@ class TestUpdateLotOwner:
             f"/api/admin/lot-owners/{lo.id}",
             json={"unit_entitlement": 0},
         )
-        assert response.status_code == 200
-        assert response.json()["unit_entitlement"] == 0
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -6874,7 +6874,7 @@ class TestMotionManagement:
         label: str,
         status: GeneralMeetingStatus = GeneralMeetingStatus.open,
         is_visible: bool = False,
-        order_index: int = 0,
+        order_index: int = 1,
     ) -> tuple[GeneralMeeting, Motion]:
         agm = await self._create_meeting(db_session, label, status)
         motion = Motion(
@@ -6938,13 +6938,13 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Second motion gets display_order = max + 1."""
-        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=0)
+        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=1)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Motion"},
         )
         assert response.status_code == 201
-        assert response.json()["display_order"] == 1
+        assert response.json()["display_order"] == 2
 
     async def test_add_multiple_motions_sequential_order_indexes(
         self, client: AsyncClient, db_session: AsyncSession
@@ -7203,7 +7203,7 @@ class TestMotionManagement:
         )
         assert response.status_code == 201
         data = response.json()
-        # First motion on a meeting with no motions → display_order=0, motion_number="0"
+        # First motion on a meeting with no motions → display_order=1, motion_number="1"
         assert data["motion_number"] == str(data["display_order"])
 
     async def test_add_motion_null_motion_number_auto_assigns(
@@ -7264,16 +7264,16 @@ class TestMotionManagement:
     async def test_add_motion_second_motion_auto_assigns_correct_number(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Second motion auto-assigns motion_number = str(display_order) = '1'."""
-        agm, _first = await self._create_meeting_with_motion(db_session, "SecondAutoMN", order_index=0)
+        """Second motion auto-assigns motion_number = str(display_order) = '2' when first is at order 1."""
+        agm, _first = await self._create_meeting_with_motion(db_session, "SecondAutoMN", order_index=1)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Auto"},
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["display_order"] == 1
-        assert data["motion_number"] == "1"
+        assert data["display_order"] == 2
+        assert data["motion_number"] == "2"
 
     async def test_add_motion_motion_number_persisted_in_db(
         self, client: AsyncClient, db_session: AsyncSession
@@ -7553,11 +7553,11 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Deleting one motion does not affect remaining motions (no renumbering)."""
-        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=0)
+        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=1)
         motion_b = Motion(
             general_meeting_id=agm.id,
             title="Motion B",
-            display_order=1,
+            display_order=2,
             is_visible=False,
         )
         db_session.add(motion_b)
@@ -7569,7 +7569,7 @@ class TestMotionManagement:
         result = await db_session.execute(select(Motion).where(Motion.id == motion_b.id))
         surviving = result.scalar_one_or_none()
         assert surviving is not None
-        assert surviving.display_order == 1  # Not renumbered
+        assert surviving.display_order == 2  # Not renumbered
 
     # --- State / precondition errors (delete) ---
 

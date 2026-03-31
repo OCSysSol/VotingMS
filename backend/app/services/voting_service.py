@@ -1,6 +1,8 @@
 """
 Draft save and ballot submit service logic.
 """
+import hashlib
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -34,6 +36,28 @@ from app.schemas.voting import (
     SubmitResponse,
     VoteSummaryItem,
 )
+
+
+def _compute_ballot_hash(
+    agm_id: uuid.UUID,
+    lot_owner_id: uuid.UUID,
+    vote_choices: list[tuple[str, str]],
+) -> str:
+    """Compute a SHA-256 hex digest for ballot audit purposes (US-VIL-03).
+
+    The hash is derived from: agm_id + lot_owner_id + sorted vote choices.
+    vote_choices is a list of (motion_id_str, choice_str) tuples.
+    Sorting ensures the hash is deterministic regardless of iteration order.
+    """
+    payload = json.dumps(
+        {
+            "agm_id": str(agm_id),
+            "lot_owner_id": str(lot_owner_id),
+            "votes": sorted(vote_choices),
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 async def save_draft(
@@ -498,6 +522,15 @@ async def submit_ballot(
         motion_order = {m.id: m.display_order for m in visible_motions}
         vote_items.sort(key=lambda v: motion_order.get(v.motion_id, 0))
 
+        # Compute cryptographic hash of this ballot for audit trail (US-VIL-03).
+        ballot_vote_choices = [
+            (str(v.motion_id), v.choice.value if v.choice else "none")
+            for v in votes_to_add
+        ]
+        computed_hash = _compute_ballot_hash(
+            general_meeting_id, lot_owner_id, ballot_vote_choices
+        )
+
         # Reuse existing BallotSubmission if present; otherwise create one.
         # The BallotSubmission row and all its Vote rows are added to the session
         # and flushed in a single batch so they are committed or rolled back
@@ -511,6 +544,7 @@ async def submit_ballot(
                     lot_owner_id=lot_owner_id,
                     voter_email=voter_email,
                     proxy_email=proxy_email_by_lot.get(lot_owner_id),
+                    ballot_hash=computed_hash,
                     submitted_at=datetime.now(UTC),
                 )
                 db.add(submission)
@@ -543,12 +577,17 @@ async def submit_ballot(
             votes=vote_items,
         ))
 
-    logger.info(
-        "ballot_submitted",
-        agm_id=str(general_meeting_id),
-        voter_email=voter_email,
-        lot_count=len(lot_owner_ids),
-    )
+    # US-VIL-06: log proxy_email audit trail when proxy submits
+    proxy_lots = {str(k): v for k, v in proxy_email_by_lot.items() if v is not None}
+    log_kwargs: dict = {
+        "agm_id": str(general_meeting_id),
+        "voter_email": voter_email,
+        "lot_count": len(lot_owner_ids),
+    }
+    if proxy_lots:
+        log_kwargs["proxy_email"] = voter_email
+        log_kwargs["proxied_lot_ids"] = list(proxy_lots.keys())
+    logger.info("ballot_submitted", **log_kwargs)
     return SubmitResponse(submitted=True, lots=lot_results)
 
 

@@ -99,9 +99,9 @@ class LotOwnerCreate(BaseModel):
 
     @field_validator("unit_entitlement")
     @classmethod
-    def entitlement_non_negative(cls, v: int) -> int:
-        if v < 0:
-            raise ValueError("unit_entitlement must be >= 0")
+    def entitlement_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("unit_entitlement must be > 0")
         return v
 
     @field_validator("lot_number")
@@ -125,9 +125,9 @@ class LotOwnerUpdate(BaseModel):
 
     @field_validator("unit_entitlement")
     @classmethod
-    def entitlement_non_negative(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("unit_entitlement must be >= 0")
+    def entitlement_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("unit_entitlement must be > 0")
         return v
 
     @field_validator("financial_position")
@@ -442,6 +442,7 @@ class VoterEntry(BaseModel):
     lot_number: str
     entitlement: int
     proxy_email: str | None = None
+    ballot_hash: str | None = None  # US-VIL-03: SHA-256 audit hash of submitted ballot
 
 
 class TallyCategory(BaseModel):
