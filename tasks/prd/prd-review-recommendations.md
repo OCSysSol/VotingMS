@@ -1821,6 +1821,50 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 
 ---
 
+## 13. User-Reported Bugs
+
+---
+
+### RR3-47: Hidden motions must not record abstain votes for voters who never saw them
+
+**As a** meeting organiser,
+**I want** voters who submitted while a motion was hidden to show as "not voted" on that motion — not "abstained",
+**So that** the tally accurately reflects that the voter was never given the opportunity to vote on that motion.
+
+**Background:** When a voter submits their ballot, unanswered visible motions are currently recorded as `abstain`. If a motion is hidden at submission time and the voter therefore never sees it, the same `abstain` record is incorrectly created. The voter can still vote once the motion is made visible (the system allows this), so the false abstain record is a data accuracy issue that corrects itself when the voter re-votes — but in the interim the tally is misleading.
+
+**Acceptance criteria:**
+- [ ] `voting_service.submit_ballot()` does not create `abstain` (or `not_eligible`) vote records for motions where `Motion.is_visible == False` at submission time
+- [ ] If a motion is later made visible and the voter re-submits, a vote record is created at that point — this already works; confirm it is not broken by the fix
+- [ ] Admin meeting report shows voters who submitted while a motion was hidden as "no vote" / absent for that motion, not "abstained"
+- [ ] Integration test: create meeting with visible motion A and hidden motion B → voter submits answering motion A → assert no Vote row exists for motion B for this voter → make motion B visible → voter re-submits answering motion B → assert Vote row now exists for motion B
+- [ ] All existing ballot submission tests pass
+
+**Technical notes:** `backend/app/services/voting_service.py` — `submit_ballot()` — the section that creates `abstain` records for unanswered motions; add `.where(Motion.is_visible == True)` to the query that determines which unanswered motions to record.
+
+**Priority:** P1 | **Effort:** S
+
+---
+
+### RR3-48: Multi-choice motions must display their legal type (General/Special), not their voting mechanism
+
+**As a** meeting organiser,
+**I want** the admin meeting page to show "General" or "Special" as the motion type for multi-choice motions,
+**So that** it is clear which legal threshold applies — multi-choice is a voting mechanism, not a motion type.
+
+**Background:** Multi-choice is how voters cast their vote (selecting multiple options), not what legal category the motion falls under. The motion type (`motion_type` field: `general` or `special`) determines the statutory threshold. Displaying "Multi-choice" as the type conflates the two concepts and could cause confusion about whether a special resolution threshold applies.
+
+**Acceptance criteria:**
+- [ ] On the admin meeting detail/report page, the type badge/label for a multi-choice motion shows `General` or `Special` based on `motion.motion_type` — not a "Multi-choice" label
+- [ ] A separate, smaller indicator (e.g., a secondary badge or icon) may be used to show that the voting mechanism is multi-choice, but it must be visually distinct from the type label and not replace it
+- [ ] Verify in browser using dev-browser skill: a meeting with both a General multi-choice motion and a Special single-choice motion correctly displays "General" and "Special" respectively
+
+**Technical notes:** `frontend/src/` — wherever `MotionTypeBadge` or similar component renders the motion type label; the fix is to always source the displayed type from `motion.motion_type` (general/special) rather than from a derived `is_multi_choice` flag.
+
+**Priority:** P1 | **Effort:** S
+
+---
+
 ## Priority Summary
 
 | Theme | P0 | P1 | P2 | Total |
