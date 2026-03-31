@@ -161,10 +161,10 @@ function SortableRow({
         </span>
         {motion.is_multi_choice && (
           <span
-            className="motion-type-badge motion-type-badge--multi-choice-indicator"
-            aria-label={`Voting mechanism: Multi-choice${motion.options && motion.options.length > 0 ? ` (${motion.options.length} options)` : ""}`}
+            className="motion-type-badge motion-type-badge--multi_choice"
+            aria-label="Multi-choice motion"
           >
-            {`Multi-choice${motion.options && motion.options.length > 0 ? ` (${motion.options.length} options)` : ""}`}
+            {`Multi-Choice${motion.options && motion.options.length > 0 ? ` (${motion.options.length})` : ""}`}
           </span>
         )}
       </td>

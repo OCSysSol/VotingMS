@@ -3104,6 +3104,85 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         assert tally["absent"]["voter_count"] == 1
         assert tally["absent"]["entitlement_sum"] == 50
 
+    async def test_hidden_motion_tally_excludes_submitters_as_abstained(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Hidden motions must not count submitters as abstained when they had no visibility."""
+        b = Building(name="HiddenMotionTest", manager_email="hidden@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="H1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+
+        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="voter@hidden.test"))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Hidden Motion AGM",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        visible_motion = Motion(
+            general_meeting_id=agm.id,
+            title="Visible Motion",
+            display_order=1,
+            is_visible=True,
+        )
+        hidden_motion = Motion(
+            general_meeting_id=agm.id,
+            title="Hidden Motion",
+            display_order=2,
+            is_visible=False,
+        )
+        db_session.add_all([visible_motion, hidden_motion])
+        await db_session.flush()
+
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=lo.unit_entitlement,
+        ))
+        await db_session.flush()
+
+        # Voter submits a ballot and votes yes on the visible motion only
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email="voter@hidden.test",
+        ))
+        db_session.add(Vote(
+            general_meeting_id=agm.id,
+            motion_id=visible_motion.id,
+            voter_email="voter@hidden.test",
+            lot_owner_id=lo.id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        ))
+        # No Vote row for the hidden motion — voter never saw it
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 200
+
+        motions_data = response.json()["motions"]
+        visible_tally = next(m["tally"] for m in motions_data if m["title"] == "Visible Motion")
+        hidden_tally = next(m["tally"] for m in motions_data if m["title"] == "Hidden Motion")
+
+        # Visible motion: voter voted yes
+        assert visible_tally["yes"]["voter_count"] == 1
+
+        # Hidden motion: voter had no visibility — must not appear as abstained
+        assert hidden_tally["abstained"]["voter_count"] == 0
+        assert hidden_tally["yes"]["voter_count"] == 0
+        assert hidden_tally["no"]["voter_count"] == 0
+
 
 # ---------------------------------------------------------------------------
 # DELETE /api/admin/general-meetings/{agm_id}

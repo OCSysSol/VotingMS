@@ -1842,6 +1842,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 
 **Technical notes:** `backend/app/services/voting_service.py` — `submit_ballot()` — the section that creates `abstain` records for unanswered motions; add `.where(Motion.is_visible == True)` to the query that determines which unanswered motions to record.
 
+**Status:** ✅ Implemented — branch: `fix/rr3-47-rr3-48`, committed 2026-03-31
+
 **Priority:** P1 | **Effort:** S
 
 ---
@@ -1860,6 +1862,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 - [ ] Verify in browser using dev-browser skill: a meeting with both a General multi-choice motion and a Special single-choice motion correctly displays "General" and "Special" respectively
 
 **Technical notes:** `frontend/src/` — wherever `MotionTypeBadge` or similar component renders the motion type label; the fix is to always source the displayed type from `motion.motion_type` (general/special) rather than from a derived `is_multi_choice` flag.
+
+**Status:** ✅ Implemented — branch: `fix/rr3-47-rr3-48`, committed 2026-03-31
 
 **Priority:** P1 | **Effort:** S
 

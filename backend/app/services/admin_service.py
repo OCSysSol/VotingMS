@@ -1485,6 +1485,8 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             not_eligible_ids: set[uuid.UUID] = set()
 
             for lot_id in submitted_lot_owner_ids:
+                if not motion.is_visible and lot_id not in motion_votes:
+                    continue  # hidden motion: voter had no visibility, do not infer abstained
                 choice = motion_votes.get(lot_id, "abstained")
                 if choice == "yes":
                     yes_ids.add(lot_id)
