@@ -10,7 +10,7 @@ const mcMotion: MotionOut = {
   description: null,
   display_order: 1,
   motion_number: null,
-  motion_type: "multi_choice",
+  motion_type: "general",
   is_visible: true,
   already_voted: false,
   submitted_choice: null,
