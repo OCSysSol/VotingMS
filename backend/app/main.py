@@ -1,8 +1,11 @@
 import asyncio
 import logging
 import traceback
+import uuid as _uuid_module
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 
+import structlog
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -20,6 +23,10 @@ configure_logging()
 
 logger = logging.getLogger(__name__)
 _structlog_logger = get_logger(__name__)
+
+# RR3-38: Per-request ID stored in a context variable so all log lines within
+# a request include the same request_id for distributed trace correlation.
+_request_id_var: ContextVar[str] = ContextVar("request_id", default="")
 
 
 _SECURITY_HEADERS = {
@@ -61,6 +68,64 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             return error_response
         for header, value in _SECURITY_HEADERS.items():
             response.headers[header] = value
+        return response
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    """US-IAS-05: Require X-Requested-With header on all state-changing requests.
+
+    SameSite=Lax cookies are NOT automatically included in cross-origin subresource
+    requests (XHR/fetch) but ARE included on top-level navigation POST from the same
+    site.  By requiring the X-Requested-With header on POST/PATCH/PUT/DELETE we prevent
+    cross-origin form-based CSRF attacks: a cross-origin attacker cannot set arbitrary
+    request headers without first passing a CORS preflight, which our CORS policy blocks.
+
+    Exceptions:
+    - OPTIONS (preflight) — must not be blocked
+    - GET/HEAD — safe/idempotent, no state change
+    - /api/admin/auth/login — called with JSON, X-Requested-With always present via fetch;
+      exempt here to avoid blocking admin login from non-browser clients / Playwright tests.
+    - testing_mode=True — CSRF check is skipped entirely so unit/integration tests that
+      do not send X-Requested-With are not blocked.
+    """
+
+    _EXEMPT_PATHS = {"/api/admin/auth/login", "/api/admin/auth/logout", "/api/admin/auth/hash-password"}
+    _STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+    async def dispatch(self, request: Request, call_next):
+        # Skip CSRF in testing mode so integration tests are not required to send the header.
+        if settings.testing_mode:
+            return await call_next(request)
+        if (
+            request.method in self._STATE_CHANGING_METHODS
+            and request.url.path not in self._EXEMPT_PATHS
+            and "X-Requested-With" not in request.headers
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "CSRF check failed: X-Requested-With header missing"},
+            )
+        return await call_next(request)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """RR3-38: Attach a UUID request ID to every request.
+
+    Generates a new UUID per request, stores it in the _request_id_var context
+    variable, and binds it into structlog's context so every log line emitted
+    within the request includes ``request_id``.  Also sets the X-Request-ID
+    response header for client-side correlation.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        request_id = str(_uuid_module.uuid4())
+        _request_id_var.set(request_id)
+        structlog.contextvars.bind_contextvars(request_id=request_id)
+        try:
+            response = await call_next(request)
+        finally:
+            structlog.contextvars.unbind_contextvars("request_id")
+        response.headers["X-Request-ID"] = request_id
         return response
 
 
@@ -132,6 +197,14 @@ def create_app() -> FastAPI:
         allow_origins=[settings.allowed_origin],
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        # US-IAS-05: X-Requested-With is our CSRF double-submit header.
+        # SameSite=Lax cookies are sent on top-level navigations from cross-origin
+        # but NOT on cross-origin subresource requests (XHR/fetch).  However, to
+        # defend against CSRF via cross-origin form posts that browsers still allow
+        # on Lax, we also require X-Requested-With on every state-changing request
+        # (enforced by CSRFMiddleware below).  A cross-origin attacker cannot set
+        # arbitrary headers without passing the CORS preflight — providing strong CSRF
+        # protection without needing a separate synchronizer token.
         allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],
     )
     app.add_middleware(
@@ -145,6 +218,13 @@ def create_app() -> FastAPI:
     # on the way in / last on the way out — ensuring headers are set on every
     # response including CORS preflight responses).
     app.add_middleware(SecurityHeadersMiddleware)
+    # RR3-38: RequestIDMiddleware generates a UUID per request and binds it to
+    # structlog context so all log lines include request_id.  Registered after
+    # SecurityHeadersMiddleware so it executes before SecurityHeadersMiddleware
+    # on the way in (Starlette reverse order).
+    app.add_middleware(RequestIDMiddleware)
+    # US-IAS-05: CSRFMiddleware enforces X-Requested-With on state-changing requests.
+    app.add_middleware(CSRFMiddleware)
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:

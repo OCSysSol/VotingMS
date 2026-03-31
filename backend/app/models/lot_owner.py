@@ -17,7 +17,8 @@ class LotOwner(Base):
     __tablename__ = "lot_owners"
     __table_args__ = (
         UniqueConstraint("building_id", "lot_number", name="uq_lot_owners_building_lot"),
-        CheckConstraint("unit_entitlement >= 0", name="ck_lot_owners_entitlement_nonneg"),
+        CheckConstraint("unit_entitlement > 0", name="ck_lot_owners_entitlement_positive"),
+        CheckConstraint("lot_number <> ''", name="ck_lot_owners_lot_number_nonempty"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

@@ -92,7 +92,8 @@ async def _create_agm(db: AsyncSession, building: Building) -> GeneralMeeting:
     return agm
 
 
-async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int = 0, description: str | None = "A motion") -> Motion:
+async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int = 1, description: str | None = "A motion") -> Motion:
+    """Create a motion for test fixtures. order_index must be > 0 (RR3-37 constraint)."""
     motion = Motion(
         general_meeting_id=agm.id,
         title=f"Motion {order_index}",
@@ -1299,7 +1300,7 @@ class TestCloseAgmEmailIntegration:
         await db_session.flush()
 
         motion = Motion(
-            general_meeting_id=agm.id, title="M1", description=None, display_order=0
+            general_meeting_id=agm.id, title="M1", description=None, display_order=1
         )
         db_session.add(motion)
         await db_session.commit()

@@ -48,6 +48,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-03: Tamper detection — cryptographic hash of submitted ballot
 
+**Status: ✅ Implemented**
+
 **As a** meeting organiser,
 **I want** each submitted ballot to carry a tamper-evident hash,
 **So that** I can demonstrate in any dispute that the recorded votes have not been altered since submission.
@@ -66,6 +68,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-VIL-04: Block vote retraction after submission
+
+**Status: ✅ Implemented**
 
 **As a** meeting organiser,
 **I want** the system to enforce that submitted votes can never be changed or deleted by any code path,
@@ -105,6 +109,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-06: Proxy authorisation audit trail
 
+**Status: ✅ Implemented**
+
 **As a** meeting auditor,
 **I want** each proxy vote to carry a record of the proxy authorisation,
 **So that** I can demonstrate who authorised the proxy and when, in any post-AGM legal challenge.
@@ -123,6 +129,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-07: Data retention policy — meeting data lifecycle
 
+**Status: ✅ Implemented**
+
 **As a** system operator,
 **I want** a documented and enforced data retention policy for AGM records,
 **So that** the system complies with applicable privacy and corporate governance regulations.
@@ -139,6 +147,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-VIL-08: Timezone-consistent meeting timestamps in audit log
+
+**Status: ✅ Implemented**
 
 **As a** meeting auditor,
 **I want** all timestamps in reports and audit records to include the UTC offset,
@@ -177,6 +187,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-IAS-02: Timing-safe admin login comparison
 
+**Status: ✅ Implemented**
+
 **As a** security engineer,
 **I want** the admin login endpoint to use a timing-safe credential comparison,
 **So that** a remote timing oracle cannot enumerate valid admin usernames or passwords.
@@ -212,6 +224,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-IAS-04: Remove session token from response body
 
+**Status: ✅ Implemented**
+
 **As a** security engineer,
 **I want** the session token to be transmitted only as an `HttpOnly` cookie,
 **So that** JavaScript running in the page cannot read or exfiltrate the token via XSS.
@@ -232,6 +246,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-IAS-05: CSRF protection on state-changing endpoints
+
+**Status: ✅ Implemented**
 
 **As a** security engineer,
 **I want** all state-changing API endpoints to require a CSRF token,
@@ -633,6 +649,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-CQM-02: Split admin_service.py into domain-specific modules
 
+**Status: ✅ Implemented**
+
 **As a** backend developer,
 **I want** `admin_service.py` (currently 2300+ lines) split into smaller focused modules,
 **So that** individual concerns are easier to find, test, and modify without merge conflicts.
@@ -651,6 +669,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-CQM-03: Decompose VotingPage into sub-components
+
+**Status: ✅ Implemented**
 
 **As a** frontend developer,
 **I want** `VotingPage.tsx` decomposed into smaller focused components,
@@ -705,6 +725,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-CQM-06: Add missing .motion-card--read-only CSS modifier
+
+**Status: ✅ Implemented**
 
 **As a** voter in the revote flow,
 **I want** previously-voted motion cards to have a visually distinct read-only appearance,
@@ -1699,6 +1721,8 @@ Medium-priority issues are grouped by theme. All are P1 or P2.
 
 ### RR3-37: Backend data quality fixes
 
+**Status: ✅ Implemented**
+
 **As a** backend developer,
 **I want** several small correctness issues fixed,
 **So that** edge cases in datetime handling, import validation, and multi-choice voting are handled explicitly.
@@ -1715,6 +1739,8 @@ Medium-priority issues are grouped by theme. All are P1 or P2.
 ---
 
 ### RR3-38: SRE observability improvements
+
+**Status: ✅ Implemented**
 
 **As a** system operator,
 **I want** several small observability gaps closed,
@@ -1736,6 +1762,8 @@ Medium-priority issues are grouped by theme. All are P1 or P2.
 
 ### RR3-39: Accessibility medium fixes — voter UI
 
+**Status: ✅ Implemented**
+
 **As a** voter using assistive technology,
 **I want** several small accessibility issues fixed in the voting UI,
 **So that** the experience is consistent and WCAG 2.1 AA compliant throughout.
@@ -1756,6 +1784,8 @@ Medium-priority issues are grouped by theme. All are P1 or P2.
 
 ### RR3-40: Frontend medium fixes — error handling, loading states, and modal UX
 
+**Status: ✅ Implemented**
+
 **As a** user of the admin portal and voter UI,
 **I want** several small UX and correctness issues fixed,
 **So that** errors are handled gracefully and the interface behaves predictably.
@@ -1774,6 +1804,8 @@ Medium-priority issues are grouped by theme. All are P1 or P2.
 ---
 
 ### RR3-41: QA medium coverage gaps
+
+**Status: ✅ Implemented**
 
 **As a** QA engineer,
 **I want** several missing test scenarios added,
@@ -1801,6 +1833,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 
 ### RR3-42: Backend observability and code hygiene cleanup
 
+**Status: ✅ Implemented**
+
 **As a** backend developer,
 **I want** a batch of small backend hygiene issues resolved,
 **So that** the codebase is easier to maintain and observe in production.
@@ -1824,6 +1858,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 
 ### RR3-43: Non-DB data backup strategy
 
+**Status: ✅ Implemented**
+
 **As a** system operator,
 **I want** a documented backup strategy for any non-database data (uploaded files),
 **So that** the disaster recovery plan covers all data stores.
@@ -1839,6 +1875,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 ---
 
 ### RR3-44: Accessibility low-priority polish
+
+**Status: ✅ Implemented**
 
 **As a** voter or admin using assistive technology,
 **I want** several small accessibility polish items addressed,
@@ -1858,6 +1896,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 
 ### RR3-45: Frontend low-priority code quality
 
+**Status: ✅ Implemented**
+
 **As a** frontend developer,
 **I want** a set of small code quality issues resolved,
 **So that** the codebase is clean and consistent.
@@ -1874,6 +1914,8 @@ Low-priority issues are grouped into thematic cleanup stories. All are P2.
 ---
 
 ### RR3-46: QA low-priority test additions
+
+**Status: ✅ Implemented**
 
 **As a** QA engineer,
 **I want** a small set of missing test scenarios added,

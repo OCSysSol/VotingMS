@@ -2,7 +2,7 @@ import enum
 import uuid
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -21,6 +21,7 @@ class Motion(Base):
             "display_order",
             name="uq_motions_general_meeting_display_order",
         ),
+        CheckConstraint("display_order > 0", name="ck_motions_display_order_positive"),
         # Partial unique index: motion_number uniqueness per meeting, NULLs excluded.
         # Multiple motions may have motion_number = NULL; only non-null values are unique.
         # Standard UniqueConstraint cannot express a WHERE clause, so Index is used instead.

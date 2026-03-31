@@ -562,9 +562,9 @@ async def import_lot_owners_from_csv(
         else:
             try:
                 unit_entitlement = int(unit_entitlement_raw)
-                if unit_entitlement < 0:
+                if unit_entitlement <= 0:
                     row_errors.append(
-                        f"Row {i}: unit_entitlement must be >= 0, got {unit_entitlement}"
+                        f"Row {i}: unit_entitlement must be > 0, got {unit_entitlement}"
                     )
             except ValueError:
                 row_errors.append(
@@ -681,9 +681,9 @@ async def import_lot_owners_from_excel(
         else:
             try:
                 unit_entitlement = int(unit_entitlement_raw)
-                if unit_entitlement < 0:
+                if unit_entitlement <= 0:
                     row_errors.append(
-                        f"Row {row_num}: unit_entitlement must be >= 0, got {unit_entitlement}"
+                        f"Row {row_num}: unit_entitlement must be > 0, got {unit_entitlement}"
                     )
             except ValueError:
                 row_errors.append(
@@ -1382,9 +1382,13 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             "entitlement_sum": sum(lot_entitlement.get(lid, 0) for lid in lot_owner_ids),
         }
 
-    # Build lot_owner_id -> voter_email and proxy_email from voted submissions
+    # Build lot_owner_id -> voter_email, proxy_email, and ballot_hash from voted submissions
     lot_owner_to_email: dict[uuid.UUID, str] = {sub.lot_owner_id: sub.voter_email for sub in voted_submissions}
     lot_owner_to_proxy_email: dict[uuid.UUID, str | None] = {sub.lot_owner_id: sub.proxy_email for sub in voted_submissions}
+    # US-VIL-03: expose ballot_hash for admin audit
+    lot_owner_to_ballot_hash: dict[uuid.UUID, str | None] = {
+        sub.lot_owner_id: sub.ballot_hash for sub in voted_submissions
+    }
 
     def _lots(lot_owner_ids: set[uuid.UUID], category: str) -> list[dict]:
         result_list: list[dict] = []
@@ -1396,15 +1400,18 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     absent_sub = absent_submissions.get(lid)
                     voter_email = absent_sub.voter_email if absent_sub else ""
                     proxy_email_val = None  # absent rows don't expose proxy separately in the list
+                    ballot_hash_val = None  # absent lots have no ballot hash
                 else:
                     # For voted categories, use the actual auth email from BallotSubmission
                     voter_email = lot_owner_to_email.get(lid, "")
                     proxy_email_val = lot_owner_to_proxy_email.get(lid)
+                    ballot_hash_val = lot_owner_to_ballot_hash.get(lid)
                 result_list.append({
                     "voter_email": voter_email,
                     "lot_number": info["lot_number"],
                     "entitlement": info["entitlement"],
                     "proxy_email": proxy_email_val,
+                    "ballot_hash": ballot_hash_val,
                 })
         return result_list
 

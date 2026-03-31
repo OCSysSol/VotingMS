@@ -4930,3 +4930,83 @@ class TestProxyVoterInArrearNotEligible:
             f"In-arrear lot on Special motion must record the actual choice 'yes', "
             f"got {vote.choice!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# US-VIL-03: Ballot hash computation and storage
+# ---------------------------------------------------------------------------
+
+
+class TestBallotHash:
+    """US-VIL-03: SHA-256 ballot hash is computed at submission time and stored."""
+
+    def test_compute_ballot_hash_is_deterministic(self):
+        """Same inputs produce the same hash regardless of vote order."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        agm_id = _uuid.UUID("00000000-0000-0000-0000-000000000001")
+        lot_id = _uuid.UUID("00000000-0000-0000-0000-000000000002")
+        votes = [("motion-a", "yes"), ("motion-b", "no")]
+        votes_reversed = [("motion-b", "no"), ("motion-a", "yes")]
+
+        h1 = _compute_ballot_hash(agm_id, lot_id, votes)
+        h2 = _compute_ballot_hash(agm_id, lot_id, votes_reversed)
+        assert h1 == h2, "Hash must be deterministic regardless of vote iteration order"
+
+    def test_compute_ballot_hash_is_64_hex_chars(self):
+        """SHA-256 hex digest is exactly 64 characters."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        h = _compute_ballot_hash(_uuid.uuid4(), _uuid.uuid4(), [("m1", "yes")])
+        assert len(h) == 64
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_compute_ballot_hash_differs_for_different_votes(self):
+        """Different vote choices produce different hashes."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        agm_id = _uuid.uuid4()
+        lot_id = _uuid.uuid4()
+        h_yes = _compute_ballot_hash(agm_id, lot_id, [("m1", "yes")])
+        h_no = _compute_ballot_hash(agm_id, lot_id, [("m1", "no")])
+        assert h_yes != h_no
+
+    async def test_ballot_hash_stored_on_submit(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Ballot hash is stored in BallotSubmission after a successful submit."""
+        import sqlalchemy as sa
+
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        votes_payload = [{"motion_id": str(m.id), "choice": "yes"} for m in motions]
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)], "votes": votes_payload},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Verify ballot_hash is stored
+        result = await db_session.execute(
+            sa.select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+                BallotSubmission.is_absent == False,  # noqa: E712
+            )
+        )
+        submission = result.scalar_one_or_none()
+        assert submission is not None
+        assert submission.ballot_hash is not None
+        assert len(submission.ballot_hash) == 64
+
+
