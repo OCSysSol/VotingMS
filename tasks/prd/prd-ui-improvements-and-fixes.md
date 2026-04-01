@@ -97,6 +97,8 @@ A set of UI improvements and correctness fixes for the voting application:
 
 ### US-GM01: Rename "AGM" → "General Meeting" in database and backend
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need to rename the AGM entity throughout the database and backend so the codebase reflects the canonical "General Meeting" terminology.
 
 **Acceptance Criteria:**
@@ -114,6 +116,8 @@ A set of UI improvements and correctness fixes for the voting application:
 ---
 
 ### US-GM02: Rename "AGM" → "General Meeting" in frontend
+
+**Status:** ✅ Implemented
 
 **Description:** As a developer, I need to update all frontend routes, state keys, component names, and display text so the UI consistently uses "General Meeting".
 
@@ -245,6 +249,8 @@ A set of UI improvements and correctness fixes for the voting application:
 ---
 
 ### US-TECH02: Fix browser caching of index.html
+
+**Status:** ✅ Implemented
 
 **Description:** As a user, I should not need to force-refresh my browser after a deployment to see the latest version of the app.
 

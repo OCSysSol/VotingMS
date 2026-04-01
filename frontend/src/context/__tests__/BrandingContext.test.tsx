@@ -74,7 +74,7 @@ describe("BrandingContext", () => {
     await waitFor(() =>
       expect(screen.getByTestId("is-loading").textContent).toBe("ready")
     );
-    expect(screen.getByTestId("app-name").textContent).toBe("AGM Voting");
+    expect(screen.getByTestId("app-name").textContent).toBe("General Meeting");
     expect(screen.getByTestId("primary-colour").textContent).toBe("#005f73");
   });
 
@@ -200,7 +200,7 @@ describe("BrandingContext", () => {
   // --- DEFAULT_CONFIG export ---
 
   it("DEFAULT_CONFIG has expected shape", () => {
-    expect(DEFAULT_CONFIG.app_name).toBe("AGM Voting");
+    expect(DEFAULT_CONFIG.app_name).toBe("General Meeting");
     expect(DEFAULT_CONFIG.logo_url).toBe("");
     expect(DEFAULT_CONFIG.favicon_url).toBeNull();
     expect(DEFAULT_CONFIG.primary_colour).toBe("#005f73");
@@ -258,7 +258,7 @@ describe("BrandingContext", () => {
   // --- configFixture is mutated correctly by MSW handler ---
 
   it("configFixture reflects fixture value from handlers", () => {
-    expect(configFixture.app_name).toBe("AGM Voting");
+    expect(configFixture.app_name).toBe("General Meeting");
   });
 
   // --- favicon_url takes priority over logo_url ---

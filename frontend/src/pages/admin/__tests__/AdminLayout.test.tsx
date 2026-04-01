@@ -15,7 +15,7 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderLayout(path = "/admin/buildings", logoUrl = "", appName = "AGM Voting") {
+function renderLayout(path = "/admin/buildings", logoUrl = "", appName = "General Meeting") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });

@@ -829,6 +829,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-TCG-05: Serialise E2E tests to prevent inter-test interference
 
+**Status:** ✅ Implemented
+
 **As a** QA engineer,
 **I want** the E2E test suite to run tests that share meeting/building state serially,
 **So that** parallel test workers do not corrupt shared state and cause flaky failures.

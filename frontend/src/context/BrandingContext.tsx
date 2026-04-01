@@ -4,7 +4,7 @@ import type { TenantConfig } from "../api/config";
 import { getPublicConfig } from "../api/config";
 
 export const DEFAULT_CONFIG: TenantConfig = {
-  app_name: "AGM Voting",
+  app_name: "General Meeting",
   logo_url: "",
   favicon_url: null,
   primary_colour: "#005f73",
