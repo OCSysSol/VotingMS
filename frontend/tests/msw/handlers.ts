@@ -20,7 +20,7 @@ import type { TenantConfig } from "../../src/api/config";
 const BASE = "http://localhost:8000";
 
 export let configFixture: TenantConfig = {
-  app_name: "AGM Voting",
+  app_name: "General Meeting",
   logo_url: "",
   favicon_url: null,
   primary_colour: "#005f73",
@@ -29,7 +29,7 @@ export let configFixture: TenantConfig = {
 
 export function resetConfigFixture() {
   configFixture = {
-    app_name: "AGM Voting",
+    app_name: "General Meeting",
     logo_url: "",
     favicon_url: null,
     primary_colour: "#005f73",

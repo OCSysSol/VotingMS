@@ -32,7 +32,7 @@ describe("VoterShell", () => {
 
   it("renders app-name text when logo_url is empty", () => {
     renderShell({ ...DEFAULT_CONFIG, logo_url: "" });
-    expect(screen.getByText("AGM Voting")).toBeInTheDocument();
+    expect(screen.getByText("General Meeting")).toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
 
@@ -40,8 +40,8 @@ describe("VoterShell", () => {
     renderShell({ ...DEFAULT_CONFIG, logo_url: "https://example.com/logo.png" });
     const img = screen.getByRole("img");
     expect(img).toHaveAttribute("src", "https://example.com/logo.png");
-    expect(img).toHaveAttribute("alt", "AGM Voting");
-    expect(screen.queryByText("AGM Voting")).not.toBeInTheDocument();
+    expect(img).toHaveAttribute("alt", "General Meeting");
+    expect(screen.queryByText("General Meeting")).not.toBeInTheDocument();
   });
 
   it("uses config app_name as alt text for logo img", () => {
@@ -58,7 +58,7 @@ describe("VoterShell", () => {
 
   it("renders with default config during loading state", () => {
     renderShell(DEFAULT_CONFIG, true);
-    expect(screen.getByText("AGM Voting")).toBeInTheDocument();
+    expect(screen.getByText("General Meeting")).toBeInTheDocument();
   });
 
   // --- US-ACC-07: Skip link ---
