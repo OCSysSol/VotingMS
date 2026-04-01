@@ -22,6 +22,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-MV01: Add `is_visible` field to Motion model
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need to store a visibility flag on each motion so the backend can filter what voters see.
 
 **Acceptance Criteria:**
@@ -36,6 +38,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-MV02: Backend endpoint to toggle motion visibility
+
+**Status:** ✅ Implemented
 
 **Description:** As a developer, I need an API endpoint so the admin UI can toggle a motion's visibility.
 
@@ -52,6 +56,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-MV03: Admin UI — visibility toggle on motion list
+
+**Status:** ✅ Implemented
 
 **Description:** As a building manager, I want to toggle the visibility of each motion from the meeting detail page so I can control which motions are live during the meeting.
 
@@ -70,6 +76,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-MV04: Voter voting page — only show visible motions and already-voted motions
 
+**Status:** ✅ Implemented
+
 **Description:** As a voter, I want to see only the motions that are currently active, plus any motions I have already voted on, so I am not confused by motions that haven't been opened yet.
 
 **Acceptance Criteria:**
@@ -86,6 +94,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-MV05: Allow re-entry voting for newly visible motions
+
+**Status:** ✅ Implemented
 
 **Description:** As a voter who has already submitted votes, I want to return to the voting page and vote on a newly revealed motion so I am not locked out just because I voted earlier.
 
@@ -104,6 +114,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-MV06: Voter summary/confirmation page — show all submitted motions
 
+**Status:** ✅ Implemented
+
 **Description:** As a voter, I want the confirmation page to show all motions I have voted on (even if some are now hidden) so I have a complete record of my participation.
 
 **Acceptance Criteria:**
@@ -117,6 +129,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-MV07: Admin report — mark hidden motions in tally
+
+**Status:** ✅ Implemented
 
 **Description:** As a building manager, I want the admin meeting report to show all motions (including hidden ones) clearly marked so I have a complete picture of all votes cast.
 
@@ -151,6 +165,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-AM01: Add a new motion to an existing meeting
 
+**Status:** ✅ Implemented
+
 **Description:** As a building manager, I want to add a new motion to a meeting that is in `pending` or `open` status so I can include late-arriving agenda items without recreating the meeting.
 
 **Acceptance Criteria:**
@@ -165,6 +181,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-AM02: Edit a hidden motion
+
+**Status:** ✅ Implemented
 
 **Description:** As a building manager, I want to edit the title, description, and motion type of a hidden motion so I can correct mistakes before revealing it to voters.
 
@@ -185,6 +203,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-AM03: Delete a hidden motion
 
+**Status:** ✅ Implemented
+
 **Description:** As a building manager, I want to delete a hidden motion that was added by mistake so I can keep the motion list clean.
 
 **Acceptance Criteria:**
@@ -200,6 +220,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 
 ### US-AM04: Backend endpoints for add, edit, and delete motions
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need backend endpoints so the admin UI can add, edit, and delete motions on an existing meeting.
 
 **Acceptance Criteria:**
@@ -213,6 +235,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-AM05: Guard rules — block edit/delete on visible or closed motions; block add on closed meetings
+
+**Status:** ✅ Implemented
 
 **Description:** As a developer, I need the backend to enforce that admins cannot edit or delete a motion once it is visible or the meeting is closed, and cannot add motions to a closed meeting.
 
@@ -228,6 +252,8 @@ Admins running a General Meeting want to control which motions are visible to vo
 ---
 
 ### US-AM06: Edit/Delete button visual saturation on motion rows
+
+**Status:** ✅ Implemented
 
 **Description:** As a building manager, I want the Edit and Delete buttons on motion rows to be visually distinct when they are enabled so I can immediately tell which motions I can act on.
 

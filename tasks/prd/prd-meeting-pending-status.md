@@ -20,6 +20,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 
 ### US-PS01: Add `pending` to the meeting status enum (DB + backend)
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need a `pending` value in the `GeneralMeetingStatus` enum and the corresponding DB migration so the new status can be stored and queried.
 
 **Acceptance Criteria:**
@@ -33,6 +35,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 
 ### US-PS02: Auto-open meetings on cold start
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need the Lambda cold start check to open meetings whose `meeting_at` has been reached so voters can enter at the right time.
 
 **Acceptance Criteria:**
@@ -45,6 +49,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 
 ### US-PS03: API reflects effective status for pending meetings
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need all API responses that return meeting status to reflect the effective status (`pending` if `meeting_at > now()`) so the frontend always shows the correct state.
 
 **Acceptance Criteria:**
@@ -56,6 +62,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 ---
 
 ### US-PS04: Admin manual start
+
+**Status:** ✅ Implemented
 
 **Description:** As a building manager, I want to manually start a pending meeting from the admin detail page so I can open voting even if the scheduled start time hasn't arrived.
 
@@ -74,6 +82,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 
 ### US-PS05: Admin manual close (update close time)
 
+**Status:** ✅ Implemented
+
 **Description:** As a building manager, I want manually closing a meeting to record the actual close time so the data accurately reflects when voting ended.
 
 **Acceptance Criteria:**
@@ -85,6 +95,8 @@ General Meetings that have not yet reached their start time (`meeting_at`) are c
 ---
 
 ### US-PS06: Voter-facing UI for pending meetings
+
+**Status:** ✅ Implemented
 
 **Description:** As a voter, I want to see that a meeting is not yet open when I visit the building list so I know when to come back.
 

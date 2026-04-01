@@ -201,6 +201,8 @@ A set of UI improvements and correctness fixes for the voting application:
 
 ### US-DM01: Delete a closed or pending meeting
 
+**Status:** ✅ Implemented
+
 **Description:** As a building manager, I want to delete a meeting that is in a closed or pending state so I can remove test meetings or incorrectly created meetings without leaving clutter.
 
 **Acceptance Criteria:**
@@ -219,6 +221,8 @@ A set of UI improvements and correctness fixes for the voting application:
 
 ### US-TECH01: Vercel Analytics and Speed Insights
 
+**Status:** ✅ Implemented
+
 **Description:** As a product owner, I want Vercel Analytics and Speed Insights instrumented in the frontend so I can monitor real-user performance and usage patterns.
 
 **Acceptance Criteria:**
@@ -232,6 +236,8 @@ A set of UI improvements and correctness fixes for the voting application:
 ---
 
 ### US-BUG-AS01: Fix already-submitted state lost on return from confirmation page
+
+**Status:** ✅ Implemented
 
 **Description:** As a voter who has submitted a ballot and clicks "View my votes" to return to the voting page, I should see my submitted lots correctly marked as "Already submitted" with disabled checkboxes and read-only motions — not an editable form that makes it appear I have not voted.
 
@@ -263,6 +269,8 @@ A set of UI improvements and correctness fixes for the voting application:
 ---
 
 ### US-FIX-BB01: Fix blank page when navigating back from VotingPage
+
+**Status:** ✅ Implemented
 
 **Description:** As a voter, I should never see a blank page when I click the "Back" button on the voting page or use the browser's native back button.
 

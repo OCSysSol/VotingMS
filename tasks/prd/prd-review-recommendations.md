@@ -32,6 +32,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-02: Prevent cascade-delete of votes via ballot submission deletion
 
+**Status:** ✅ Implemented
+
 **As a** meeting auditor,
 **I want** ballot submissions and votes to be protected from inadvertent deletion,
 **So that** a legal challenge cannot succeed by pointing to missing audit records.
@@ -71,7 +73,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-04: Block vote retraction after submission
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** meeting organiser,
 **I want** the system to enforce that submitted votes can never be changed or deleted by any code path,
@@ -89,29 +91,9 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ---
 
-### US-VIL-05: Special resolution threshold display and audit
-
-**As a** meeting organiser,
-**I want** the system to flag motions typed as "Special Resolution" with their statutory threshold (75% of eligible votes),
-**So that** the results report makes it clear whether the threshold was met and the outcome is audit-ready.
-
-**Acceptance criteria:**
-- [ ] For motions with `motion_type = "special"`, the in-app results report shows a "Special Resolution" label and the statutory threshold: "Requires 75% of eligible weighted votes to pass"
-- [ ] The report shows whether the threshold was met: pass (Yes weighted entitlement >= 75% of total eligible entitlement) or fail
-- [ ] The emailed HTML report includes the same threshold indicator
-- [ ] `GET /api/admin/general-meetings/{id}` response includes a `threshold_met: bool | null` field per motion (null for general motions, true/false for special resolutions)
-- [ ] The 75% threshold is a named constant in the backend, not a magic number
-- [ ] Verify in browser using dev-browser skill
-
-**Technical notes:** `backend/app/services/admin_service.py` → `get_general_meeting_detail()` and email report generation. `frontend/src/components/admin/AGMReportView.tsx`. No schema change required.
-
-**Priority:** P1 | **Effort:** M
-
----
-
 ### US-VIL-06: Proxy authorisation audit trail
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** meeting auditor,
 **I want** each proxy vote to carry a record of the proxy authorisation,
@@ -131,7 +113,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-07: Data retention policy — meeting data lifecycle
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** system operator,
 **I want** a documented and enforced data retention policy for AGM records,
@@ -150,7 +132,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-08: Timezone-consistent meeting timestamps in audit log
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** meeting auditor,
 **I want** all timestamps in reports and audit records to include the UTC offset,
@@ -172,6 +154,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-IAS-01: Timing-safe OTP comparison
 
+**Status:** ✅ Implemented
+
 **As a** security engineer,
 **I want** the OTP verification step to use a timing-safe string comparison,
 **So that** a remote timing oracle cannot be used to enumerate valid OTP values.
@@ -189,7 +173,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-IAS-02: Timing-safe admin login comparison
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** security engineer,
 **I want** the admin login endpoint to use a timing-safe credential comparison,
@@ -206,27 +190,9 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ---
 
-### US-IAS-03: Draft save/get ownership check
-
-**As a** security engineer,
-**I want** the draft ballot save and retrieve endpoints to verify session ownership,
-**So that** a voter with a valid session cannot read or overwrite another voter's draft.
-
-**Acceptance criteria:**
-- [ ] `PUT /api/general-meeting/{id}/draft` verifies that the authenticated session's `voter_email` and `lot_owner_id` match the lot(s) in the request body; returns 403 if not
-- [ ] `GET /api/general-meeting/{id}/draft` (if it exists and returns draft votes) verifies session ownership before returning any data
-- [ ] The session token is validated before any draft read/write occurs (no unauthenticated draft access)
-- [ ] An integration test covers the 403 case: session for voter A cannot read/write draft for voter B
-
-**Technical notes:** `backend/app/routers/voting.py` — draft endpoints. `backend/app/services/auth_service.py` — session validation.
-
-**Priority:** P0 | **Effort:** S
-
----
-
 ### US-IAS-04: Remove session token from response body
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** security engineer,
 **I want** the session token to be transmitted only as an `HttpOnly` cookie,
@@ -249,7 +215,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-IAS-05: CSRF protection on state-changing endpoints
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** security engineer,
 **I want** all state-changing API endpoints to require a CSRF token,
@@ -410,6 +376,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-OPS-08: Concurrent vote submission race condition guard
 
+**Status:** ✅ Implemented
+
 **As a** voter with multiple browser tabs open,
 **I want** a second simultaneous ballot submission to be safely rejected,
 **So that** duplicate submissions from a race condition do not produce inconsistent DB state.
@@ -450,6 +418,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-ACC-02: Focus trap in modal dialogs
+
+**Status:** ✅ Implemented
 
 **As a** voter using keyboard navigation,
 **I want** keyboard focus to be trapped inside modal dialogs (SubmitDialog, MixedSelectionWarningDialog, DeleteMotionDialog),
@@ -533,6 +503,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-ACC-06: Admin navigation drawer Escape key dismiss
 
+**Status:** ✅ Implemented
+
 **As an** admin using keyboard navigation,
 **I want** to press Escape to close the admin sidebar drawer on mobile,
 **So that** I can dismiss the overlay without using a mouse.
@@ -595,6 +567,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-PER-01: Eliminate N+1 queries in list_lot_owners
 
+**Status:** ✅ Implemented
+
 **As a** system operator,
 **I want** the lot owner list endpoint to use efficient bulk queries,
 **So that** a building with 200+ lot owners does not cause 400+ individual DB round trips per request.
@@ -612,6 +586,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-PER-02: Database connection pool configuration
+
+**Status:** ✅ Implemented
 
 **As a** system operator,
 **I want** the database connection pool to be explicitly configured for the Lambda environment,
@@ -653,7 +629,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-CQM-02: Split admin_service.py into domain-specific modules
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** backend developer,
 **I want** `admin_service.py` (currently 2300+ lines) split into smaller focused modules,
@@ -674,7 +650,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-CQM-03: Decompose VotingPage into sub-components
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** frontend developer,
 **I want** `VotingPage.tsx` decomposed into smaller focused components,
@@ -734,7 +710,7 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-CQM-06: Add missing .motion-card--read-only CSS modifier
 
-**Status: ✅ Implemented**
+**Status:** ✅ Implemented
 
 **As a** voter in the revote flow,
 **I want** previously-voted motion cards to have a visually distinct read-only appearance,
@@ -756,6 +732,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-TCG-01: Motion visibility toggle test coverage
 
+**Status:** ✅ Implemented
+
 **As a** QA engineer,
 **I want** comprehensive unit and integration tests for the motion visibility toggle,
 **So that** regressions in visibility state transitions are caught automatically.
@@ -773,6 +751,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-TCG-02: Concurrent ballot submission integration test
+
+**Status:** ✅ Implemented
 
 **As a** QA engineer,
 **I want** an integration test that simulates two simultaneous ballot submissions from the same voter,
@@ -792,6 +772,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-TCG-03: Email failure during AGM close — integration test
 
+**Status:** ✅ Implemented
+
 **As a** QA engineer,
 **I want** an integration test that verifies correct behaviour when the email service fails during meeting close,
 **So that** the admin error banner and retry mechanism work as designed.
@@ -809,6 +791,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-TCG-04: E2E test — closed meeting auth flow
+
+**Status:** ✅ Implemented
 
 **As a** QA engineer,
 **I want** an E2E test that covers the voter auth flow against a closed meeting,
@@ -848,6 +832,8 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 ---
 
 ### US-TCG-06: QA gap review — missing test scenarios list
+
+**Status:** ✅ Implemented
 
 **As a** QA engineer,
 **I want** a living document that tracks known test gaps,

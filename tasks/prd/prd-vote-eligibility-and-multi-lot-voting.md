@@ -29,6 +29,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V01: Add `motion_type` field to motions
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need motions to carry a type (General or Special) so the system can enforce eligibility rules.
 
 **Acceptance Criteria:**
@@ -44,6 +46,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V02: Add `financial_position` field to lot owners
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need lot owners to carry a financial position so the system can restrict in-arrear lots from voting on General Motions.
 
 **Acceptance Criteria:**
@@ -57,6 +61,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 ---
 
 ### US-V03: Refactor lot owner emails to a separate `LotOwnerEmail` table
+
+**Status:** ✅ Implemented
 
 **Description:** As a developer, I need to support multiple email addresses per lot so that any authorised contact can vote for that lot.
 
@@ -74,6 +80,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V04: Update lot owner import to support multiple emails and empty emails
 
+**Status:** ✅ Implemented
+
 **Description:** As a meeting host, I want the lot owner import to accept multiple email rows for the same lot and allow rows with no email, so I can import exactly what the strata roll contains.
 
 **Acceptance Criteria:**
@@ -90,6 +98,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V05: Email-only authentication returning a list of lots
 
+**Status:** ✅ Implemented
+
 **Description:** As a lot owner, I want to enter only my email address to authenticate, so I don't need to know my lot number.
 
 **Acceptance Criteria:**
@@ -105,6 +115,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 ---
 
 ### US-V06: Lot selection UI before voting
+
+**Status:** ✅ Implemented
 
 **Description:** As a lot owner, I want to see a list of lots associated with my email and choose which ones to cast votes for, so I can vote for multiple lots at once or split them across sessions.
 
@@ -127,6 +139,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V07: Per-lot ballot submission
 
+**Status:** ✅ Implemented
+
 **Description:** As a developer, I need ballot submissions to be keyed per lot (not per email) so that each lot votes exactly once regardless of which email authenticated.
 
 **Acceptance Criteria:**
@@ -144,6 +158,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 ---
 
 ### US-V08: In-arrear lot voting restrictions
+
+**Status:** ✅ Implemented
 
 **Description:** As a lot owner with in-arrear lots, the system records `not_eligible` for General Motions at the **backend per-lot** level. The frontend does not block or disable General Motion buttons — a voter with mixed lots (some financial, some in arrears) can vote on General Motions for their financial lots without restriction.
 
@@ -170,6 +186,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V09: Partial lot submission and resume
 
+**Status:** ✅ Implemented
+
 **Description:** As a lot owner with multiple lots, I want to submit a ballot for some of my lots now and return later to vote for the rest, so I can spread the process across time if needed.
 
 **Acceptance Criteria:**
@@ -186,6 +204,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V10: Show financial position on admin lot owner detail page
 
+**Status:** ✅ Implemented
+
 **Description:** As a meeting host, I want to see each lot's financial position in the admin portal so I can verify eligibility before an AGM.
 
 **Acceptance Criteria:**
@@ -200,6 +220,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 
 ### US-V12: Show motion type indicator on admin results page
 
+**Status:** ✅ Implemented
+
 **Description:** As a meeting host, I want to see a "General" or "Special" badge on each motion in the admin results/report view so I can easily distinguish motion types when reviewing tallies — consistent with the voter-facing voting page.
 
 **Acceptance Criteria:**
@@ -211,6 +233,8 @@ This PRD redesigns authentication to be email-only, moves to per-lot ballot subm
 ---
 
 ### US-V11: Show emails list on admin lot owner detail page
+
+**Status:** ✅ Implemented
 
 **Description:** As a meeting host, I want to see all email addresses associated with each lot in the admin portal so I can verify and manage contact details.
 

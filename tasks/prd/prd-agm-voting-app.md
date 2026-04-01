@@ -600,7 +600,7 @@ A web application for body corporates to run voting during Annual General Meetin
 
 ### US-006: Sync lot owner data from PropertyIQ
 
-**Status:** 🔄 Partial — PropertyIQ API credentials pending; sync endpoint not yet implemented
+**Status:** 🔄 Partial — PropertyIQ API credentials pending
 
 **Description:** As a meeting host, I want to sync lot owner data from PropertyIQ so I don't have to manually export/import CSVs.
 
