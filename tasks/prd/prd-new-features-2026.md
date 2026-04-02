@@ -146,7 +146,7 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-MC-SPLIT-01: Voter sees per-option For/Against/Abstain on multi-choice motions
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As a lot owner, I want each option in a multi-choice motion to have its own For / Against / Abstain buttons so that I can express support, opposition, or neutrality for each option individually, consistent with how I vote on other motion types.
 
