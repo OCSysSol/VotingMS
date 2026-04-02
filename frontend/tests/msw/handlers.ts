@@ -917,6 +917,8 @@ export const myBallotFixture = {
       lot_owner_id: "lo-e2e",
       lot_number: "E2E-1",
       financial_position: "normal",
+      submitter_email: "owner@example.com",
+      proxy_email: null,
       votes: [
         {
           motion_id: MOTION_ID_1,

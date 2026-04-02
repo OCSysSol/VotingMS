@@ -654,6 +654,8 @@ async def get_my_ballot(
     )
     all_subs = list(all_subs_result.scalars().all())
     submitted_lot_ids = {s.lot_owner_id for s in all_subs}
+    # Map lot_owner_id -> BallotSubmission for submitter/proxy info
+    submission_by_lot: dict[uuid.UUID, BallotSubmission] = {s.lot_owner_id: s for s in all_subs}
     remaining_lot_owner_ids = [lid for lid in all_lot_owner_ids if lid not in submitted_lot_ids]
 
     # If specific lot_owner_ids requested, filter to those; else show all submitted
@@ -688,12 +690,13 @@ async def get_my_ballot(
     # is_visible.  The confirmation receipt must show all motions the voter actually
     # voted on, regardless of whether an admin later hides them (RR2-08 / US-TCG-06).
     # Using the Vote records as the driving set preserves the legal audit trail.
+    # NOTE: We do NOT filter by voter_email here — a co-owner (different email, same lot)
+    # must be able to see the ballot that was submitted by the other owner (US-MOV-01).
     votes_result = await db.execute(
         select(Vote, Motion)
         .join(Motion, Vote.motion_id == Motion.id)
         .where(
             Vote.general_meeting_id == general_meeting_id,
-            Vote.voter_email == voter_email,
             Vote.lot_owner_id.in_(target_lot_ids),
             Vote.status == VoteStatus.submitted,
         )
@@ -799,11 +802,14 @@ async def get_my_ballot(
                     is_multi_choice=motion.is_multi_choice,
                 ))
 
+        sub = submission_by_lot.get(lot_owner_id)
         submitted_lots.append(LotBallotSummary(
             lot_owner_id=lot_owner_id,
             lot_number=lo.lot_number,
             financial_position=fp_str,
             votes=lot_votes,
+            submitter_email=sub.voter_email if sub is not None else "",
+            proxy_email=sub.proxy_email if sub is not None else None,
         ))
 
     # Sort by lot_number

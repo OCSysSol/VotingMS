@@ -3195,6 +3195,8 @@ class TestMyBallot:
         assert data["building_name"] == building.name
         assert len(data["submitted_lots"]) == 1
         assert len(data["submitted_lots"][0]["votes"]) == 2
+        assert data["submitted_lots"][0]["submitter_email"] == voter_email
+        assert data["submitted_lots"][0]["proxy_email"] is None
 
     async def test_my_ballot_has_remaining_lot_owner_ids(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -3255,6 +3257,164 @@ class TestMyBallot:
         agm = building_with_agm["agm"]
         response = await client.get(f"/api/general-meeting/{agm.id}/my-ballot")
         assert response.status_code == 401
+
+    # --- US-MOV-01: cross-owner ballot visibility ---
+
+    async def test_coowner_sees_ballot_submitted_by_other_email(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Voter B (co-owner, different email, same lot) sees ballot submitted by Voter A.
+
+        Both voter A and voter B have LotOwnerEmail entries for the same lot.
+        Voter A submits the ballot. Voter B authenticates and calls get_my_ballot —
+        must return the ballot with submitter_email = voter_a@example.com.
+        """
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_a_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        # Add a second email for the same lot (Voter B)
+        voter_b_email = "voterb@coowner.com"
+        lo_email_b = LotOwnerEmail(lot_owner_id=lo.id, email=voter_b_email)
+        db_session.add(lo_email_b)
+        await db_session.flush()
+
+        # Voter A submits ballot
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_a_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_a_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        # Voter B authenticates and calls get_my_ballot
+        token = await create_session(db_session, voter_b_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["submitted_lots"]) == 1
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == voter_a_email
+        assert lot["proxy_email"] is None
+        assert len(lot["votes"]) == 2
+
+    async def test_submitter_email_and_proxy_email_in_response(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """submitter_email and proxy_email are present in get_my_ballot response."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == voter_email
+        assert lot["proxy_email"] is None
+
+    async def test_proxy_ballot_shows_proxy_email_in_submitter_info(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When a proxy submits, proxy_email is set in BallotSubmission and returned."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        proxy_email = "proxy@delegate.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=proxy_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        # proxy_email set because proxy submitted
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=proxy_email,
+            proxy_email=proxy_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        # Direct lot owner views ballot after proxy submitted
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == proxy_email
+        assert lot["proxy_email"] == proxy_email
+
+    async def test_voter_with_no_associated_lots_gets_404(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A voter with no lots associated in the building gets 404 (no submitted ballot)."""
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        # A different email not registered to any lot in this building
+        unknown_email = "nobody@elsewhere.com"
+        token = await create_session(db_session, unknown_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------

@@ -55,7 +55,8 @@ describe("VoteRoutes", () => {
   it("renders ConfirmationPage at /vote/:meetingId/confirmation", async () => {
     renderRoutes(`/vote/${AGM_ID}/confirmation`);
     await waitFor(() => {
-      expect(screen.getByText(/owner@example.com/)).toBeInTheDocument();
+      // voter_email and submitter_email may both show owner@example.com — use getAllByText
+      expect(screen.getAllByText(/owner@example.com/).length).toBeGreaterThanOrEqual(1);
     });
   });
 });
