@@ -75,6 +75,21 @@ export function ConfirmationPage() {
   const sortedVotes = [...allVotes].sort((a, b) => a.display_order - b.display_order);
   const isMultiLot = data.submitted_lots.length > 1;
 
+  function renderSubmitterInfo(lot: { submitter_email: string; proxy_email?: string | null }) {
+    if (lot.proxy_email) {
+      return (
+        <p className="vote-meta__submitter">
+          Submitted via proxy by {lot.proxy_email}
+        </p>
+      );
+    }
+    return (
+      <p className="vote-meta__submitter">
+        This ballot was submitted by {lot.submitter_email}
+      </p>
+    );
+  }
+
   return (
     <main className="voter-content">
       <div className="card">
@@ -108,6 +123,7 @@ export function ConfirmationPage() {
               ? data.submitted_lots.map((lot) => (
                   <li key={lot.lot_owner_id} style={{ marginBottom: "12px" }}>
                     <p style={{ fontWeight: 600, marginBottom: "4px" }}>Lot {lot.lot_number}</p>
+                    {renderSubmitterInfo(lot)}
                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                       {[...lot.votes].sort((a, b) => a.display_order - b.display_order).map((v) => (
                         <li className="vote-item" key={v.motion_id}>
@@ -120,14 +136,19 @@ export function ConfirmationPage() {
                     </ul>
                   </li>
                 ))
-              : sortedVotes.map((v) => (
-                  <li className="vote-item" key={v.motion_id}>
-                    <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
-                    <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
-                      {renderChoiceLabel(v)}
-                    </span>
-                  </li>
-                ))}
+              : (
+                <>
+                  {data.submitted_lots.length === 1 && renderSubmitterInfo(data.submitted_lots[0])}
+                  {sortedVotes.map((v) => (
+                    <li className="vote-item" key={v.motion_id}>
+                      <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
+                      <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
+                        {renderChoiceLabel(v)}
+                      </span>
+                    </li>
+                  ))}
+                </>
+              )}
           </ul>
         </div>
 

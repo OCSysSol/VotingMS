@@ -87,6 +87,8 @@ class LotBallotSummary(BaseModel):
     lot_number: str
     financial_position: str
     votes: list[BallotVoteItem]
+    submitter_email: str
+    proxy_email: Optional[str] = None
 
 
 class MyBallotResponse(BaseModel):

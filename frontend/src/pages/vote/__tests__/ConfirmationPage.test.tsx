@@ -49,7 +49,9 @@ describe("ConfirmationPage", () => {
   it("renders voter email", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText(/owner@example.com/)).toBeInTheDocument();
+      // voter_email and submitter_email may both show owner@example.com — use getAllByText
+      const matches = screen.getAllByText(/owner@example.com/);
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
   });
 
@@ -75,6 +77,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo-e2e",
               lot_number: "E2E-1",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: "A1", choice: "yes", eligible: true },
                 { motion_id: "m2", motion_title: "Motion 2", display_order: 2, motion_number: "  BBB  ", choice: "no", eligible: true },
@@ -130,6 +134,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m2", motion_title: "Second Motion", display_order: 2, motion_number: null, choice: "no", eligible: true },
                 { motion_id: "m1", motion_title: "First Motion", display_order: 1, motion_number: null, choice: "yes", eligible: true },
@@ -160,6 +166,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion", display_order: 0, choice: "abstained", eligible: true },
               ],
@@ -198,6 +206,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion", display_order: 0, choice: "unknown_choice", eligible: true },
               ],
@@ -225,6 +235,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion 1", display_order: 0, choice: "yes", eligible: true },
               ],
@@ -233,6 +245,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo2",
               lot_number: "2B",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion 1", display_order: 0, choice: "no", eligible: true },
               ],
@@ -300,6 +314,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "yes", eligible: true },
               ],
@@ -329,6 +345,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "yes", eligible: true },
               ],
@@ -374,6 +392,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "in_arrear",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "General Motion", display_order: 0, choice: "not_eligible", eligible: false },
                 { motion_id: "m2", motion_title: "Special Motion", display_order: 1, choice: "yes", eligible: true },
@@ -383,6 +403,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo2",
               lot_number: "2B",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "General Motion", display_order: 0, choice: "yes", eligible: true },
               ],
@@ -411,6 +433,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Budget Motion", display_order: 1, motion_number: "A1", choice: "yes", eligible: true },
               ],
@@ -419,6 +443,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo2",
               lot_number: "2B",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Budget Motion", display_order: 1, motion_number: "A1", choice: "no", eligible: true },
               ],
@@ -448,6 +474,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 {
                   motion_id: "m1",
@@ -484,6 +512,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 {
                   motion_id: "m1",
@@ -520,6 +550,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "in_arrear",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 {
                   motion_id: "m1",
@@ -556,6 +588,8 @@ describe("ConfirmationPage", () => {
               lot_owner_id: "lo1",
               lot_number: "1A",
               financial_position: "normal",
+              submitter_email: "voter@test.com",
+              proxy_email: null,
               votes: [
                 { motion_id: "m1", motion_title: "Motion", display_order: 5, motion_number: "   ", choice: "yes", eligible: true },
               ],
@@ -568,6 +602,106 @@ describe("ConfirmationPage", () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("Motion 5. Motion")).toBeInTheDocument();
+    });
+  });
+
+  // --- US-MOV-01: submitter_email / proxy_email display ---
+
+  it("shows 'This ballot was submitted by' with submitter_email in single-lot ballot", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "coowner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              submitter_email: "votera@example.com",
+              proxy_email: null,
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("This ballot was submitted by votera@example.com")).toBeInTheDocument();
+    });
+  });
+
+  it("shows 'Submitted via proxy by' with proxy_email when proxy_email is set", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "lotowner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              submitter_email: "proxy@example.com",
+              proxy_email: "proxy@example.com",
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "yes", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Submitted via proxy by proxy@example.com")).toBeInTheDocument();
+    });
+  });
+
+  it("shows submitter_email in multi-lot ballot for each lot", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/my-ballot`, () =>
+        HttpResponse.json({
+          voter_email: "owner@example.com",
+          meeting_title: "2024 AGM",
+          building_name: "Sunset Towers",
+          submitted_lots: [
+            {
+              lot_owner_id: "lo1",
+              lot_number: "1A",
+              financial_position: "normal",
+              submitter_email: "votera@example.com",
+              proxy_email: null,
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "yes", eligible: true },
+              ],
+            },
+            {
+              lot_owner_id: "lo2",
+              lot_number: "2B",
+              financial_position: "normal",
+              submitter_email: "voterb@example.com",
+              proxy_email: null,
+              votes: [
+                { motion_id: "m1", motion_title: "Motion 1", display_order: 1, motion_number: null, choice: "no", eligible: true },
+              ],
+            },
+          ],
+          remaining_lot_owner_ids: [],
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("This ballot was submitted by votera@example.com")).toBeInTheDocument();
+      expect(screen.getByText("This ballot was submitted by voterb@example.com")).toBeInTheDocument();
     });
   });
 });

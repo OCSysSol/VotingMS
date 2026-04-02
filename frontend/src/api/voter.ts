@@ -118,6 +118,8 @@ export interface LotBallotSummary {
   lot_number: string;
   financial_position: string;
   votes: BallotVoteItem[];
+  submitter_email: string;
+  proxy_email?: string | null;
 }
 
 export interface MyBallotResponse {
