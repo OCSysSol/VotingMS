@@ -83,6 +83,8 @@ class BuildingImportResult(BaseModel):
 class LotOwnerOut(BaseModel):
     id: uuid.UUID
     lot_number: str
+    given_name: str | None = None
+    surname: str | None = None
     emails: list[str]
     unit_entitlement: int
     financial_position: str
@@ -93,6 +95,8 @@ class LotOwnerOut(BaseModel):
 
 class LotOwnerCreate(BaseModel):
     lot_number: str
+    given_name: str | None = None
+    surname: str | None = None
     unit_entitlement: int
     financial_position: str = "normal"
     emails: list[str] = []
@@ -120,6 +124,8 @@ class LotOwnerCreate(BaseModel):
 
 
 class LotOwnerUpdate(BaseModel):
+    given_name: str | None = None
+    surname: str | None = None
     unit_entitlement: int | None = None
     financial_position: str | None = None
 
@@ -139,8 +145,13 @@ class LotOwnerUpdate(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "LotOwnerUpdate":
-        if self.unit_entitlement is None and self.financial_position is None:
-            raise ValueError("At least one of unit_entitlement or financial_position must be provided")
+        if (
+            self.given_name is None
+            and self.surname is None
+            and self.unit_entitlement is None
+            and self.financial_position is None
+        ):
+            raise ValueError("At least one field must be provided")
         return self
 
 
@@ -157,6 +168,8 @@ class AddEmailRequest(BaseModel):
 
 class SetProxyRequest(BaseModel):
     proxy_email: str
+    given_name: str | None = None
+    surname: str | None = None
 
     @field_validator("proxy_email")
     @classmethod
@@ -443,6 +456,7 @@ class VoterEntry(BaseModel):
     entitlement: int
     proxy_email: str | None = None
     ballot_hash: str | None = None  # US-VIL-03: SHA-256 audit hash of submitted ballot
+    submitted_by_admin: bool = False
 
 
 class TallyCategory(BaseModel):
@@ -488,6 +502,7 @@ class MotionDetail(BaseModel):
     is_visible: bool = True
     option_limit: int | None = None
     options: list[MotionOptionOut] = []
+    voting_closed_at: datetime | None = None
     tally: MotionTally
     voter_lists: MotionVoterLists
 
@@ -499,6 +514,7 @@ class EmailDeliveryInfo(BaseModel):
 
 class GeneralMeetingDetail(BaseModel):
     id: uuid.UUID
+    building_id: uuid.UUID | None = None
     building_name: str
     title: str
     status: str
@@ -598,3 +614,23 @@ class MotionReorderOut(BaseModel):
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
+
+
+# ---------------------------------------------------------------------------
+# Admin vote entry schemas
+# ---------------------------------------------------------------------------
+
+
+class AdminVoteEntry(BaseModel):
+    lot_owner_id: uuid.UUID
+    votes: list[dict] = []  # [{motion_id: str, choice: str}]
+    multi_choice_votes: list[dict] = []  # [{motion_id: str, option_ids: [str]}]
+
+
+class AdminVoteEntryRequest(BaseModel):
+    entries: list[AdminVoteEntry]
+
+
+class AdminVoteEntryResult(BaseModel):
+    submitted_count: int
+    skipped_count: int

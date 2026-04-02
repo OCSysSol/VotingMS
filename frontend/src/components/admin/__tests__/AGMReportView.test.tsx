@@ -15,6 +15,7 @@ const motions: MotionDetail[] = [
     is_visible: true,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
     tally: {
       yes: { voter_count: 2, entitlement_sum: 200 },
       no: { voter_count: 1, entitlement_sum: 100 },
@@ -48,6 +49,7 @@ const motions: MotionDetail[] = [
     is_visible: true,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
     tally: {
       yes: { voter_count: 1, entitlement_sum: 50 },
       no: { voter_count: 0, entitlement_sum: 0 },
@@ -81,6 +83,7 @@ const mcMotionFixture: MotionDetail = {
   is_multi_choice: true,
   is_visible: true,
   option_limit: 2,
+  voting_closed_at: null,
   options: [
     { id: "opt-a", text: "Alice", display_order: 1 },
     { id: "opt-b", text: "Bob", display_order: 2 },
@@ -251,10 +254,10 @@ describe("AGMReportView", () => {
 
   // --- CSV export: Voter Email column ---
 
-  it("CSV header row contains 'Voter Email' as the 5th column", async () => {
+  it("CSV header row contains all expected columns including 'Submitted By'", async () => {
     const csv = await captureCSVFromExport(motions);
     const headerRow = csv.split("\n")[0];
-    expect(headerRow).toBe("Motion,Category,Lot Number,Entitlement (UOE),Voter Email");
+    expect(headerRow).toBe("Motion,Category,Lot Number,Entitlement (UOE),Voter Email,Submitted By");
   });
 
   it("CSV data row for direct-vote lot includes the voter email", async () => {

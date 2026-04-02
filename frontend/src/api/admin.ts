@@ -48,6 +48,7 @@ export interface MotionOut {
   is_visible: boolean;
   option_limit: number | null;
   options: MotionOptionOut[];
+  voting_closed_at?: string | null;
 }
 
 export interface GeneralMeetingOut {
@@ -76,6 +77,7 @@ export interface VoterEntry {
   lot_number?: string;
   entitlement: number;
   proxy_email?: string | null;
+  submitted_by_admin?: boolean;
 }
 
 export interface TallyCategory {
@@ -121,12 +123,14 @@ export interface MotionDetail {
   is_visible: boolean;
   option_limit: number | null;
   options: MotionOptionOut[];
+  voting_closed_at: string | null;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
 
 export interface GeneralMeetingDetail {
   id: string;
+  building_id?: string;
   building_name: string;
   title: string;
   status: string;
@@ -167,12 +171,16 @@ export interface EmailDeliveryInfo {
 
 export interface LotOwnerCreateRequest {
   lot_number: string;
+  given_name?: string | null;
+  surname?: string | null;
   emails: string[];
   unit_entitlement: number;
   financial_position?: string;
 }
 
 export interface LotOwnerUpdateRequest {
+  given_name?: string | null;
+  surname?: string | null;
   unit_entitlement?: number;
   financial_position?: string;
 }
@@ -202,11 +210,13 @@ export async function removeEmailFromLotOwner(
 
 export async function setLotOwnerProxy(
   lotOwnerId: string,
-  proxyEmail: string
+  proxyEmail: string,
+  givenName?: string | null,
+  surname?: string | null,
 ): Promise<LotOwner> {
   return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/proxy`, {
     method: "PUT",
-    body: JSON.stringify({ proxy_email: proxyEmail }),
+    body: JSON.stringify({ proxy_email: proxyEmail, given_name: givenName, surname }),
   });
 }
 
@@ -590,4 +600,53 @@ export async function deleteMotion(motionId: string): Promise<void> {
   return apiFetchVoid(`/api/admin/motions/${motionId}`, {
     method: "DELETE",
   });
+}
+
+export async function closeMotion(motionId: string): Promise<MotionDetail> {
+  return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/close`, {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin in-person vote entry (US-AVE-01/02/03)
+// ---------------------------------------------------------------------------
+
+export interface AdminVoteEntryItem {
+  motion_id: string;
+  choice: "yes" | "no" | "abstained";
+}
+
+export interface AdminMultiChoiceVoteItem {
+  motion_id: string;
+  option_ids: string[];
+}
+
+export interface AdminVoteEntryLot {
+  lot_owner_id: string;
+  votes: AdminVoteEntryItem[];
+  multi_choice_votes: AdminMultiChoiceVoteItem[];
+}
+
+export interface AdminVoteEntryRequest {
+  entries: AdminVoteEntryLot[];
+}
+
+export interface AdminVoteEntryResult {
+  submitted_count: number;
+  skipped_count: number;
+}
+
+export async function enterInPersonVotes(
+  meetingId: string,
+  request: AdminVoteEntryRequest
+): Promise<AdminVoteEntryResult> {
+  return apiFetch<AdminVoteEntryResult>(
+    `/api/admin/general-meetings/${meetingId}/enter-votes`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
 }

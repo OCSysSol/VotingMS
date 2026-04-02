@@ -37,6 +37,8 @@ from app.schemas.admin import (
     LotOwnerOut,
     LotOwnerUpdate,
     MotionAddRequest,
+    AdminVoteEntryRequest,
+    AdminVoteEntryResult,
     MotionDetail,
     MotionOut,
     MotionReorderOut,
@@ -422,7 +424,10 @@ async def set_lot_owner_proxy(
     db: AsyncSession = Depends(get_db),
 ) -> LotOwnerOut:
     """Set or replace the proxy nomination for a lot owner."""
-    owner = await admin_service.set_lot_owner_proxy(lot_owner_id, data.proxy_email, db)
+    owner = await admin_service.set_lot_owner_proxy(
+        lot_owner_id, data.proxy_email, db,
+        given_name=data.given_name, surname=data.surname,
+    )
     return LotOwnerOut(**owner)
 
 
@@ -442,6 +447,21 @@ async def remove_lot_owner_proxy(
 # ---------------------------------------------------------------------------
 # Motions
 # ---------------------------------------------------------------------------
+
+
+@router.post("/motions/{motion_id}/close", response_model=MotionDetail)
+async def close_motion_endpoint(
+    motion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> MotionDetail:
+    """Close voting for a single motion. Requires admin auth.
+
+    Returns 200 with updated motion detail on success.
+    Returns 404 if motion not found.
+    Returns 409 if motion is hidden, already closed, or meeting is not open.
+    """
+    result = await admin_service.close_motion(motion_id, db)
+    return MotionDetail(**result)
 
 
 @router.patch("/motions/{motion_id}/visibility", response_model=MotionDetail)
@@ -676,6 +696,27 @@ async def reset_general_meeting_ballots(
     """
     result = await admin_service.reset_general_meeting_ballots(general_meeting_id, db)
     return GeneralMeetingBallotResetOut(**result)
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/enter-votes",
+    response_model=AdminVoteEntryResult,
+    status_code=status.HTTP_200_OK,
+)
+async def enter_votes_for_meeting(
+    general_meeting_id: uuid.UUID,
+    data: AdminVoteEntryRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AdminVoteEntryResult:
+    """Enter in-person votes on behalf of lot owners (US-AVE-01/02/03).
+
+    Returns 200 with submitted_count and skipped_count.
+    Returns 404 if the meeting does not exist.
+    Returns 409 if the meeting is not open.
+    Returns 422 if unknown lot_owner_ids or invalid votes are provided.
+    """
+    result = await admin_service.enter_votes_for_meeting(general_meeting_id, data, db)
+    return AdminVoteEntryResult(**result)
 
 
 # ---------------------------------------------------------------------------

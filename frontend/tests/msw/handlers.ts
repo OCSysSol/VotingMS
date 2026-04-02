@@ -66,6 +66,8 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     id: "lo1",
     building_id: "b1",
     lot_number: "1A",
+    given_name: "Alice",
+    surname: "Smith",
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
     financial_position: "normal",
@@ -75,6 +77,8 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     id: "lo2",
     building_id: "b1",
     lot_number: "2B",
+    given_name: null,
+    surname: null,
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
     financial_position: "normal",
@@ -120,6 +124,7 @@ export const ADMIN_AGM_LIST = ADMIN_MEETING_LIST;
 
 export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   id: "agm1",
+  building_id: "b1",
   building_name: "Alpha Tower",
   title: "2024 AGM",
   status: "open",
@@ -140,6 +145,7 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
       is_visible: true,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 2, entitlement_sum: 200 },
         no: { voter_count: 1, entitlement_sum: 100 },
@@ -202,6 +208,7 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -232,6 +239,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: true,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -252,6 +260,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -272,6 +281,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -299,6 +309,7 @@ export const ADMIN_MEETING_DETAIL_ALL_HIDDEN: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -498,6 +509,8 @@ export const adminHandlers = [
       id: "lo-new",
       building_id: "b1",
       lot_number: body?.lot_number ?? "NEW",
+      given_name: null,
+      surname: null,
       emails: ["new@example.com"],
       unit_entitlement: 50,
       financial_position: "normal",
@@ -810,6 +823,28 @@ export const adminHandlers = [
     });
   }),
 
+  // Close motion voting
+  http.post(`${BASE}/api/admin/motions/:motionId/close`, ({ params }) => {
+    if (params.motionId === "motion-hidden-close") {
+      return HttpResponse.json({ detail: "Cannot close a hidden motion" }, { status: 409 });
+    }
+    if (params.motionId === "motion-already-closed") {
+      return HttpResponse.json({ detail: "Motion voting is already closed" }, { status: 409 });
+    }
+    if (params.motionId === "motion-close-not-open") {
+      return HttpResponse.json({ detail: "Cannot close motion on a meeting that is not open" }, { status: 409 });
+    }
+    if (params.motionId === "motion-notfound-close") {
+      return HttpResponse.json({ detail: "Motion not found" }, { status: 404 });
+    }
+    const motion = ADMIN_MEETING_DETAIL.motions[0];
+    return HttpResponse.json({
+      ...motion,
+      id: params.motionId as string,
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    });
+  }),
+
   // Delete motion
   http.delete(`${BASE}/api/admin/motions/:motionId`, ({ params }) => {
     if (params.motionId === "motion-visible-delete") {
@@ -819,6 +854,19 @@ export const adminHandlers = [
       return HttpResponse.json({ detail: "Server error" }, { status: 500 });
     }
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Admin vote entry
+  http.post(`${BASE}/api/admin/general-meetings/:meetingId/enter-votes`, async ({ params, request }) => {
+    if (params.meetingId === "agm-closed-enter") {
+      return HttpResponse.json({ detail: "Meeting is not open" }, { status: 409 });
+    }
+    if (params.meetingId === "agm-enter-fail") {
+      return HttpResponse.json({ detail: "Unknown lot_owner_ids: [\"unknown-lot\"]" }, { status: 422 });
+    }
+    const body = await request.json() as { entries?: Array<{ lot_owner_id: string }> };
+    const count = body?.entries?.length ?? 0;
+    return HttpResponse.json({ submitted_count: count, skipped_count: 0 });
   }),
 
   // Tenant config — admin endpoints
@@ -919,6 +967,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
   {
     id: MOTION_ID_2,
@@ -932,6 +981,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
 ];
 

@@ -93,7 +93,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 
 export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 }: AGMReportViewProps) {
   function handleExportCSV() {
-    const rows: string[] = ["Motion,Category,Lot Number,Entitlement (UOE),Voter Email"];
+    const rows: string[] = ["Motion,Category,Lot Number,Entitlement (UOE),Voter Email,Submitted By"];
     for (const motion of motions) {
       const motionLabel = `${motion.motion_number?.trim() || String(motion.display_order)}. ${motion.title.replace(/"/g, '""')}`;
       if (motion.is_multi_choice === true) {
@@ -104,7 +104,8 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
             const emailCell = v.proxy_email
               ? `${v.voter_email || ""} (proxy)`
               : (v.voter_email || "");
-            rows.push(`"${motionLabel}","Option: ${optTally.option_text.replace(/"/g, '""')}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}"`);
+            const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
+            rows.push(`"${motionLabel}","Option: ${optTally.option_text.replace(/"/g, '""')}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
         }
         // Abstained / absent / not_eligible rows
@@ -113,7 +114,8 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
             const emailCell = v.proxy_email
               ? `${v.voter_email || ""} (proxy)`
               : (v.voter_email || "");
-            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}"`);
+            const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
+            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
         }
       } else {
@@ -122,7 +124,8 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
             const emailCell = v.proxy_email
               ? `${v.voter_email || ""} (proxy)`
               : (v.voter_email || "");
-            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}"`);
+            const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
+            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
         }
       }
