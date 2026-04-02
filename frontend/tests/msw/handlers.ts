@@ -66,6 +66,8 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     id: "lo1",
     building_id: "b1",
     lot_number: "1A",
+    given_name: "Alice",
+    surname: "Smith",
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
     financial_position: "normal",
@@ -75,6 +77,8 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     id: "lo2",
     building_id: "b1",
     lot_number: "2B",
+    given_name: null,
+    surname: null,
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
     financial_position: "normal",
@@ -141,6 +145,7 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
       is_visible: true,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 2, entitlement_sum: 200 },
         no: { voter_count: 1, entitlement_sum: 100 },
@@ -203,6 +208,7 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -233,6 +239,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: true,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -253,6 +260,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -273,6 +281,7 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -300,6 +309,7 @@ export const ADMIN_MEETING_DETAIL_ALL_HIDDEN: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -453,6 +463,8 @@ export const adminHandlers = [
       id: "lo-new",
       building_id: "b1",
       lot_number: body?.lot_number ?? "NEW",
+      given_name: null,
+      surname: null,
       emails: ["new@example.com"],
       unit_entitlement: 50,
       financial_position: "normal",
@@ -765,6 +777,28 @@ export const adminHandlers = [
     });
   }),
 
+  // Close motion voting
+  http.post(`${BASE}/api/admin/motions/:motionId/close`, ({ params }) => {
+    if (params.motionId === "motion-hidden-close") {
+      return HttpResponse.json({ detail: "Cannot close a hidden motion" }, { status: 409 });
+    }
+    if (params.motionId === "motion-already-closed") {
+      return HttpResponse.json({ detail: "Motion voting is already closed" }, { status: 409 });
+    }
+    if (params.motionId === "motion-close-not-open") {
+      return HttpResponse.json({ detail: "Cannot close motion on a meeting that is not open" }, { status: 409 });
+    }
+    if (params.motionId === "motion-notfound-close") {
+      return HttpResponse.json({ detail: "Motion not found" }, { status: 404 });
+    }
+    const motion = ADMIN_MEETING_DETAIL.motions[0];
+    return HttpResponse.json({
+      ...motion,
+      id: params.motionId as string,
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    });
+  }),
+
   // Delete motion
   http.delete(`${BASE}/api/admin/motions/:motionId`, ({ params }) => {
     if (params.motionId === "motion-visible-delete") {
@@ -887,6 +921,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
   {
     id: MOTION_ID_2,
@@ -900,6 +935,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
 ];
 
@@ -914,11 +950,28 @@ export const mcMotionFixtureVoter = {
   is_visible: true,
   already_voted: false,
   submitted_choice: null,
+  submitted_option_choices: {} as Record<string, string>,
   option_limit: 2,
   options: [
     { id: "opt-alice", text: "Alice", display_order: 1 },
     { id: "opt-bob", text: "Bob", display_order: 2 },
     { id: "opt-carol", text: "Carol", display_order: 3 },
+  ],
+};
+
+export const mcBallotVoteFixture = {
+  motion_id: MOTION_ID_MC,
+  motion_title: "Board Election",
+  display_order: 3,
+  motion_number: null,
+  choice: "selected" as const,
+  eligible: true,
+  motion_type: "general" as const,
+  is_multi_choice: true,
+  selected_options: [{ id: "opt-alice", text: "Alice", display_order: 1 }],
+  option_choices: [
+    { option_id: "opt-alice", option_text: "Alice", choice: "for" },
+    { option_id: "opt-bob", option_text: "Bob", choice: "against" },
   ],
 };
 
@@ -931,6 +984,8 @@ export const myBallotFixture = {
       lot_owner_id: "lo-e2e",
       lot_number: "E2E-1",
       financial_position: "normal",
+      submitter_email: "owner@example.com",
+      proxy_email: null,
       votes: [
         {
           motion_id: MOTION_ID_1,
@@ -939,6 +994,10 @@ export const myBallotFixture = {
           motion_number: null,
           choice: "yes" as const,
           eligible: true,
+          motion_type: "general" as const,
+          is_multi_choice: false,
+          selected_options: [],
+          option_choices: [],
         },
         {
           motion_id: MOTION_ID_2,
@@ -947,6 +1006,10 @@ export const myBallotFixture = {
           motion_number: null,
           choice: "no" as const,
           eligible: true,
+          motion_type: "general" as const,
+          is_multi_choice: false,
+          selected_options: [],
+          option_choices: [],
         },
       ],
     },

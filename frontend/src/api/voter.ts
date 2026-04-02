@@ -70,9 +70,11 @@ export interface MotionOut {
   is_visible: boolean;
   already_voted: boolean;
   submitted_choice: VoteChoice | null;
-  submitted_option_ids?: string[];
+  /** option_id → choice string ("for" | "against" | "abstained") */
+  submitted_option_choices?: Record<string, string>;
   option_limit: number | null;
   options: MotionOptionOut[];
+  voting_closed_at?: string | null;
 }
 
 export interface DraftSaveRequest {
@@ -101,6 +103,12 @@ export interface SubmitResponse {
   lots: LotBallotResult[];
 }
 
+export interface BallotOptionChoiceItem {
+  option_id: string;
+  option_text: string;
+  choice: string;  // "for" | "against" | "abstained"
+}
+
 export interface BallotVoteItem {
   motion_id: string;
   motion_title: string;
@@ -111,6 +119,7 @@ export interface BallotVoteItem {
   motion_type: MotionType;
   is_multi_choice?: boolean;
   selected_options: MotionOptionOut[];
+  option_choices: BallotOptionChoiceItem[];
 }
 
 export interface LotBallotSummary {
@@ -118,6 +127,8 @@ export interface LotBallotSummary {
   lot_number: string;
   financial_position: string;
   votes: BallotVoteItem[];
+  submitter_email: string;
+  proxy_email?: string | null;
 }
 
 export interface MyBallotResponse {
@@ -128,9 +139,14 @@ export interface MyBallotResponse {
   remaining_lot_owner_ids: string[];
 }
 
+export interface MultiChoiceOptionChoice {
+  option_id: string;
+  choice: "for" | "against" | "abstained";
+}
+
 export interface MultiChoiceVoteItem {
   motion_id: string;
-  option_ids: string[];
+  option_choices: MultiChoiceOptionChoice[];
 }
 
 export interface SubmitBallotRequest {

@@ -8,6 +8,8 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ## Goals
 
+- Allow all lot co-owners to see the submitted ballot on the confirmation page, regardless of which email submitted it.
+- Expose submitter and proxy identity on the ballot receipt for audit clarity.
 - Allow admins to enter votes on behalf of lot owners who voted in person (paper or vocal), without overriding app-submitted ballots
 - Store given name and surname for lot owners and proxy contacts for admin identification in reports
 - Present multi-choice motion options to voters as individual For/Against/Abstain decisions, matching how voters experience other resolution types
@@ -20,11 +22,27 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ## User Stories
 
+### US-MOV-01: All Lot Co-Owners See Submitted Ballot ✅ Implemented
+
+**Description:** As a lot co-owner with a different email than the person who submitted the ballot, I want to see the submitted ballot on the confirmation page so that I can verify what was voted on behalf of my lot.
+
+**Acceptance Criteria:**
+
+- [x] `GET /api/general-meeting/{id}/my-ballot` resolves all `lot_owner_id` values for the authenticated voter's email (direct + proxy) in this building
+- [x] Ballot submissions are returned for any of those lots, regardless of which email submitted them
+- [x] `LotBallotSummary` includes `submitter_email` (the email that submitted) and `proxy_email` (set if proxy submitted)
+- [x] Vote rows are fetched by `lot_owner_id` only — not filtered by `voter_email` — so co-owner B sees votes cast by co-owner A
+- [x] Confirmation page renders "This ballot was submitted by {submitter_email}" for each lot
+- [x] When `proxy_email` is set, renders "Submitted via proxy by {proxy_email}" instead
+- [x] Voter with no associated lots gets 404
+- [x] All tests pass at 100% coverage
+- [x] Typecheck/lint passes
+
 ---
 
 ### US-AVE-01: Admin selects lots for in-person vote entry
 
-**Status:** ✅ Implemented
+**Status:** Pending
 
 **Description:** As an admin, I want to select which lot owner records I need to enter in-person votes for, so that I only see the relevant rows in the entry grid and avoid a cluttered view with all building lots.
 
@@ -45,7 +63,7 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-AVE-02: Admin enters votes in grid UI
 
-**Status:** ✅ Implemented
+**Status:** Pending
 
 **Description:** As an admin, I want a dense grid showing motions as rows and selected lots as columns so I can quickly enter votes for multiple lots across all motions in one view.
 
@@ -72,7 +90,7 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-AVE-03: Admin-submitted ballot is marked distinctly in results
 
-**Status:** ✅ Implemented
+**Status:** Pending
 
 **Description:** As an admin reviewing results, I want to see which ballots were entered by an admin on behalf of a voter (rather than self-submitted via the app), so that I can distinguish in-person and app votes in the report.
 
@@ -89,47 +107,47 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-LON-01: Lot owner given name and surname
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As an admin, I want to store a given name and surname for each lot owner so that admin views and reports can identify owners by name rather than lot number alone.
 
 **Acceptance Criteria:**
 
-- [ ] `LotOwner` gains two optional fields: `given_name` (VARCHAR, nullable) and `surname` (VARCHAR, nullable)
-- [ ] The Add Lot Owner form in the admin building detail page includes optional "Given name" and "Surname" fields
-- [ ] The Edit Lot Owner modal pre-fills existing name values and allows updates
-- [ ] The lot owner table on the admin building detail page shows a "Name" column (blank when not set)
-- [ ] Names are not shown anywhere in the voter-facing flow (voting page, confirmation page, auth page)
-- [ ] The lot owner import (CSV/Excel) accepts optional `given_name` and `surname` columns; rows without these columns import successfully without error (names default to null)
-- [ ] `PATCH /api/admin/lot-owners/{id}` accepts `given_name` and `surname` in the request body
-- [ ] `GET /api/admin/buildings/{id}/lot-owners` includes `given_name` and `surname` in each `LotOwnerOut` item
-- [ ] All tests pass at 100% coverage
-- [ ] Typecheck/lint passes
+- [x] `LotOwner` gains two optional fields: `given_name` (VARCHAR, nullable) and `surname` (VARCHAR, nullable)
+- [x] The Add Lot Owner form in the admin building detail page includes optional "Given name" and "Surname" fields
+- [x] The Edit Lot Owner modal pre-fills existing name values and allows updates
+- [x] The lot owner table on the admin building detail page shows a "Name" column (blank when not set)
+- [x] Names are not shown anywhere in the voter-facing flow (voting page, confirmation page, auth page)
+- [x] The lot owner import (CSV/Excel) accepts optional `given_name` and `surname` columns; rows without these columns import successfully without error (names default to null)
+- [x] `PATCH /api/admin/lot-owners/{id}` accepts `given_name` and `surname` in the request body
+- [x] `GET /api/admin/buildings/{id}/lot-owners` includes `given_name` and `surname` in each `LotOwnerOut` item
+- [x] All tests pass at 100% coverage
+- [x] Typecheck/lint passes
 
 ---
 
 ### US-LON-02: Proxy contact name
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As an admin, I want to store a name for the proxy contact on a lot so that the results report and admin views can identify proxy representatives by name.
 
 **Acceptance Criteria:**
 
-- [ ] `LotProxy` gains two optional fields: `given_name` (VARCHAR, nullable) and `surname` (VARCHAR, nullable)
-- [ ] The Set Proxy dialog on the lot owner detail / edit view includes optional "Given name" and "Surname" fields for the proxy contact
-- [ ] `PUT /api/admin/lot-owners/{id}/proxy` accepts `given_name` and `surname` alongside `proxy_email`
-- [ ] `GET /api/admin/lot-owners/{id}` returns proxy name fields in the `LotOwnerOut.proxy` object
-- [ ] The proxy import (CSV/Excel) accepts optional `proxy_given_name` and `proxy_surname` columns; rows without them import without error
-- [ ] Proxy names are not shown in the voter-facing flow
-- [ ] All tests pass at 100% coverage
-- [ ] Typecheck/lint passes
+- [x] `LotProxy` gains two optional fields: `given_name` (VARCHAR, nullable) and `surname` (VARCHAR, nullable)
+- [x] The Set Proxy dialog on the lot owner detail / edit view includes optional "Given name" and "Surname" fields for the proxy contact
+- [x] `PUT /api/admin/lot-owners/{id}/proxy` accepts `given_name` and `surname` alongside `proxy_email`
+- [x] `GET /api/admin/lot-owners/{id}` returns proxy name fields in the `LotOwnerOut.proxy` object
+- [x] The proxy import (CSV/Excel) accepts optional `proxy_given_name` and `proxy_surname` columns; rows without them import without error
+- [x] Proxy names are not shown in the voter-facing flow
+- [x] All tests pass at 100% coverage
+- [x] Typecheck/lint passes
 
 ---
 
 ### US-MC-SPLIT-01: Voter sees per-option For/Against/Abstain on multi-choice motions
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As a lot owner, I want each option in a multi-choice motion to have its own For / Against / Abstain buttons so that I can express support, opposition, or neutrality for each option individually, consistent with how I vote on other motion types.
 
@@ -182,7 +200,7 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-QR-01: QR code for voter share link on admin AGM detail page
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As a meeting host, I want to display a QR code for the voter-facing AGM URL on the admin AGM detail page so that I can project or print it for in-person attendees to scan.
 
@@ -271,6 +289,8 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ## Non-Goals
 
+- Changing who can submit a ballot (submission still restricted to the authenticated voter's own lots and proxy lots).
+- Exposing submitter identity in the admin tally view.
 - Admin vote entry for meetings that are already closed
 - Overriding or amending app-submitted ballots via admin vote entry
 - Lot owner names shown in any voter-facing surface
@@ -283,6 +303,9 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ## Technical Considerations
 
+- `BallotSubmission.voter_email` = the email that actually submitted (may differ from the authenticated viewer's email for co-owners).
+- `BallotSubmission.proxy_email` = set only when a proxy submitted (equals the proxy's email).
+- The vote query in `get_my_ballot` must not filter by `voter_email` — it must filter only by `lot_owner_id` to return votes cast by any email for that lot.
 - Feature 1 (admin vote entry) reuses the `submit_ballot` service path with a new `submitted_by_admin` flag on `BallotSubmission`; it does not create a separate ballot model
 - Feature 2 (lot owner names) requires an Alembic migration adding nullable columns to `lot_owners` and `lot_proxies`
 - Feature 3 (multi-choice split) is a frontend-only rendering change on the voter voting page; backend submission needs a new `option_choices` list format per `multi_choice_votes` item
@@ -295,6 +318,8 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ## Success Metrics
 
+- Co-owner B can see Lot A's ballot after co-owner A submits.
+- Proxy-submitted ballots show "Submitted via proxy by {proxy_email}" on confirmation page.
 - Admin can enter and submit votes for a selected set of lots for a full motion list in under 2 minutes
 - All lot owners and proxy contacts associated with a lot see the submitted ballot when they authenticate after submission
 - Pass/fail outcomes are automatically computed on meeting close with no manual admin calculation required
