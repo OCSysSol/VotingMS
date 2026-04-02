@@ -89,6 +89,7 @@ export interface OptionTallyEntry {
   display_order: number;
   voter_count: number;
   entitlement_sum: number;
+  outcome: string | null;
 }
 
 export interface MotionTally {

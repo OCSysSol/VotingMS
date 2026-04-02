@@ -103,7 +103,16 @@
                       <tbody>
                         {% for opt in motion.tally.options %}
                         <tr style="background-color:#eaf7ea;">
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#1a3c5e;border-bottom:1px solid #e8e8e8;">{{ opt.option_text }}</td>
+                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#1a3c5e;border-bottom:1px solid #e8e8e8;">
+                            {{ opt.option_text }}
+                            {% if opt.outcome == 'pass' %}
+                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#1b7a40;text-transform:uppercase;letter-spacing:0.4px;">&#10003; Pass</span>
+                            {% elif opt.outcome == 'fail' %}
+                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#a3220e;text-transform:uppercase;letter-spacing:0.4px;">&#10007; Fail</span>
+                            {% elif opt.outcome == 'tie' %}
+                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#c05621;text-transform:uppercase;letter-spacing:0.4px;">&#8776; Tie</span>
+                            {% endif %}
+                          </td>
                           <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.voter_count }}</td>
                           <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.entitlement_sum }}</td>
                         </tr>

@@ -1479,6 +1479,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     "display_order": opt.display_order,
                     "voter_count": len(opt_lot_ids),
                     "entitlement_sum": sum(lot_entitlement.get(lid, 0) for lid in opt_lot_ids),
+                    "outcome": opt.outcome,
                 })
                 option_voter_lists[str(opt.id)] = _lots(opt_lot_ids, "selected")
 
@@ -2039,6 +2040,9 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
                     is_absent=True,
                 ))
 
+    # Compute multi-choice pass/fail outcomes (Slice 4)
+    await compute_multi_choice_outcomes(general_meeting_id, db)
+
     # Create EmailDelivery record
     email_delivery = EmailDelivery(
         general_meeting_id=general_meeting_id,
@@ -2061,6 +2065,143 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
     )
 
     return general_meeting
+
+
+async def compute_multi_choice_outcomes(general_meeting_id: uuid.UUID, db: AsyncSession) -> None:
+    """Compute and persist pass/fail/tie outcomes for all multi-choice motions in the meeting.
+
+    Algorithm (per motion):
+    1. total_building_entitlement = sum of all AGMLotWeight.unit_entitlement_snapshot for the meeting.
+    2. For each option:
+       - for_entitlement_sum = sum of UOE for lots with Vote.choice = "selected" for this option.
+       - against_entitlement_sum = sum of UOE for lots with Vote.choice = "against" for this option.
+    3. Mark option as "fail" if against_entitlement_sum / total_building_entitlement > 0.50.
+    4. Among remaining (non-failed) options, rank by for_entitlement_sum descending.
+    5. Top option_limit ranked options: check for ties at the boundary.
+       - If position option_limit and option_limit+1 have the same for_entitlement_sum,
+         mark both (and all others at the boundary) as "tie".
+       - Positions 1..option_limit without a tie boundary: mark "pass".
+       - Positions after option_limit without tie: mark "fail".
+    6. Persist outcome on each MotionOption row.
+    """
+    # Load motions for this meeting
+    motions_result = await db.execute(
+        select(Motion).where(
+            Motion.general_meeting_id == general_meeting_id,
+            Motion.is_multi_choice == True,  # noqa: E712
+        )
+    )
+    mc_motions = list(motions_result.scalars().all())
+    if not mc_motions:
+        return
+
+    # Total building entitlement for this meeting
+    weights_result = await db.execute(
+        select(func.sum(GeneralMeetingLotWeight.unit_entitlement_snapshot)).where(
+            GeneralMeetingLotWeight.general_meeting_id == general_meeting_id
+        )
+    )
+    total_entitlement = weights_result.scalar() or 0
+
+    # Build entitlement lookup: lot_owner_id -> unit_entitlement_snapshot
+    entitlement_rows = await db.execute(
+        select(
+            GeneralMeetingLotWeight.lot_owner_id,
+            GeneralMeetingLotWeight.unit_entitlement_snapshot,
+        ).where(GeneralMeetingLotWeight.general_meeting_id == general_meeting_id)
+    )
+    entitlement_map: dict[uuid.UUID, int] = {
+        row[0]: row[1] for row in entitlement_rows.all()
+    }
+
+    # Load all submitted votes for this meeting
+    votes_result = await db.execute(
+        select(Vote).where(
+            Vote.general_meeting_id == general_meeting_id,
+            Vote.status == VoteStatus.submitted,
+        )
+    )
+    all_votes = list(votes_result.scalars().all())
+
+    for motion in mc_motions:
+        # Load options for this motion
+        opts_result = await db.execute(
+            select(MotionOption)
+            .where(MotionOption.motion_id == motion.id)
+            .order_by(MotionOption.display_order)
+        )
+        options = list(opts_result.scalars().all())
+        if not options:
+            continue
+
+        option_limit = motion.option_limit or len(options)
+
+        # Per-option tally
+        for_sums: dict[uuid.UUID, int] = {}
+        against_sums: dict[uuid.UUID, int] = {}
+        for opt in options:
+            for_sums[opt.id] = 0
+            against_sums[opt.id] = 0
+
+        for vote in all_votes:
+            if vote.motion_id != motion.id or vote.motion_option_id is None:
+                continue
+            opt_id = vote.motion_option_id
+            if opt_id not in for_sums:
+                continue
+            ent = entitlement_map.get(vote.lot_owner_id, 0)
+            choice = vote.choice.value if hasattr(vote.choice, "value") else vote.choice
+            if choice == "selected":
+                for_sums[opt_id] = for_sums.get(opt_id, 0) + ent
+            elif choice == "against":
+                against_sums[opt_id] = against_sums.get(opt_id, 0) + ent
+
+        # Step 3: mark failed options (>50% against)
+        failed_by_against: set[uuid.UUID] = set()
+        if total_entitlement > 0:
+            for opt in options:
+                if against_sums.get(opt.id, 0) / total_entitlement > 0.50:
+                    failed_by_against.add(opt.id)
+
+        # Step 4 & 5: rank remaining options by for_entitlement_sum
+        remaining = [opt for opt in options if opt.id not in failed_by_against]
+        remaining.sort(key=lambda o: for_sums.get(o.id, 0), reverse=True)
+
+        # Determine outcomes
+        outcome_map: dict[uuid.UUID, str] = {}
+
+        # All against-failed options are "fail"
+        for opt_id in failed_by_against:
+            outcome_map[opt_id] = "fail"
+
+        if remaining:
+            # Check for tie at boundary (position option_limit vs option_limit+1)
+            if len(remaining) > option_limit:
+                boundary_score = for_sums.get(remaining[option_limit - 1].id, 0)
+                next_score = for_sums.get(remaining[option_limit].id, 0)
+                if boundary_score == next_score:
+                    # Tie: mark all options with boundary_score as "tie"
+                    for opt in remaining:
+                        if for_sums.get(opt.id, 0) == boundary_score:
+                            outcome_map[opt.id] = "tie"
+                        elif for_sums.get(opt.id, 0) > boundary_score:
+                            outcome_map[opt.id] = "pass"
+                        else:
+                            outcome_map[opt.id] = "fail"
+                else:
+                    # No tie at boundary
+                    for i, opt in enumerate(remaining):
+                        outcome_map[opt.id] = "pass" if i < option_limit else "fail"
+            else:
+                # All remaining options fit within the limit — all pass
+                for opt in remaining:
+                    outcome_map[opt.id] = "pass"
+
+        # Persist outcomes
+        for opt in options:
+            opt.outcome = outcome_map.get(opt.id)
+
+    await db.flush()
 
 
 async def delete_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession) -> None:

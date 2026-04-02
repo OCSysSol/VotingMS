@@ -337,6 +337,52 @@ export const ADMIN_CREATED_MEETING: GeneralMeetingOut = {
 // Keep backward-compatible alias
 export const ADMIN_CREATED_AGM = ADMIN_CREATED_MEETING;
 
+// Multi-choice meeting detail fixture with computed outcomes (Slice 4)
+export const ADMIN_MEETING_DETAIL_MC_OUTCOME: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL,
+  id: "agm-mc-outcome",
+  status: "closed",
+  closed_at: "2024-06-01T13:00:00Z",
+  motions: [
+    {
+      id: "mc-outcome-m1",
+      title: "Board Election",
+      description: null,
+      display_order: 1,
+      motion_number: "1",
+      motion_type: "general" as const,
+      is_multi_choice: true,
+      is_visible: true,
+      option_limit: 2,
+      options: [
+        { id: "mc-opt-a", text: "Alice", display_order: 1 },
+        { id: "mc-opt-b", text: "Bob", display_order: 2 },
+        { id: "mc-opt-c", text: "Carol", display_order: 3 },
+      ],
+      tally: {
+        yes: { voter_count: 0, entitlement_sum: 0 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 0, entitlement_sum: 0 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [
+          { option_id: "mc-opt-a", option_text: "Alice", display_order: 1, voter_count: 3, entitlement_sum: 300, outcome: "pass" },
+          { option_id: "mc-opt-b", option_text: "Bob", display_order: 2, voter_count: 2, entitlement_sum: 200, outcome: "pass" },
+          { option_id: "mc-opt-c", option_text: "Carol", display_order: 3, voter_count: 1, entitlement_sum: 100, outcome: "fail" },
+        ],
+      },
+      voter_lists: {
+        yes: [],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options: {},
+      },
+    },
+  ],
+};
+
 export const adminHandlers = [
   http.get(`${BASE}/api/admin/auth/me`, () => {
     return HttpResponse.json({ authenticated: true });

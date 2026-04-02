@@ -92,8 +92,8 @@ const mcMotionFixture: MotionDetail = {
     absent: { voter_count: 1, entitlement_sum: 75 },
     not_eligible: { voter_count: 0, entitlement_sum: 0 },
     options: [
-      { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 2, entitlement_sum: 200 },
-      { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 1, entitlement_sum: 100 },
+      { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 2, entitlement_sum: 200, outcome: null },
+      { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 1, entitlement_sum: 100, outcome: null },
     ],
   },
   voter_lists: {
@@ -544,6 +544,88 @@ describe("AGMReportView", () => {
     render(<AGMReportView motions={[motions[0]]} />);
     expect(screen.getByText("For")).toBeInTheDocument();
     expect(screen.getByText("Against")).toBeInTheDocument();
+  });
+
+  // --- Outcome badges (Slice 4 — US-MC-RESULT-01) ---
+
+  it("renders Pass badge when outcome is 'pass'", () => {
+    const mcWithPass: MotionDetail = {
+      ...mcMotionFixture,
+      id: "mc-pass",
+      tally: {
+        ...mcMotionFixture.tally,
+        options: [
+          { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 2, entitlement_sum: 200, outcome: "pass" },
+          { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 1, entitlement_sum: 100, outcome: "fail" },
+        ],
+      },
+    };
+    render(<AGMReportView motions={[mcWithPass]} />);
+    expect(screen.getByLabelText("Outcome: Pass")).toBeInTheDocument();
+  });
+
+  it("renders Fail badge when outcome is 'fail'", () => {
+    const mcWithFail: MotionDetail = {
+      ...mcMotionFixture,
+      id: "mc-fail",
+      tally: {
+        ...mcMotionFixture.tally,
+        options: [
+          { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 2, entitlement_sum: 200, outcome: "pass" },
+          { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 1, entitlement_sum: 100, outcome: "fail" },
+        ],
+      },
+    };
+    render(<AGMReportView motions={[mcWithFail]} />);
+    expect(screen.getByLabelText("Outcome: Fail")).toBeInTheDocument();
+  });
+
+  it("renders Tie badge when outcome is 'tie'", () => {
+    const mcWithTie: MotionDetail = {
+      ...mcMotionFixture,
+      id: "mc-tie",
+      tally: {
+        ...mcMotionFixture.tally,
+        options: [
+          { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 2, entitlement_sum: 200, outcome: "tie" },
+          { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 2, entitlement_sum: 200, outcome: "tie" },
+        ],
+      },
+    };
+    render(<AGMReportView motions={[mcWithTie]} />);
+    const tieBadges = screen.getAllByLabelText("Outcome: Tie — admin review required");
+    expect(tieBadges).toHaveLength(2);
+  });
+
+  it("renders no outcome badges when outcome is null", () => {
+    render(<AGMReportView motions={[mcMotionFixture]} />);
+    expect(screen.queryByLabelText("Outcome: Pass")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Outcome: Fail")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Outcome: Tie — admin review required")).not.toBeInTheDocument();
+  });
+
+  it("renders outcome badges for all options in a meeting", () => {
+    const mcAllOutcomes: MotionDetail = {
+      ...mcMotionFixture,
+      id: "mc-all-outcomes",
+      options: [
+        { id: "opt-a", text: "Alice", display_order: 1 },
+        { id: "opt-b", text: "Bob", display_order: 2 },
+        { id: "opt-c", text: "Carol", display_order: 3 },
+      ],
+      tally: {
+        ...mcMotionFixture.tally,
+        options: [
+          { option_id: "opt-a", option_text: "Alice", display_order: 1, voter_count: 3, entitlement_sum: 300, outcome: "pass" },
+          { option_id: "opt-b", option_text: "Bob", display_order: 2, voter_count: 2, entitlement_sum: 200, outcome: "tie" },
+          { option_id: "opt-c", option_text: "Carol", display_order: 3, voter_count: 1, entitlement_sum: 100, outcome: "fail" },
+        ],
+      },
+    };
+    render(<AGMReportView motions={[mcAllOutcomes]} />);
+    expect(screen.getByLabelText("Outcome: Pass")).toBeInTheDocument();
+    expect(screen.getByLabelText("Outcome: Tie — admin review required")).toBeInTheDocument();
+    expect(screen.getByLabelText("Outcome: Fail")).toBeInTheDocument();
   });
 
   it("CSV row with proxy_email containing double-quotes has them escaped", async () => {

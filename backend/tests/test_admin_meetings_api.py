@@ -24,6 +24,7 @@ from app.models import (
     LotOwner,
     LotProxy,
     Motion,
+    MotionOption,
     MotionType,
     Vote,
     VoteChoice,
@@ -6003,3 +6004,467 @@ class TestListGeneralMeetingsSort:
         # Lower-cased titles that include our test data should appear in order apple < mango < zebra
         test_titles = [t for t in titles if any(kw in t for kw in ("apple", "mango", "zebra"))]
         assert test_titles == sorted(test_titles)
+
+
+# ---------------------------------------------------------------------------
+# Slice 4 — Multi-choice pass/fail outcome algorithm
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestMultiChoiceOutcome:
+    """Tests for compute_multi_choice_outcomes called on meeting close."""
+
+    async def _setup_mc_meeting(
+        self,
+        db_session: AsyncSession,
+        name: str,
+        lot_entitlements: list[int],
+        option_limit: int = 2,
+        option_count: int = 3,
+    ) -> tuple:
+        """Create a building, lot owners, meeting with one MC motion, and lot weights.
+
+        Returns (agm_id, motion_id, lot_owner_ids, option_ids).
+        """
+        b = Building(name=name, manager_email=f"mc_outcome_{name}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lot_owners = []
+        for i, ent in enumerate(lot_entitlements):
+            lo = LotOwner(building_id=b.id, lot_number=str(i + 1), unit_entitlement=ent)
+            db_session.add(lo)
+            await db_session.flush()
+            from app.models.lot_owner_email import LotOwnerEmail
+            db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email=f"mc_lo{i}_{name}@test.com"))
+            lot_owners.append(lo)
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title=f"MC Outcome Meeting {name}",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(
+            general_meeting_id=agm.id,
+            title="MC Motion",
+            display_order=1,
+            is_multi_choice=True,
+            option_limit=option_limit,
+        )
+        db_session.add(motion)
+        await db_session.flush()
+
+        options = []
+        for j in range(option_count):
+            opt = MotionOption(motion_id=motion.id, text=f"Option {j + 1}", display_order=j + 1)
+            db_session.add(opt)
+            await db_session.flush()
+            options.append(opt)
+
+        # Create AGM lot weights (snapshot)
+        for lo in lot_owners:
+            db_session.add(GeneralMeetingLotWeight(
+                general_meeting_id=agm.id,
+                lot_owner_id=lo.id,
+                unit_entitlement_snapshot=lo.unit_entitlement,
+            ))
+
+        await db_session.commit()
+        return agm, motion, lot_owners, options
+
+    async def _cast_vote(
+        self,
+        db_session: AsyncSession,
+        agm_id,
+        motion_id,
+        lot_owner: LotOwner,
+        option_id,
+        choice: VoteChoice,
+    ) -> None:
+        """Cast a single submitted vote for a lot owner on an option."""
+        db_session.add(Vote(
+            general_meeting_id=agm_id,
+            motion_id=motion_id,
+            voter_email=f"lo_{lot_owner.id}@test.com",
+            lot_owner_id=lot_owner.id,
+            choice=choice,
+            motion_option_id=option_id,
+            status=VoteStatus.submitted,
+        ))
+        # Create ballot submission if not exists
+        existing_sub = await db_session.execute(
+            select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm_id,
+                BallotSubmission.lot_owner_id == lot_owner.id,
+            )
+        )
+        if existing_sub.scalar_one_or_none() is None:
+            db_session.add(BallotSubmission(
+                general_meeting_id=agm_id,
+                lot_owner_id=lot_owner.id,
+                voter_email=f"lo_{lot_owner.id}@test.com",
+            ))
+        await db_session.commit()
+
+    async def test_top_n_pass_rest_fail(self, client: AsyncClient, db_session: AsyncSession):
+        """All options below against threshold; top option_limit by for-votes pass, rest fail."""
+        # 3 lots: 100, 100, 100 (total=300); option_limit=2; 3 options
+        # Votes: opt1 gets all 3 for (300), opt2 gets 2 for (200), opt3 gets 1 for (100)
+        # Expected: opt1=pass, opt2=pass, opt3=fail
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeTopN", [100, 100, 100], option_limit=2, option_count=3
+        )
+        # Lot1 votes for opt1
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[0], options[0].id, VoteChoice.selected)
+        # Lot2 votes for opt1, opt2
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[1], options[0].id, VoteChoice.selected)
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[1].id}@test.com", lot_owner_id=lot_owners[1].id,
+            choice=VoteChoice.selected, motion_option_id=options[1].id, status=VoteStatus.submitted,
+        ))
+        # Lot3 votes for opt1, opt2, opt3 — but option_limit=2 so technically frontend should prevent,
+        # but service just computes from existing votes. For test: lot3 votes opt1, opt2
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[2].id}@test.com", lot_owner_id=lot_owners[2].id,
+            choice=VoteChoice.selected, motion_option_id=options[1].id, status=VoteStatus.submitted,
+        ))
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[2].id}@test.com", lot_owner_id=lot_owners[2].id,
+            choice=VoteChoice.selected, motion_option_id=options[2].id, status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id, lot_owner_id=lot_owners[2].id,
+            voter_email=f"lo_{lot_owners[2].id}@test.com",
+        ))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+        # Verify via detail endpoint
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert detail_resp.status_code == 200
+        data = detail_resp.json()
+        motion_data = data["motions"][0]
+        opt_tallies = {o["option_text"]: o["outcome"] for o in motion_data["tally"]["options"]}
+        # opt1 (300 for) = pass; opt2 (200 for) = pass; opt3 (100 for) = fail
+        assert opt_tallies["Option 1"] == "pass"
+        assert opt_tallies["Option 2"] == "pass"
+        assert opt_tallies["Option 3"] == "fail"
+
+    async def test_against_threshold_fails_option(self, client: AsyncClient, db_session: AsyncSession):
+        """Option with >50% against is marked fail regardless of for-votes."""
+        # 3 lots: 100, 100, 100 (total=300); option_limit=1; 3 options
+        # opt1: all 3 vote against (300 against > 150 = >50%) → fail even if top by for
+        # opt2: 2 vote for (200) → passes (top of remaining, limit=1)
+        # opt3: 1 vote for (100) → fails (below limit)
+        # After excluding opt1 (failed by against), remaining: opt2=pass, opt3=fail
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeAgainst", [100, 100, 100], option_limit=1, option_count=3
+        )
+        # All 3 lots vote against opt1
+        for lo in lot_owners:
+            await self._cast_vote(db_session, agm.id, motion.id, lo, options[0].id, VoteChoice.against)
+        # Lot1 votes for opt2
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[0].id}@test.com", lot_owner_id=lot_owners[0].id,
+            choice=VoteChoice.selected, motion_option_id=options[1].id, status=VoteStatus.submitted,
+        ))
+        # Lot2 votes for opt2
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[1].id}@test.com", lot_owner_id=lot_owners[1].id,
+            choice=VoteChoice.selected, motion_option_id=options[1].id, status=VoteStatus.submitted,
+        ))
+        # Lot3 votes for opt3
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[2].id}@test.com", lot_owner_id=lot_owners[2].id,
+            choice=VoteChoice.selected, motion_option_id=options[2].id, status=VoteStatus.submitted,
+        ))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert detail_resp.status_code == 200
+        data = detail_resp.json()
+        motion_data = data["motions"][0]
+        opt_tallies = {o["option_text"]: o["outcome"] for o in motion_data["tally"]["options"]}
+        assert opt_tallies["Option 1"] == "fail"  # >50% against
+        assert opt_tallies["Option 2"] == "pass"  # top remaining by for
+        assert opt_tallies["Option 3"] == "fail"  # below limit
+
+    async def test_tie_at_boundary(self, client: AsyncClient, db_session: AsyncSession):
+        """When position option_limit and option_limit+1 have equal for-votes, mark both tie."""
+        # 4 lots: 100, 100, 100, 100 (total=400); option_limit=1; 3 options
+        # opt1: 2 vote for (200)
+        # opt2: 2 vote for (200) — ties with opt1 at boundary
+        # opt3: 0 votes
+        # Expected: opt1=tie, opt2=tie, opt3=fail (same for-score as boundary)
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeTie", [100, 100, 100, 100], option_limit=1, option_count=3
+        )
+        # Lots 1 and 2 vote for opt1
+        for lo in lot_owners[:2]:
+            await self._cast_vote(db_session, agm.id, motion.id, lo, options[0].id, VoteChoice.selected)
+        # Lots 3 and 4 vote for opt2
+        for lo in lot_owners[2:]:
+            await self._cast_vote(db_session, agm.id, motion.id, lo, options[1].id, VoteChoice.selected)
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        data = detail_resp.json()
+        motion_data = data["motions"][0]
+        opt_tallies = {o["option_text"]: o["outcome"] for o in motion_data["tally"]["options"]}
+        assert opt_tallies["Option 1"] == "tie"
+        assert opt_tallies["Option 2"] == "tie"
+        assert opt_tallies["Option 3"] == "fail"
+
+    async def test_outcomes_stored_in_db(self, client: AsyncClient, db_session: AsyncSession):
+        """compute_multi_choice_outcomes persists outcome on MotionOption rows."""
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeDB", [100, 200], option_limit=1, option_count=2
+        )
+        # Lot1 votes for opt1, Lot2 votes for opt2
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[0], options[0].id, VoteChoice.selected)
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[1], options[1].id, VoteChoice.selected)
+
+        await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+
+        # Refresh options from DB
+        for opt in options:
+            await db_session.refresh(opt)
+        opt_outcomes = {opt.text: opt.outcome for opt in options}
+        # opt2 (200 for) should pass; opt1 (100 for) should fail
+        assert opt_outcomes["Option 2"] == "pass"
+        assert opt_outcomes["Option 1"] == "fail"
+
+    async def test_get_detail_includes_outcome_on_options(self, client: AsyncClient, db_session: AsyncSession):
+        """GET /api/admin/general-meetings/{id} includes outcome on each option tally item."""
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeDetail", [100, 100], option_limit=1, option_count=2
+        )
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[0], options[0].id, VoteChoice.selected)
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[1], options[0].id, VoteChoice.selected)
+        await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+
+        resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert resp.status_code == 200
+        tally_options = resp.json()["motions"][0]["tally"]["options"]
+        assert all("outcome" in o for o in tally_options)
+
+    async def test_open_meeting_options_have_null_outcome(self, client: AsyncClient, db_session: AsyncSession):
+        """Before meeting is closed, option outcomes are null in GET detail."""
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeNull", [100], option_limit=1, option_count=2
+        )
+        resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert resp.status_code == 200
+        tally_options = resp.json()["motions"][0]["tally"]["options"]
+        assert all(o["outcome"] is None for o in tally_options)
+
+    async def test_all_options_pass_when_all_fit_in_limit(self, client: AsyncClient, db_session: AsyncSession):
+        """When fewer remaining options than option_limit, all remaining pass."""
+        # 2 options, option_limit=3 (more than the options)
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeAllPass", [100, 100], option_limit=3, option_count=2
+        )
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[0], options[0].id, VoteChoice.selected)
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[1], options[1].id, VoteChoice.selected)
+        await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+
+        resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        tally_options = resp.json()["motions"][0]["tally"]["options"]
+        outcomes = {o["option_text"]: o["outcome"] for o in tally_options}
+        assert all(v == "pass" for v in outcomes.values())
+
+    async def test_mc_motion_with_no_options_is_skipped(self, client: AsyncClient, db_session: AsyncSession):
+        """A multi-choice motion with no options is skipped without error."""
+        b = Building(name="OutcomeNoOpts", manager_email="noopts@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        lo = LotOwner(building_id=b.id, lot_number="1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="No Options MC Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+        # Multi-choice motion with NO options (unusual but should not crash)
+        motion = Motion(
+            general_meeting_id=agm.id,
+            title="Empty MC Motion",
+            display_order=1,
+            is_multi_choice=True,
+            option_limit=1,
+        )
+        db_session.add(motion)
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=100,
+        ))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+    async def test_votes_for_other_motions_are_ignored(self, client: AsyncClient, db_session: AsyncSession):
+        """Votes for other motions/options do not affect outcome calculation."""
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeOtherVotes", [100, 100], option_limit=1, option_count=2
+        )
+        # Add a different motion (non-MC)
+        other_motion = Motion(
+            general_meeting_id=agm.id,
+            title="Other Motion",
+            display_order=2,
+            is_multi_choice=False,
+        )
+        db_session.add(other_motion)
+        await db_session.flush()
+
+        # Vote for lot1 on opt1 of our MC motion
+        await self._cast_vote(db_session, agm.id, motion.id, lot_owners[0], options[0].id, VoteChoice.selected)
+        # Also add a vote for the other motion with motion_option_id=None (should be ignored by the opt_id check)
+        db_session.add(Vote(
+            general_meeting_id=agm.id,
+            motion_id=other_motion.id,
+            voter_email=f"lo_{lot_owners[1].id}@test.com",
+            lot_owner_id=lot_owners[1].id,
+            choice=VoteChoice.yes,
+            motion_option_id=None,
+            status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lot_owners[1].id,
+            voter_email=f"lo_{lot_owners[1].id}@test.com",
+        ))
+        # Add a vote for our MC motion that references a foreign option_id not in this motion's options
+        # (simulates stale/orphaned data — exercises the opt_id not in for_sums guard)
+        foreign_opt = MotionOption(motion_id=other_motion.id, text="Foreign Opt", display_order=1)
+        db_session.add(foreign_opt)
+        await db_session.flush()
+        db_session.add(Vote(
+            general_meeting_id=agm.id,
+            motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[1].id}@test.com",
+            lot_owner_id=lot_owners[1].id,
+            choice=VoteChoice.selected,
+            motion_option_id=foreign_opt.id,  # option from a different motion
+            status=VoteStatus.submitted,
+        ))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        opt_tallies = {o["option_text"]: o["outcome"] for o in detail_resp.json()["motions"][0]["tally"]["options"]}
+        # opt1 got all for-votes; opt2 has none → opt1=pass, opt2=fail
+        assert opt_tallies["Option 1"] == "pass"
+        assert opt_tallies["Option 2"] == "fail"
+
+    async def test_no_mc_motions_is_noop(self, client: AsyncClient, db_session: AsyncSession):
+        """Close meeting with no multi-choice motions completes without error."""
+        b = Building(name="OutcomeNoMC", manager_email="nomc@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="No MC Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+        db_session.add(Motion(general_meeting_id=agm.id, title="Regular Motion", display_order=1))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+    async def test_tie_in_middle_others_still_pass(self, client: AsyncClient, db_session: AsyncSession):
+        """Options above the tie boundary still pass; options below fail."""
+        # option_limit=2, 4 options
+        # opt1: 400 for (all 4 lots) → clear winner, pass
+        # opt2: 200 for (2 lots) → ties with opt3 at boundary position 2 vs 3
+        # opt3: 200 for (2 lots) → ties
+        # opt4: 100 for (1 lot) → below tie, fail
+        agm, motion, lot_owners, options = await self._setup_mc_meeting(
+            db_session, "OutcomeTieMid", [100, 100, 100, 100], option_limit=2, option_count=4
+        )
+        # All 4 lots vote for opt1
+        for lo in lot_owners:
+            db_session.add(Vote(
+                general_meeting_id=agm.id, motion_id=motion.id,
+                voter_email=f"lo_{lo.id}@test.com", lot_owner_id=lo.id,
+                choice=VoteChoice.selected, motion_option_id=options[0].id, status=VoteStatus.submitted,
+            ))
+        # Lots 1, 2 vote for opt2
+        for lo in lot_owners[:2]:
+            db_session.add(Vote(
+                general_meeting_id=agm.id, motion_id=motion.id,
+                voter_email=f"lo_{lo.id}@test.com", lot_owner_id=lo.id,
+                choice=VoteChoice.selected, motion_option_id=options[1].id, status=VoteStatus.submitted,
+            ))
+        # Lots 3, 4 vote for opt3
+        for lo in lot_owners[2:]:
+            db_session.add(Vote(
+                general_meeting_id=agm.id, motion_id=motion.id,
+                voter_email=f"lo_{lo.id}@test.com", lot_owner_id=lo.id,
+                choice=VoteChoice.selected, motion_option_id=options[2].id, status=VoteStatus.submitted,
+            ))
+        # Lot 1 votes for opt4
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email=f"lo_{lot_owners[0].id}@test.com", lot_owner_id=lot_owners[0].id,
+            choice=VoteChoice.selected, motion_option_id=options[3].id, status=VoteStatus.submitted,
+        ))
+        # Ballot submissions
+        for lo in lot_owners:
+            existing = await db_session.execute(
+                select(BallotSubmission).where(
+                    BallotSubmission.general_meeting_id == agm.id,
+                    BallotSubmission.lot_owner_id == lo.id,
+                )
+            )
+            if existing.scalar_one_or_none() is None:
+                db_session.add(BallotSubmission(
+                    general_meeting_id=agm.id, lot_owner_id=lo.id,
+                    voter_email=f"lo_{lo.id}@test.com",
+                ))
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        data = detail_resp.json()
+        opt_tallies = {o["option_text"]: o["outcome"] for o in data["motions"][0]["tally"]["options"]}
+        assert opt_tallies["Option 1"] == "pass"
+        assert opt_tallies["Option 2"] == "tie"
+        assert opt_tallies["Option 3"] == "tie"
+        assert opt_tallies["Option 4"] == "fail"

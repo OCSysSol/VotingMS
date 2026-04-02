@@ -456,6 +456,7 @@ class OptionTallyEntry(BaseModel):
     display_order: int
     voter_count: int
     entitlement_sum: int
+    outcome: str | None = None
 
 
 class MotionTally(BaseModel):
