@@ -9,7 +9,7 @@ interface AgmQrCodeProps {
 }
 
 export default function AgmQrCode({ agmId, logoUrl, size = 200, canvasRef }: AgmQrCodeProps) {
-  const voterUrl = window.location.origin + "/vote/" + agmId;
+  const voterUrl = window.location.origin + "/vote/" + agmId + "/auth";
 
   const imageSettings =
     logoUrl

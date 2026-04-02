@@ -32,7 +32,7 @@ describe("AgmQrCode", () => {
   it("encodes the voter URL in the QR value", () => {
     render(<AgmQrCode agmId="agm-abc" logoUrl={null} />);
     const canvas = screen.getByTestId("qr-canvas");
-    expect(canvas).toHaveAttribute("data-value", window.location.origin + "/vote/agm-abc");
+    expect(canvas).toHaveAttribute("data-value", window.location.origin + "/vote/agm-abc/auth");
   });
 
   it("uses the provided size", () => {
