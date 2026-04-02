@@ -141,9 +141,9 @@ Run all stages in order. Never skip. Never raise a PR until Branch E2E passes. N
 |---|---|---|---|
 | **Local testing** | During development + before every push | pytest (100% cov) · Vitest (100% cov) · bandit · eslint-security | Run manually — re-run on every meaningful change for fast feedback |
 | **Branch CI** | Auto on `git push` | Same as local + semgrep + Alembic migration on clean DB | `gh run list --branch <branch> --workflow ci.yml` |
-| **Branch E2E** | Auto after Vercel preview deploys | Full Playwright suite | `gh run list --branch <branch> --workflow e2e.yml` |
+| **Branch E2E** | Auto after Vercel preview deploys | Full Playwright suite against the branch's Preview deployment | `gh run list --branch <branch> --workflow e2e.yml` |
 | **Post-merge CI** | Auto after PR merges to `preview` | Same as Branch CI | `gh run list --branch preview --workflow ci.yml` |
-| **Preview E2E** | Orchestrator-directed after all slices merged | Full Playwright suite against `preview` | `gh run list --branch preview --workflow e2e.yml` |
+| **Demo E2E** | Orchestrator-directed after all slices merged | Full Playwright suite against Demo URL (`demo_url`) | `gh run list --branch preview --workflow e2e.yml` |
 
 Local testing checks are fast (seconds) — use them as a tight feedback loop while developing, not just as a pre-push gate. All CI/E2E stages are automated and only need monitoring.
 
@@ -217,10 +217,13 @@ Multiple fund sections: worst-case across all sections (arrears in any -> `in_ar
 | Environment | Trigger | URL pattern |
 |---|---|---|
 | **Production** | Push to `master` only | `agm-voting.vercel.app` |
+| **Demo** | Push to `preview` branch | `agm-voting-git-preview-ocss.vercel.app` |
 | **Preview** | Push to any other branch | `agm-voting-git-<branch>-ocss.vercel.app` |
 
 - **Never** run `vercel deploy --prod` or target production from the CLI
-- All non-production deployments land in Preview and use Preview env vars
+- The `preview` branch deploys to the **Demo** Vercel environment (for stakeholder review)
+- Feature and fix branches deploy to the **Preview** Vercel environment
+- When setting branch-scoped env vars for feature branches, target `["preview"]`; for the `preview` branch itself, env vars target `["preview"]` with no `gitBranch` scope (or the demo environment target)
 - Required env vars: `DATABASE_URL`, `VITE_API_BASE_URL` (empty string on Vercel), `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `ALLOWED_ORIGIN`
 
 > **CRITICAL:** `vercel env pull` may return a DIFFERENT Neon DB URL than what the deployed Lambda actually uses. To run a manual migration, retrieve `DATABASE_URL_UNPOOLED` directly from the Lambda (via a temporary debug endpoint), then run:
@@ -364,6 +367,7 @@ These fields are read by the generic agent definitions. Values here override use
 | `e2e_command` | `cd frontend && npx playwright test` |
 | `worktree_root` | `/Users/stevensun/personal/agm_survey/.worktree` |
 | `preview_url_pattern` | `https://agm-voting-git-<branch>-ocss.vercel.app` |
+| `demo_url` | `https://agm-voting-git-preview-ocss.vercel.app` |
 | `schema_migration_tool` | `alembic` |
 | `container_tool` | `podman` |
 | `neon_project_id` | `divine-dust-41291876` |
@@ -373,7 +377,7 @@ These fields are read by the generic agent definitions. Values here override use
 | `prd_dir` | `tasks/prd` |
 | `design_dir` | `tasks/design` |
 | `keychain_service` | `agm-survey` |
-| `cleanup_preview_url` | `https://agm-voting-git-preview-ocss.vercel.app` |
+| `cleanup_demo_url` | `https://agm-voting-git-preview-ocss.vercel.app` |
 
 ---
 
