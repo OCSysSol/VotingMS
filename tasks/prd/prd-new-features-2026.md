@@ -177,7 +177,7 @@ This document captures seven new features for the AGM Voting App: admin vote ent
 
 ### US-MC-RESULT-01: Multi-choice motion pass/fail outcome
 
-**Status:** Pending
+**Status:** ✅ Implemented
 
 **Description:** As a meeting host, I want the system to automatically determine which options pass and fail on a multi-choice motion so that I can announce the outcome without manually tallying weighted votes.
 

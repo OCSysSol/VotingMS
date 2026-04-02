@@ -1,4 +1,67 @@
-import type { MotionDetail } from "../../api/admin";
+import type { MotionDetail, OptionTallyEntry } from "../../api/admin";
+
+function OutcomeBadge({ outcome }: { outcome: string | null | undefined }) {
+  if (!outcome) return null;
+  if (outcome === "pass") {
+    return (
+      <span
+        style={{
+          marginLeft: 6,
+          fontSize: "0.7rem",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.4px",
+          color: "var(--green)",
+          background: "var(--green-bg)",
+          borderRadius: "var(--r-sm)",
+          padding: "2px 6px",
+        }}
+        aria-label="Outcome: Pass"
+      >
+        Pass
+      </span>
+    );
+  }
+  if (outcome === "fail") {
+    return (
+      <span
+        style={{
+          marginLeft: 6,
+          fontSize: "0.7rem",
+          fontWeight: 700,
+          textTransform: "uppercase",
+          letterSpacing: "0.4px",
+          color: "var(--red)",
+          background: "var(--red-bg)",
+          borderRadius: "var(--r-sm)",
+          padding: "2px 6px",
+        }}
+        aria-label="Outcome: Fail"
+      >
+        Fail
+      </span>
+    );
+  }
+  // tie
+  return (
+    <span
+      style={{
+        marginLeft: 6,
+        fontSize: "0.7rem",
+        fontWeight: 700,
+        textTransform: "uppercase",
+        letterSpacing: "0.4px",
+        color: "var(--amber)",
+        background: "var(--amber-bg)",
+        borderRadius: "var(--r-sm)",
+        padding: "2px 6px",
+      }}
+      aria-label="Outcome: Tie — admin review required"
+    >
+      Tie — admin review required
+    </span>
+  );
+}
 
 interface AGMReportViewProps {
   motions: MotionDetail[];
@@ -128,12 +191,13 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
             <tbody>
               {motion.is_multi_choice === true ? (
                 <>
-                  {(motion.tally.options ?? []).map((optTally) => (
+                  {(motion.tally.options ?? []).map((optTally: OptionTallyEntry) => (
                     <tr key={optTally.option_id}>
                       <td>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
                           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--navy)", flexShrink: 0 }} />
                           {optTally.option_text}
+                          <OutcomeBadge outcome={optTally.outcome} />
                         </span>
                       </td>
                       <td style={{ fontFamily: "'Overpass Mono', monospace" }}>

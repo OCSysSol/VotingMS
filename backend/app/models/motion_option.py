@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -14,6 +14,10 @@ class MotionOption(Base):
             "display_order",
             name="uq_motion_options_motion_display_order",
         ),
+        CheckConstraint(
+            "outcome IN ('pass', 'fail', 'tie') OR outcome IS NULL",
+            name="ck_motion_options_outcome",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -23,6 +27,7 @@ class MotionOption(Base):
     )
     text: Mapped[str] = mapped_column(String, nullable=False)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    outcome: Mapped[str | None] = mapped_column(String, nullable=True, default=None)
 
     # Relationship back to Motion
     motion: Mapped["Motion"] = relationship("Motion", back_populates="options")  # noqa: F821
