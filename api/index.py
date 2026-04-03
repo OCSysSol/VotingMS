@@ -5,14 +5,13 @@ Makes the backend package importable from the project root, then exports
 the FastAPI `app` instance for Vercel's Python runtime (ASGI).
 
 Environment variables expected (set in Vercel project settings):
-  DATABASE_URL      postgresql+asyncpg://... (cloud Postgres)
-  SESSION_SECRET    random secret for session cookies
-  SMTP_HOST         SMTP server hostname (e.g. mail-au.smtp2go.com)
-  SMTP_PORT         SMTP server port (e.g. 2525 for STARTTLS)
-  SMTP_USERNAME     SMTP authentication username
-  SMTP_PASSWORD     SMTP authentication password
-  SMTP_FROM_EMAIL   sender address for result emails
-  ALLOWED_ORIGIN    frontend URL (e.g. https://your-project.vercel.app)
+  DATABASE_URL         postgresql+asyncpg://... (cloud Postgres)
+  SESSION_SECRET       random secret for session cookies
+  SMTP_ENCRYPTION_KEY  base64url-encoded 32-byte key for encrypting stored SMTP passwords
+  ALLOWED_ORIGIN       frontend URL (e.g. https://your-project.vercel.app)
+
+  SMTP settings (host, port, username, password, from_email) are configured
+  via the admin Settings page and stored encrypted in the database.
 """
 import os
 import sys
