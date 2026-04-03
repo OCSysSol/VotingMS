@@ -1,5 +1,6 @@
-> **For any feature, bug fix, or task — invoke the `/orchestrate-feature-dev` skill as the entry point.**
+> **For any feature, bug fix, CI fix, coverage fix, or task — invoke the `/orchestrate-feature-dev` skill as the entry point.**
 > The skill runs in the main session and coordinates all sub-agents (design, implement, test, cleanup) via the `Agent` tool.
+> **Never edit files directly in the main repo or use general-purpose agents for code changes. All implementation must go through a worktree + `app-implement` agent.**
 
 ---
 
