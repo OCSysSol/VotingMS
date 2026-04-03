@@ -223,7 +223,8 @@ Multiple fund sections: worst-case across all sections (arrears in any -> `in_ar
 - **Never** run `vercel deploy --prod` or target production from the CLI
 - The `preview` branch deploys to the **Demo** Vercel environment (for stakeholder review)
 - Feature and fix branches deploy to the **Preview** Vercel environment
-- When setting branch-scoped env vars for feature branches, target `["preview"]`; for the `preview` branch itself, env vars target `["preview"]` with no `gitBranch` scope (or the demo environment target)
+- **Neon DB mapping:** Demo env → `demo` Neon branch (`br-orange-sound-a76hyf9w`); Preview env (feature branches) → `preview` Neon branch (`br-bold-cherry-a7yzlzj1`)
+- When setting branch-scoped env vars for feature branches, target `["preview"]`; the demo env DATABASE_URL is set at the custom environment level (`customEnvironmentIds: [env_FULKSWxHCulQ5CTDb0kyzZUfvfUE]`), not branch-scoped
 - Required env vars: `DATABASE_URL`, `VITE_API_BASE_URL` (empty string on Vercel), `SESSION_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `ALLOWED_ORIGIN`
 
 > **CRITICAL:** `vercel env pull` may return a DIFFERENT Neon DB URL than what the deployed Lambda actually uses. To run a manual migration, retrieve `DATABASE_URL_UNPOOLED` directly from the Lambda (via a temporary debug endpoint), then run:
