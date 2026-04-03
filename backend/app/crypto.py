@@ -19,9 +19,19 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 
 def _decode_key(key_b64: str) -> bytes:
-    """Decode a base64-encoded 32-byte AES key."""
+    """Decode a base64 or base64url-encoded 32-byte AES key.
+
+    Accepts both standard base64 (with +/= chars) and URL-safe base64
+    (with -_ chars, optional = padding stripped). Both decode to 32 bytes.
+    """
     try:
-        key = base64.b64decode(key_b64)
+        # Normalise to standard base64: replace URL-safe chars and add padding
+        normalised = key_b64.replace("-", "+").replace("_", "/")
+        # Add padding if missing
+        padding = 4 - len(normalised) % 4
+        if padding != 4:
+            normalised += "=" * padding
+        key = base64.b64decode(normalised)
     except Exception as exc:
         raise ValueError(f"SMTP_ENCRYPTION_KEY is not valid base64: {exc}") from exc
     if len(key) != 32:
