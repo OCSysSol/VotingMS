@@ -31,6 +31,7 @@ const AgmQrCodeModal = lazy(() => import("../../components/admin/AgmQrCodeModal"
 interface DeleteMeetingConfirmModalProps {
   meetingTitle: string;
   deleting: boolean;
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -93,7 +94,7 @@ function DeleteMotionConfirmModal({ onConfirm, onCancel }: DeleteMotionConfirmMo
   );
 }
 
-function DeleteMeetingConfirmModal({ meetingTitle, deleting, onConfirm, onCancel }: DeleteMeetingConfirmModalProps) {
+function DeleteMeetingConfirmModal({ meetingTitle, deleting, error, onConfirm, onCancel }: DeleteMeetingConfirmModalProps) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && !deleting) onCancel();
@@ -133,6 +134,11 @@ function DeleteMeetingConfirmModal({ meetingTitle, deleting, onConfirm, onCancel
         <p style={{ marginBottom: 24, color: "var(--text-secondary)" }}>
           This action cannot be undone. All motions, votes, and ballot submissions for this meeting will be permanently deleted.
         </p>
+        {error && (
+          <p role="alert" style={{ color: "var(--red)", background: "var(--red-bg)", borderRadius: "var(--r-md)", padding: "10px 14px", marginBottom: 16 }}>
+            {error}
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={deleting}>
             Cancel
@@ -154,6 +160,7 @@ export default function GeneralMeetingDetailPage() {
   const [visibilityErrors, setVisibilityErrors] = useState<Record<string, string>>({});
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
+  const [deleteMeetingError, setDeleteMeetingError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
 
   // Optimistic motions list — updated immediately on reorder, confirmed on API response
@@ -231,6 +238,9 @@ export default function GeneralMeetingDetailPage() {
     mutationFn: () => deleteGeneralMeeting(meetingId!),
     onSuccess: () => {
       navigate("/admin/general-meetings");
+    },
+    onError: (err: Error) => {
+      setDeleteMeetingError(err.message || "Failed to delete meeting");
     },
   });
 
@@ -448,12 +458,12 @@ export default function GeneralMeetingDetailPage() {
   }
 
   function handleDelete() {
+    setDeleteMeetingError(null);
     setShowDeleteMeetingModal(true);
   }
 
   function handleDeleteMeetingConfirm() {
     deleteMutation.mutate();
-    setShowDeleteMeetingModal(false);
   }
 
   function handleEditSubmit(e: React.FormEvent) {
@@ -832,8 +842,9 @@ export default function GeneralMeetingDetailPage() {
         <DeleteMeetingConfirmModal
           meetingTitle={meeting.title}
           deleting={deleteMutation.isPending}
+          error={deleteMeetingError}
           onConfirm={handleDeleteMeetingConfirm}
-          onCancel={() => setShowDeleteMeetingModal(false)}
+          onCancel={() => { setShowDeleteMeetingModal(false); setDeleteMeetingError(null); }}
         />
       )}
 
