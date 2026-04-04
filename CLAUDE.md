@@ -218,8 +218,8 @@ Multiple fund sections: worst-case across all sections (arrears in any -> `in_ar
 | Environment | Trigger | URL pattern |
 |---|---|---|
 | **Production** | Push to `master` only | `agm-voting.vercel.app` |
-| **Demo** | Push to `demo` branch | `agm-voting-env-demo-ocss.vercel.app` |
-| **Preview** | Push to any other branch | `agm-voting-git-<branch>-ocss.vercel.app` |
+| **Demo** | Push to `demo` branch | `votingms-env-demo-ocss.vercel.app` |
+| **Preview** | Push to any other branch | `votingms-git-<branch>-ocss.vercel.app` |
 
 - **Never** run `vercel deploy --prod` or target production from the CLI
 - The `demo` branch deploys to the **Demo** Vercel environment (for stakeholder review)
@@ -369,7 +369,7 @@ These fields are read by the generic agent definitions. Values here override use
 | `test_frontend` | `cd frontend && npm run test:coverage` |
 | `e2e_command` | `cd frontend && npx playwright test` |
 | `worktree_root` | `/Users/stevensun/personal/agm_survey/.worktree` |
-| `preview_url_pattern` | `https://agm-voting-git-<branch>-ocss.vercel.app` |
+| `preview_url_pattern` | `https://votingms-git-<branch>-ocss.vercel.app` |
 | `schema_migration_tool` | `alembic` |
 | `container_tool` | `podman` |
 | `neon_project_id` | `divine-dust-41291876` |
@@ -379,8 +379,8 @@ These fields are read by the generic agent definitions. Values here override use
 | `prd_dir` | `tasks/prd` |
 | `design_dir` | `tasks/design` |
 | `keychain_service` | `agm-survey` |
-| `demo_url` | `https://agm-voting-env-demo-ocss.vercel.app` |
-| `cleanup_demo_url` | `https://agm-voting-env-demo-ocss.vercel.app` |
+| `demo_url` | `https://votingms-env-demo-ocss.vercel.app` |
+| `cleanup_demo_url` | `https://votingms-env-demo-ocss.vercel.app` |
 
 ---
 
