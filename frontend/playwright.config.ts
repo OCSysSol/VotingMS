@@ -11,7 +11,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : isDeployed ? 1 : 0,
   // Serialise in CI to prevent inter-test state interference; limit on deployed targets
   workers: process.env.CI ? 2 : isDeployed ? 4 : undefined,
-  reporter: process.env.CI ? [["github"], ["html"]] : [["html"]],
+  reporter: process.env.CI ? [["list"], ["html"]] : [["html"]],
   globalSetup: "../e2e_tests/global-setup.ts",
   // Increase default expect/action timeout for deployed Lambda targets: API
   // calls can take up to 10s on cold start; the Playwright default of 5s is
