@@ -142,6 +142,23 @@ class TestDatabase:
 
         assert AsyncSessionLocal is not None
 
+    def test_engine_connect_args_timeout(self):
+        """Engine connect_args has timeout=5 to detect hung Neon connections quickly.
+
+        SQLAlchemy merges connect_args into the pool creator's closure (cparams).
+        We inspect that closure to verify the timeout value — dialect.create_connect_args
+        only returns driver defaults, not user-supplied overrides.
+        """
+        import inspect
+
+        from app.database import engine
+
+        # The pool creator is a closure that captures `cparams` — the merged
+        # connect kwargs including any user-supplied connect_args.
+        pool_creator = engine.sync_engine.pool._creator
+        cparams = inspect.getclosurevars(pool_creator).nonlocals.get("cparams", {})
+        assert cparams.get("timeout") == 5
+
     async def test_get_db_yields_session(self):
         from sqlalchemy.ext.asyncio import AsyncSession
 
