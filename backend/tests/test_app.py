@@ -132,8 +132,8 @@ class TestDatabase:
         assert cparams.get("statement_cache_size") == 0, (
             "statement_cache_size must be 0 for PgBouncer transaction mode compatibility"
         )
-        assert cparams.get("timeout") == 10, (
-            "timeout must be 10 so asyncpg raises after 10s during Neon wake-up "
+        assert cparams.get("timeout") == 5, (
+            "timeout must be 5 so asyncpg raises after 5s during Neon wake-up "
             "instead of hanging indefinitely"
         )
 
