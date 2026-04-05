@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.exc import DBAPIError, OperationalError
+from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -10,19 +11,18 @@ from sqlalchemy.ext.asyncio import (
 
 from app.config import settings
 
-# Small persistent pool: keeps exactly one connection alive per Lambda instance.
+# Persistent pool sized for Fluid Compute concurrency.
 #
 # Architecture rationale (Vercel Fluid Compute + Neon):
-# - pool_size=1: each Lambda instance holds ONE warm connection.
-# - This connection keeps Neon compute active for the Lambda instance's lifetime.
-# - On Lambda cold-start, the pool establishes one connection (waking Neon once).
-# - All subsequent requests within the same Lambda instance reuse the warm connection —
-#   no per-request Neon wakeup latency.
-# - max_overflow=0: no burst connections; one connection per instance is sufficient.
+# - pool_size=5: Fluid Compute routes multiple concurrent requests to the same Lambda
+#   instance. pool_size=5 supports up to 5 concurrent DB operations without exhausting
+#   the QueuePool and raising TimeoutError.
+# - max_overflow=2: allows up to 2 extra connections under burst load before rejecting.
 # - pool_pre_ping=True: detects if Neon compute suspended mid-session and reconnects
 #   transparently on the next request.
 # - pool_recycle=300: recycles connections held for 5+ minutes to prevent stale state.
-# - pool_timeout=30: request fails fast if the single connection is somehow unavailable.
+# - pool_timeout=5: fails fast (5s) so the retry in get_db() can attempt reconnection
+#   quickly rather than blocking for 30s per attempt.
 #
 # statement_cache_size=0 is required for PgBouncer transaction mode compatibility.
 # timeout=5 sets a 5-second asyncpg connection timeout. When Neon is waking from
@@ -65,9 +65,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Provide a DB session with retry logic for transient Neon compute wake-up errors.
 
     When Neon auto-suspends and a request arrives during wake-up, SQLAlchemy raises
-    OperationalError or DBAPIError. We retry up to _DB_RETRY_ATTEMPTS times with
-    exponential backoff (_DB_RETRY_BASE_WAIT * 2^attempt seconds: 1s, 2s) to give
-    the compute time to become ready before propagating the error.
+    OperationalError or DBAPIError. Under Fluid Compute, concurrent requests can also
+    exhaust the QueuePool (SQLAlchemyTimeoutError) or hit a TCP timeout
+    (asyncio.TimeoutError). All four are retried up to _DB_RETRY_ATTEMPTS times with
+    exponential backoff (_DB_RETRY_BASE_WAIT * 2^attempt seconds: 1s, 2s) to give the
+    compute time to become ready before propagating the error.
     """
     last_err: Exception | None = None
     for attempt in range(_DB_RETRY_ATTEMPTS):
@@ -75,7 +77,7 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             async with AsyncSessionLocal() as session:
                 yield session
                 return
-        except (OperationalError, DBAPIError) as exc:
+        except (OperationalError, DBAPIError, SQLAlchemyTimeoutError, asyncio.TimeoutError) as exc:
             last_err = exc
             if attempt < _DB_RETRY_ATTEMPTS - 1:
                 wait = _DB_RETRY_BASE_WAIT * (2 ** attempt)

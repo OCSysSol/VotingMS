@@ -96,13 +96,13 @@ class TestDatabase:
         assert engine is not None
 
     def test_engine_uses_persistent_pool(self):
-        """Verify the engine is configured with a small persistent pool (pool_size=1)."""
+        """Verify the engine is configured with a QueuePool sized for Fluid Compute concurrency."""
         from sqlalchemy.pool import QueuePool
 
         from app.database import engine
 
         assert isinstance(engine.pool, QueuePool)
-        assert engine.pool.size() == 1
+        assert engine.pool.size() == 5
 
     def test_engine_connect_args(self):
         """Engine connect_args disables statement cache (PgBouncer compat) and sets asyncpg timeout.
@@ -268,6 +268,67 @@ class TestDatabase:
             async def __aenter__(self):
                 if self._should_fail:
                     raise DBAPIError("db error", None, None)
+                return real_session
+
+            async def __aexit__(self, *args):
+                return False
+
+        with patch("app.database.AsyncSessionLocal", FlakySessionLocal), \
+             patch("app.database.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            gen = get_db()
+            session = await gen.__anext__()
+            assert session is real_session
+            assert mock_sleep.call_count == 1
+
+    async def test_get_db_retries_on_sqlalchemy_timeout_error_then_succeeds(self):
+        """get_db retries on SQLAlchemy TimeoutError (QueuePool exhaustion) and eventually yields."""
+        from unittest.mock import AsyncMock, patch
+        from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
+
+        from app.database import get_db
+
+        real_session = AsyncMock()
+        call_count = 0
+
+        class FlakySessionLocal:
+            def __init__(self):
+                nonlocal call_count
+                call_count += 1
+                self._should_fail = (call_count == 1)
+
+            async def __aenter__(self):
+                if self._should_fail:
+                    raise SQLAlchemyTimeoutError("QueuePool limit exceeded", None, None)
+                return real_session
+
+            async def __aexit__(self, *args):
+                return False
+
+        with patch("app.database.AsyncSessionLocal", FlakySessionLocal), \
+             patch("app.database.asyncio.sleep", new_callable=AsyncMock) as mock_sleep:
+            gen = get_db()
+            session = await gen.__anext__()
+            assert session is real_session
+            assert mock_sleep.call_count == 1
+
+    async def test_get_db_retries_on_asyncio_timeout_error_then_succeeds(self):
+        """get_db retries on asyncio.TimeoutError (TCP connection timeout) and eventually yields."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.database import get_db
+
+        real_session = AsyncMock()
+        call_count = 0
+
+        class FlakySessionLocal:
+            def __init__(self):
+                nonlocal call_count
+                call_count += 1
+                self._should_fail = (call_count == 1)
+
+            async def __aenter__(self):
+                if self._should_fail:
+                    raise asyncio.TimeoutError("TCP connection timeout")
                 return real_session
 
             async def __aexit__(self, *args):

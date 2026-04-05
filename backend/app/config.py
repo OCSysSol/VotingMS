@@ -70,12 +70,15 @@ class Settings(BaseSettings):
     # Defaults to False so the endpoint is blocked in all deployed environments unless opted in.
     enable_ballot_reset: bool = False
 
-    # Pool settings for the small persistent pool (see database.py).
-    # pool_size=1 keeps exactly one connection alive per Lambda instance.
+    # Pool settings for the persistent pool (see database.py).
+    # Fluid Compute handles multiple concurrent requests per Lambda instance, so
+    # pool_size=5 supports up to 5 concurrent DB operations without exhausting the
+    # QueuePool. pool_timeout=5s fails fast so the retry in get_db() can attempt
+    # reconnection quickly without blocking for 30s per attempt.
     # Override via DB_POOL_SIZE, DB_MAX_OVERFLOW, DB_POOL_TIMEOUT env vars if needed.
-    db_pool_size: int = 1
-    db_max_overflow: int = 0
-    db_pool_timeout: int = 30
+    db_pool_size: int = 5
+    db_max_overflow: int = 2
+    db_pool_timeout: int = 5  # Fail fast so retries kick in quickly
 
     @field_validator("admin_password")
     @classmethod
