@@ -116,6 +116,7 @@ if _db_url:  # pragma: no cover — requires a live DB; exercised by integration
 # frontend/dist is included in the Lambda via vercel.json includeFiles.
 _dist_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_dist_dir):
+    from fastapi import HTTPException  # noqa: E402
     from fastapi.staticfiles import StaticFiles  # noqa: E402
     from fastapi.responses import FileResponse  # noqa: E402
     from starlette.types import Scope  # noqa: E402
@@ -145,6 +146,12 @@ if os.path.isdir(_dist_dir):
         candidate = os.path.join(_dist_dir, full_path)  # pragma: no cover
         if os.path.isfile(candidate):  # pragma: no cover
             return FileResponse(candidate)  # pragma: no cover
+        _, ext = os.path.splitext(full_path)  # pragma: no cover
+        if ext and ext.lower() in {  # pragma: no cover
+            '.png', '.jpg', '.jpeg', '.ico', '.svg', '.webp', '.gif',  # pragma: no cover
+            '.woff', '.woff2', '.ttf', '.eot', '.map'  # pragma: no cover
+        }:  # pragma: no cover
+            raise HTTPException(status_code=404)  # pragma: no cover
         return FileResponse(  # pragma: no cover
             os.path.join(_dist_dir, "index.html"),  # pragma: no cover
             headers=_NO_CACHE,  # pragma: no cover
