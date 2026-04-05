@@ -35,24 +35,19 @@ jobs:
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
-      - name: Determine test URL
-        id: test_url
+      - name: Validate test URL
         run: |
-          ENVIRONMENT="${{ github.event.deployment.environment }}"
-          DEMO_URL="https://vms-demo.ocss.tech"
-          # For demo branch deployments, Vercel sets the environment to a name
-          # containing "demo". Use the canonical alias URL instead of the raw
-          # deployment URL (which goes cold between branch E2E and post-merge E2E).
-          if echo "$ENVIRONMENT" | grep -qi "demo"; then
-            echo "url=${DEMO_URL}" >> "$GITHUB_OUTPUT"
-          else
-            echo "url=${{ github.event.deployment_status.environment_url }}" >> "$GITHUB_OUTPUT"
+          URL="${{ github.event.deployment_status.environment_url }}"
+          if [ -z "$URL" ] || echo "$URL" | grep -qi "localhost"; then
+            echo "ERROR: deployment URL is empty or localhost: '$URL'"
+            exit 1
           fi
+          echo "Test URL: $URL"
 
       - name: Run E2E tests
         run: cd frontend && npx playwright test
         env:
-          PLAYWRIGHT_BASE_URL: ${{ steps.test_url.outputs.url }}
+          PLAYWRIGHT_BASE_URL: ${{ github.event.deployment_status.environment_url }}
           CI: 'true'
           VERCEL_BYPASS_TOKEN: ${{ secrets.VERCEL_BYPASS_TOKEN }}
           ADMIN_USERNAME: ${{ secrets.ADMIN_USERNAME }}
