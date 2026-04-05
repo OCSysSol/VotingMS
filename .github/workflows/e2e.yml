@@ -255,7 +255,7 @@ jobs:
         with:
           pattern: playwright-blob-*-${{ github.run_id }}
           path: frontend/all-blob-reports
-          merge-multiple: false
+          merge-multiple: true
 
       - name: Merge Playwright reports
         run: cd frontend && npx playwright merge-reports --reporter html all-blob-reports
