@@ -6,6 +6,9 @@ name: E2E Tests (post-deploy)
 on:
   deployment_status:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── 1. Setup: seed data, save auth state ────────────────────────────────────
   setup:
