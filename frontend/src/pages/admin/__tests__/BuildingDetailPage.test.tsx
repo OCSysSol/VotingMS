@@ -16,13 +16,13 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderPage(buildingId = "b1") {
+function renderPage(buildingId = "b1", search = "") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/admin/buildings/${buildingId}`]}>
+      <MemoryRouter initialEntries={[`/admin/buildings/${buildingId}${search}`]}>
         <Routes>
           <Route path="/admin/buildings/:buildingId" element={<BuildingDetailPage />} />
         </Routes>
@@ -896,5 +896,96 @@ describe("BuildingDetailPage", () => {
       expect(screen.getByRole("button", { name: "Delete Building" })).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Delete Building" })).toHaveClass("btn--danger");
+  });
+
+  // --- Pagination ---
+
+  it("does not show pagination when total count is 2 (≤ PAGE_SIZE=20)", async () => {
+    // Default MSW: ADMIN_LOT_OWNERS has 2 items for b1, count = 2
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByText("1A")).toBeInTheDocument();
+    });
+    // Pagination nav only renders when totalPages > 1; with 2 items it stays hidden
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+  });
+
+  it("shows pagination nav when count exceeds PAGE_SIZE", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    renderPage("b1");
+    await waitFor(() => {
+      const navs = screen.getAllByRole("navigation", { name: "Pagination" });
+      expect(navs.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("passes lotPage=2 URL param when navigating to page 2", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getAllByRole("navigation", { name: "Pagination" }).length).toBeGreaterThan(0);
+    });
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
+    // After clicking page 2, the Pagination component should show page 2 as active
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 2" })[0]).toHaveClass("pagination__btn--active");
+    });
+  });
+
+  it("prefetches next page when there are more items than PAGE_SIZE", async () => {
+    let prefetchCalled = false;
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      ),
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners", ({ request }) => {
+        const url = new URL(request.url);
+        const offset = url.searchParams.get("offset");
+        if (offset === "20") prefetchCalled = true;
+        return HttpResponse.json([]);
+      })
+    );
+    renderPage("b1");
+    await waitFor(() => {
+      expect(prefetchCalled).toBe(true);
+    });
+  });
+
+  it("reads lotPage from URL search param", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    renderPage("b1", "?lotPage=2");
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 2" })[0]).toHaveClass("pagination__btn--active");
+    });
+  });
+
+  it("navigates back to page 1 removing lotPage param", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage("b1", "?lotPage=2");
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 1" })[0]).toBeInTheDocument();
+    });
+    await user.click(screen.getAllByRole("button", { name: "Go to page 1" })[0]);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 1" })[0]).toHaveClass("pagination__btn--active");
+    });
   });
 });

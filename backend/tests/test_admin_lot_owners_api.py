@@ -71,6 +71,49 @@ class TestListLotOwners:
         assert "voter1@test.com" in all_emails
         assert "voter2@test.com" in all_emails
 
+    async def test_pagination_limit_and_offset(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """limit and offset params page through results correctly."""
+        for i in range(5):
+            lo = LotOwner(building_id=building.id, lot_number=f"PG{i:02d}", unit_entitlement=10)
+            db_session.add(lo)
+        await db_session.commit()
+
+        resp_p1 = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?limit=3&offset=0"
+        )
+        assert resp_p1.status_code == 200
+        page1 = resp_p1.json()
+        assert len(page1) == 3
+
+        resp_p2 = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?limit=3&offset=3"
+        )
+        assert resp_p2.status_code == 200
+        page2 = resp_p2.json()
+        assert len(page2) == 2  # only 2 remaining
+
+        # No overlap between pages
+        ids_p1 = {o["id"] for o in page1}
+        ids_p2 = {o["id"] for o in page2}
+        assert ids_p1.isdisjoint(ids_p2)
+
+    async def test_default_limit_is_20(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """Default limit is 20 — requesting without limit returns at most 20."""
+        for i in range(25):
+            lo = LotOwner(building_id=building.id, lot_number=f"DL{i:02d}", unit_entitlement=10)
+            db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners"
+        )
+        assert response.status_code == 200
+        assert len(response.json()) == 20
+
     # --- State / precondition errors ---
 
     async def test_building_not_found_returns_404(self, client: AsyncClient):
@@ -78,6 +121,76 @@ class TestListLotOwners:
             f"/api/admin/buildings/{uuid.uuid4()}/lot-owners"
         )
         assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/buildings/{building_id}/lot-owners/count
+# ---------------------------------------------------------------------------
+
+
+class TestCountLotOwners:
+    # --- Happy path ---
+
+    async def test_returns_count_for_building(
+        self, client: AsyncClient, building_with_owners: Building
+    ):
+        response = await client.get(
+            f"/api/admin/buildings/{building_with_owners.id}/lot-owners/count"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data == {"count": 2}
+
+    async def test_returns_zero_for_empty_building(
+        self, client: AsyncClient, building: Building
+    ):
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners/count"
+        )
+        assert response.status_code == 200
+        assert response.json() == {"count": 0}
+
+    async def test_count_reflects_added_owners(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        for i in range(7):
+            lo = LotOwner(building_id=building.id, lot_number=f"CNT{i:02d}", unit_entitlement=10)
+            db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners/count"
+        )
+        assert response.status_code == 200
+        assert response.json()["count"] == 7
+
+    async def test_count_is_independent_of_other_buildings(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Count for one building is not affected by lot owners in another."""
+        b1 = Building(name="Cnt Bldg A", manager_email="cnta@test.com")
+        b2 = Building(name="Cnt Bldg B", manager_email="cntb@test.com")
+        db_session.add(b1)
+        db_session.add(b2)
+        await db_session.flush()
+        for i in range(3):
+            db_session.add(LotOwner(building_id=b1.id, lot_number=f"CA{i}", unit_entitlement=10))
+        for i in range(5):
+            db_session.add(LotOwner(building_id=b2.id, lot_number=f"CB{i}", unit_entitlement=10))
+        await db_session.commit()
+
+        r1 = await client.get(f"/api/admin/buildings/{b1.id}/lot-owners/count")
+        r2 = await client.get(f"/api/admin/buildings/{b2.id}/lot-owners/count")
+        assert r1.json()["count"] == 3
+        assert r2.json()["count"] == 5
+
+    # --- Input validation ---
+
+    async def test_invalid_building_uuid_returns_422(self, client: AsyncClient):
+        response = await client.get(
+            "/api/admin/buildings/not-a-uuid/lot-owners/count"
+        )
+        assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------

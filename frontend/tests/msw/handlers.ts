@@ -578,8 +578,19 @@ export const adminHandlers = [
     return HttpResponse.json<BuildingImportResult>({ created: 2, updated: 1 });
   }),
 
-  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, () => {
-    return HttpResponse.json(ADMIN_LOT_OWNERS);
+  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, ({ params }) => {
+    const owners = ADMIN_LOT_OWNERS.filter((lo) => lo.building_id === params.buildingId);
+    return HttpResponse.json({ count: owners.length });
+  }),
+
+  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request, params }) => {
+    const url = new URL(request.url);
+    const limitParam = url.searchParams.get("limit");
+    const offsetParam = url.searchParams.get("offset");
+    const owners = ADMIN_LOT_OWNERS.filter((lo) => lo.building_id === params.buildingId);
+    const offset = offsetParam !== null ? parseInt(offsetParam, 10) : 0;
+    const limit = limitParam !== null ? parseInt(limitParam, 10) : owners.length;
+    return HttpResponse.json(owners.slice(offset, offset + limit));
   }),
 
   http.get(`${BASE}/api/admin/lot-owners/:lotOwnerId`, ({ params }) => {

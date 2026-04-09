@@ -376,8 +376,24 @@ export async function importBuildings(file: File): Promise<BuildingImportResult>
 // Lot owners
 // ---------------------------------------------------------------------------
 
-export async function listLotOwners(buildingId: string): Promise<LotOwner[]> {
-  return apiFetch<LotOwner[]>(`/api/admin/buildings/${buildingId}/lot-owners`);
+export async function listLotOwners(
+  buildingId: string,
+  params?: { limit?: number; offset?: number }
+): Promise<LotOwner[]> {
+  const qs = new URLSearchParams();
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch<LotOwner[]>(
+    `/api/admin/buildings/${buildingId}/lot-owners${query ? `?${query}` : ""}`
+  );
+}
+
+export async function countLotOwners(buildingId: string): Promise<number> {
+  const data = await apiFetch<{ count: number }>(
+    `/api/admin/buildings/${buildingId}/lot-owners/count`
+  );
+  return data.count;
 }
 
 export async function getLotOwner(lotOwnerId: string): Promise<LotOwner> {
