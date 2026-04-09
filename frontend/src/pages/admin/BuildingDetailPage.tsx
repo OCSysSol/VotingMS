@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBuilding, listLotOwners, archiveBuilding, updateBuilding, deleteBuilding } from "../../api/admin";
+import { getBuilding, listLotOwners, countLotOwners, archiveBuilding, updateBuilding, deleteBuilding } from "../../api/admin";
 import type { Building, LotOwner } from "../../types";
 import LotOwnerTable from "../../components/admin/LotOwnerTable";
 import LotOwnerForm from "../../components/admin/LotOwnerForm";
 import LotOwnerCSVUpload from "../../components/admin/LotOwnerCSVUpload";
 import ProxyNominationsUpload from "../../components/admin/ProxyNominationsUpload";
 import FinancialPositionUpload from "../../components/admin/FinancialPositionUpload";
+import Pagination from "../../components/admin/Pagination";
+
+const PAGE_SIZE = 20;
 
 const FOCUSABLE_SELECTORS =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -316,6 +319,7 @@ export default function BuildingDetailPage() {
   const { buildingId } = useParams<{ buildingId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [editTarget, setEditTarget] = useState<LotOwner | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -327,21 +331,56 @@ export default function BuildingDetailPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
+  // Read lotPage from URL search params; default to 1
+  const lotPageParam = parseInt(searchParams.get("lotPage") ?? "1", 10);
+  const lotPage = isNaN(lotPageParam) || lotPageParam < 1 ? 1 : lotPageParam;
+
   const { data: building } = useQuery<Building>({
     queryKey: ["admin", "buildings", buildingId],
     queryFn: () => getBuilding(buildingId!),
     enabled: !!buildingId,
   });
 
+  const { data: lotCountData } = useQuery<number>({
+    queryKey: ["admin", "lot-owners", "count", buildingId],
+    queryFn: () => countLotOwners(buildingId!),
+    enabled: !!buildingId,
+  });
+
+  const totalLotCount = lotCountData ?? 0;
+  const totalLotPages = Math.max(1, Math.ceil(totalLotCount / PAGE_SIZE));
+  const safeLotPage = Math.min(lotPage, totalLotPages);
+
   const {
     data: lotOwners = [],
     isLoading,
     error,
   } = useQuery<LotOwner[]>({
-    queryKey: ["admin", "lot-owners", buildingId],
-    queryFn: () => listLotOwners(buildingId!),
+    queryKey: ["admin", "lot-owners", buildingId, safeLotPage],
+    queryFn: () => listLotOwners(buildingId!, { limit: PAGE_SIZE, offset: (safeLotPage - 1) * PAGE_SIZE }),
     enabled: !!buildingId,
   });
+
+  // Prefetch next page
+  useEffect(() => {
+    const nextOffset = safeLotPage * PAGE_SIZE;
+    if (nextOffset < totalLotCount && buildingId) {
+      void queryClient.prefetchQuery({
+        queryKey: ["admin", "lot-owners", buildingId, safeLotPage + 1],
+        queryFn: () => listLotOwners(buildingId, { limit: PAGE_SIZE, offset: nextOffset }),
+      });
+    }
+  }, [safeLotPage, totalLotCount, buildingId, queryClient]);
+
+  function handleLotPageChange(newPage: number) {
+    const next = new URLSearchParams(searchParams);
+    if (newPage === 1) {
+      next.delete("lotPage");
+    } else {
+      next.set("lotPage", String(newPage));
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   function handleEdit(lo: LotOwner) {
     setEditTarget(lo);
@@ -490,7 +529,25 @@ export default function BuildingDetailPage() {
       )}
 
       <div className="admin-card">
-        <LotOwnerTable lotOwners={lotOwners} onEdit={handleEdit} isLoading={isLoading} />
+        <Pagination
+          page={safeLotPage}
+          totalPages={totalLotPages}
+          totalItems={totalLotCount}
+          pageSize={PAGE_SIZE}
+          onPageChange={handleLotPageChange}
+          isLoading={isLoading}
+        />
+        <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 0.15s", pointerEvents: isLoading ? "none" : "auto" }}>
+          <LotOwnerTable lotOwners={lotOwners} onEdit={handleEdit} isLoading={isLoading} />
+        </div>
+        <Pagination
+          page={safeLotPage}
+          totalPages={totalLotPages}
+          totalItems={totalLotCount}
+          pageSize={PAGE_SIZE}
+          onPageChange={handleLotPageChange}
+          isLoading={isLoading}
+        />
       </div>
 
       <LotOwnerCSVUpload

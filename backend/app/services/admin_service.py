@@ -438,7 +438,16 @@ async def _get_proxy_email(lot_owner_id: uuid.UUID, db: AsyncSession) -> str | N
     return row[0] if row is not None else None
 
 
-async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int = 1000, offset: int = 0) -> list[dict]:
+async def count_lot_owners(building_id: uuid.UUID, db: AsyncSession) -> int:
+    result = await db.execute(
+        select(func.count()).select_from(LotOwner).where(
+            LotOwner.building_id == building_id,
+        )
+    )
+    return result.scalar_one()
+
+
+async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int = 20, offset: int = 0) -> list[dict]:
     await get_building_or_404(building_id, db)
     result = await db.execute(
         select(LotOwner).where(LotOwner.building_id == building_id).offset(offset).limit(limit)

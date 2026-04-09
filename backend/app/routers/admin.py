@@ -272,12 +272,21 @@ async def delete_building(
 )
 async def list_lot_owners(
     building_id: uuid.UUID,
-    limit: int = Query(default=1000, le=1000),
+    limit: int = Query(default=20, le=1000),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
     owners = await admin_service.list_lot_owners(building_id, db, limit=limit, offset=offset)
     return [LotOwnerOut(**o) for o in owners]
+
+
+@router.get("/buildings/{building_id}/lot-owners/count")
+async def count_lot_owners_endpoint(
+    building_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, int]:
+    count = await admin_service.count_lot_owners(building_id, db)
+    return {"count": count}
 
 
 @router.post(

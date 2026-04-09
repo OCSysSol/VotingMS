@@ -6,6 +6,8 @@ import {
   getGeneralMeetingsCount,
   listBuildings,
   listGeneralMeetings,
+  listLotOwners,
+  countLotOwners,
   deleteGeneralMeeting,
   deleteBuilding,
   deleteMotion,
@@ -415,6 +417,120 @@ describe("listGeneralMeetings with params", () => {
     await listGeneralMeetings({ limit: 20 });
     expect(capturedUrl).not.toContain("sort_by");
     expect(capturedUrl).not.toContain("sort_dir");
+  });
+});
+
+describe("listLotOwners", () => {
+  // --- Happy path ---
+
+  it("fetches lot owners without pagination params", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([{ id: "lo1" }]);
+      })
+    );
+    const result = await listLotOwners("b1");
+    expect(result).toEqual([{ id: "lo1" }]);
+    expect(capturedUrl).not.toContain("?");
+  });
+
+  it("sends limit and offset when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { limit: 20, offset: 40 });
+    expect(capturedUrl).toContain("limit=20");
+    expect(capturedUrl).toContain("offset=40");
+  });
+
+  it("sends only limit when offset is undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { limit: 20 });
+    expect(capturedUrl).toContain("limit=20");
+    expect(capturedUrl).not.toContain("offset");
+  });
+
+  it("sends only offset when limit is undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { offset: 20 });
+    expect(capturedUrl).toContain("offset=20");
+    expect(capturedUrl).not.toContain("limit");
+  });
+
+  it("sends no query string when params object is empty", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", {});
+    expect(capturedUrl).not.toContain("?");
+  });
+
+  // --- State / precondition errors ---
+
+  it("throws on non-ok response", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, () =>
+        HttpResponse.json({ detail: "Not found" }, { status: 404 })
+      )
+    );
+    await expect(listLotOwners("b-missing")).rejects.toThrow("404");
+  });
+});
+
+describe("countLotOwners", () => {
+  // --- Happy path ---
+
+  it("returns count as a number", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ count: 42 })
+      )
+    );
+    const result = await countLotOwners("b1");
+    expect(result).toBe(42);
+  });
+
+  it("returns 0 for empty building", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ count: 0 })
+      )
+    );
+    const result = await countLotOwners("b-empty");
+    expect(result).toBe(0);
+  });
+
+  // --- State / precondition errors ---
+
+  it("throws on non-ok response", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ detail: "Not found" }, { status: 404 })
+      )
+    );
+    await expect(countLotOwners("b-missing")).rejects.toThrow("404");
   });
 });
 
