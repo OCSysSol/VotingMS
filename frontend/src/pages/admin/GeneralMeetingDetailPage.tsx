@@ -236,7 +236,7 @@ export default function GeneralMeetingDetailPage() {
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteGeneralMeeting(meetingId!),
-    onSuccess: () => {
+    onSuccess: async () => {
       navigate("/admin/general-meetings");
     },
     onError: (err: Error) => {
@@ -259,7 +259,7 @@ export default function GeneralMeetingDetailPage() {
   const [resendError, setResendError] = useState<string | null>(null);
   const resendMutation = useMutation({
     mutationFn: () => resendReport(meetingId!),
-    onSuccess: () => {
+    onSuccess: async () => {
       setResendSuccess(true);
       setResendError(null);
     },
@@ -310,11 +310,11 @@ export default function GeneralMeetingDetailPage() {
 
   const addMotionMutation = useMutation({
     mutationFn: (data: AddMotionRequest) => addMotionToMeeting(meetingId!, data),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
       setShowAddMotionModal(false);
       setAddMotionError(null);
       setAddMotionForm({ title: "", description: "", motion_type: "general", is_multi_choice: false, motion_number: "", option_limit: "1", options: [{ text: "" }, { text: "" }] });
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
       setAddMotionError(error.message || "Failed to add motion");
@@ -324,10 +324,10 @@ export default function GeneralMeetingDetailPage() {
   const updateMotionMutation = useMutation({
     mutationFn: ({ motionId, data }: { motionId: string; data: UpdateMotionRequest }) =>
       updateMotion(motionId, data),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditingMotion(null);
       setEditMotionError(null);
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
       setEditMotionError(error.message || "Failed to update motion");
@@ -336,13 +336,13 @@ export default function GeneralMeetingDetailPage() {
 
   const deleteMotionMutation = useMutation({
     mutationFn: (motionId: string) => deleteMotion(motionId),
-    onSuccess: (_data, motionId) => {
+    onSuccess: async (_data, motionId) => {
       setDeleteMotionErrors((prev) => {
         const next = { ...prev };
         delete next[motionId];
         return next;
       });
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error, motionId) => {
       setDeleteMotionErrors((prev) => ({ ...prev, [motionId]: error.message || "Failed to delete motion" }));
@@ -359,14 +359,14 @@ export default function GeneralMeetingDetailPage() {
       setPendingCloseMotionId(motionId);
       return closeMotion(motionId);
     },
-    onSuccess: (_data, motionId) => {
+    onSuccess: async (_data, motionId) => {
       setPendingCloseMotionId(null);
       setCloseMotionErrors((prev) => {
         const next = { ...prev };
         delete next[motionId];
         return next;
       });
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error, motionId) => {
       setPendingCloseMotionId(null);
@@ -409,9 +409,9 @@ export default function GeneralMeetingDetailPage() {
         : "Failed to update visibility";
       setVisibilityErrors((prev) => ({ ...prev, [variables.motionId]: msg }));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setPendingVisibilityMotionId(null);
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
   });
 
@@ -545,10 +545,10 @@ export default function GeneralMeetingDetailPage() {
         <AdminVoteEntryPanel
           meeting={meeting}
           onClose={() => setShowVoteEntryPanel(false)}
-          onSuccess={() => {
+          onSuccess={async () => {
             setShowVoteEntryPanel(false);
             setVoteEntrySuccess("In-person votes submitted successfully.");
-            void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+            await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
           }}
         />
       )}
