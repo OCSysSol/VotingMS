@@ -1267,6 +1267,97 @@ describe("VotingPage", () => {
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
+  it("fix-vote-422: HTTP POST body excludes already-voted motions and 'selected' sentinel (server-side capture)", async () => {
+    // Captures the actual HTTP request body sent to the server.
+    // Asserts: votes array must not contain MOTION_ID_1 (already_voted=true)
+    // and must not contain any entry with choice="selected" (MC sentinel).
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(`${BASE}/api/general-meeting/${AGM_ID}/submit`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          submitted: true,
+          lots: [{ lot_owner_id: "lo1", lot_number: "1", votes: [] }],
+        });
+      })
+    );
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Motion 1 (already voted)",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: true,
+            submitted_choice: "yes",
+            option_limit: null,
+            options: [],
+            voting_closed_at: "2024-06-01T11:00:00Z",
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2 (new)",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo1",
+          lot_number: "1",
+          financial_position: "normal",
+          already_submitted: false,
+          is_proxy: false,
+          voted_motion_ids: [MOTION_ID_1],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 2 (new)" }));
+
+    // Vote on Motion 2 (the only interactive motion)
+    const forButtons = screen.getAllByRole("button", { name: "For" });
+    await user.click(forButtons[forButtons.length - 1]);
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(capturedBody).not.toBeNull();
+    });
+
+    const votes = (capturedBody as { votes: Array<{ motion_id: string; choice: string }> }).votes;
+    // Already-voted motion must NOT appear in the POST body
+    const motionIds = votes.map((v) => v.motion_id);
+    expect(motionIds).not.toContain(MOTION_ID_1);
+    // Motion 2 must appear
+    expect(motionIds).toContain(MOTION_ID_2);
+    // No "selected" sentinel values
+    const sentinelVotes = votes.filter((v) => v.choice === "selected");
+    expect(sentinelVotes).toHaveLength(0);
+
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
   // --- In-arrear warning banner ---
 
   it("arrear banner not shown when no lots are in arrear", async () => {

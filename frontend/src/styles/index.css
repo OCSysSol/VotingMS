@@ -1178,6 +1178,12 @@ button, input, select, textarea {
   margin-top: 24px;
 }
 
+.dialog__error {
+  color: var(--red);
+  font-size: 0.875rem;
+  margin-bottom: 12px;
+}
+
 /* === CONFIRMATION PAGE === */
 .confirmation {
   padding: 4px 0 24px;

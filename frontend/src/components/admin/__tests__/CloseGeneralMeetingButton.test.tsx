@@ -97,4 +97,30 @@ describe("CloseGeneralMeetingButton", () => {
       expect(screen.getByText(/409/)).toBeInTheDocument();
     });
   });
+
+  it("dialog remains open while mutation is in flight (isPending)", async () => {
+    let resolve!: () => void;
+    server.use(
+      http.post("http://localhost:8000/api/admin/general-meetings/:meetingId/close", () =>
+        new Promise<Response>((res) => {
+          resolve = () =>
+            res(HttpResponse.json({ id: "agm1", status: "closed", closed_at: "2024-06-01T13:00:00Z" }) as Response);
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderComponent("agm1", "2024 AGM");
+    await user.click(screen.getByRole("button", { name: "Close Voting" }));
+    await user.click(screen.getByRole("button", { name: "Confirm Close" }));
+    // While in flight: dialog must remain visible and confirm button shows loading label
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Closing..." })).toBeDisabled();
+    });
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // Resolve the mutation — dialog closes
+    resolve();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
 });
