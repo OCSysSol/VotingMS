@@ -145,9 +145,6 @@ export const ADMIN_MEETING_LIST: GeneralMeetingListItem[] = [
   },
 ];
 
-// Keep backward-compatible alias
-export const ADMIN_AGM_LIST = ADMIN_MEETING_LIST;
-
 export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   id: "agm1",
   building_id: "b1",
@@ -197,9 +194,6 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
     },
   ],
 };
-
-// Keep backward-compatible alias
-export const ADMIN_AGM_DETAIL = ADMIN_MEETING_DETAIL;
 
 export const ADMIN_MEETING_DETAIL_CLOSED: GeneralMeetingDetail = {
   ...ADMIN_MEETING_DETAIL,
@@ -254,9 +248,6 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
     },
   ],
 };
-
-// Keep backward-compatible alias
-export const ADMIN_AGM_DETAIL_CLOSED = ADMIN_MEETING_DETAIL_CLOSED;
 
 export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
   ...ADMIN_MEETING_DETAIL,
@@ -377,9 +368,6 @@ export const ADMIN_CREATED_MEETING: GeneralMeetingOut = {
     },
   ],
 };
-
-// Keep backward-compatible alias
-export const ADMIN_CREATED_AGM = ADMIN_CREATED_MEETING;
 
 // Multi-choice meeting detail fixture with computed outcomes (Slice 4)
 export const ADMIN_MEETING_DETAIL_MC_OUTCOME: GeneralMeetingDetail = {

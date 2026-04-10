@@ -79,7 +79,7 @@ export function BuildingSelectPage() {
           />
         )}
         {meetingsLoading && (
-          <p className="state-message" style={{ padding: "24px 0 8px" }}>
+          <p className="state-message" role="status" style={{ padding: "24px 0 8px" }}>
             Loading General Meetings...
           </p>
         )}
