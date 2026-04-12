@@ -5,7 +5,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import LotOwnerForm from "../LotOwnerForm";
-import { addEmailToLotOwner, getLotOwner, removeEmailFromLotOwner, setLotOwnerProxy, removeLotOwnerProxy } from "../../../api/admin";
+import {
+  addEmailToLotOwner,
+  getLotOwner,
+  removeEmailFromLotOwner,
+  addOwnerEmailToLotOwner,
+  updateOwnerEmail,
+  removeOwnerEmailById,
+  setLotOwnerProxy,
+  removeLotOwnerProxy,
+} from "../../../api/admin";
 import type { LotOwner } from "../../../types";
 
 const existingLotOwner: LotOwner = {
@@ -14,6 +23,7 @@ const existingLotOwner: LotOwner = {
   lot_number: "1A",
   given_name: null,
   surname: null,
+  owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: null, surname: null }],
   emails: ["owner1@example.com"],
   unit_entitlement: 100,
   financial_position: "normal",
@@ -23,6 +33,10 @@ const existingLotOwner: LotOwner = {
 const multiEmailOwner: LotOwner = {
   ...existingLotOwner,
   id: "lo1",
+  owner_emails: [
+    { id: "em1", email: "owner1@example.com", given_name: null, surname: null },
+    { id: "em2", email: "second@example.com", given_name: null, surname: null },
+  ],
   emails: ["owner1@example.com", "second@example.com"],
 };
 
@@ -440,32 +454,32 @@ describe("LotOwnerForm - Edit modal close behaviours", () => {
 // Email management (US-UI03)
 // ---------------------------------------------------------------------------
 describe("LotOwnerForm - Edit modal email management", () => {
-  it("renders Add email input and button", () => {
+  it("renders Add owner email input and button", () => {
     renderEditForm(existingLotOwner);
-    expect(screen.getByLabelText("Add email")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add email" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Add owner email")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add owner" })).toBeInTheDocument();
   });
 
   it("shows validation error when adding empty email", async () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     expect(screen.getByText("Email is required.")).toBeInTheDocument();
   });
 
   it("shows validation error for invalid email format", async () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "not-an-email");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "not-an-email");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     expect(screen.getByText("Please enter a valid email address.")).toBeInTheDocument();
   });
 
   it("adds a new email successfully", async () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "added@example.com");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "added@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
       expect(screen.getByText("added@example.com")).toBeInTheDocument();
     });
@@ -474,17 +488,17 @@ describe("LotOwnerForm - Edit modal email management", () => {
   it("clears the add email input after successful add", async () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "added@example.com");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "added@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
-      expect(screen.getByLabelText("Add email")).toHaveValue("");
+      expect(screen.getByLabelText("Add owner email")).toHaveValue("");
     });
   });
 
   it("adds email when Enter key is pressed in the add email input", async () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "entered@example.com");
+    await user.type(screen.getByLabelText("Add owner email"), "entered@example.com");
     await user.keyboard("{Enter}");
     await waitFor(() => {
       expect(screen.getByText("entered@example.com")).toBeInTheDocument();
@@ -493,14 +507,14 @@ describe("LotOwnerForm - Edit modal email management", () => {
 
   it("shows server error when add email API fails", async () => {
     server.use(
-      http.post("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/emails", () => {
+      http.post("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails", () => {
         return HttpResponse.json({ detail: "Conflict" }, { status: 409 });
       })
     );
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "dup@example.com");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "dup@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
       expect(screen.getByText(/409/)).toBeInTheDocument();
     });
@@ -509,17 +523,21 @@ describe("LotOwnerForm - Edit modal email management", () => {
   it("normalises email to lowercase before calling add email API", async () => {
     let capturedEmail: string | undefined;
     server.use(
-      http.post("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/emails", async ({ request }) => {
+      http.post("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails", async ({ request }) => {
         const body = await request.json() as { email?: string };
         capturedEmail = body?.email;
-        const updated = { ...existingLotOwner, emails: [...existingLotOwner.emails, capturedEmail ?? ""] };
-        return HttpResponse.json(updated);
+        const updated = {
+          ...existingLotOwner,
+          owner_emails: [...existingLotOwner.owner_emails, { id: "em-new", email: capturedEmail ?? "", given_name: null, surname: null }],
+          emails: [...existingLotOwner.emails, capturedEmail ?? ""],
+        };
+        return HttpResponse.json(updated, { status: 201 });
       })
     );
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
-    await user.type(screen.getByLabelText("Add email"), "UPPER@EXAMPLE.COM");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "UPPER@EXAMPLE.COM");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
       expect(capturedEmail).toBe("upper@example.com");
     });
@@ -556,7 +574,7 @@ describe("LotOwnerForm - Edit modal email management", () => {
 
   it("shows server error when remove email API fails", async () => {
     server.use(
-      http.delete("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/emails/:email", () => {
+      http.delete("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId", () => {
         return HttpResponse.json({ detail: "Not found" }, { status: 404 });
       })
     );
@@ -567,6 +585,64 @@ describe("LotOwnerForm - Edit modal email management", () => {
     await waitFor(() => {
       expect(screen.getByText(/404/)).toBeInTheDocument();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// API function coverage — new owner-emails endpoints
+// ---------------------------------------------------------------------------
+describe("addOwnerEmailToLotOwner API function", () => {
+  it("adds an owner email with names and returns updated lot owner", async () => {
+    const result = await addOwnerEmailToLotOwner("lo1", {
+      email: "added@example.com",
+      given_name: "Jane",
+      surname: "Smith",
+    });
+    const found = result.owner_emails.find((e) => e.email === "added@example.com");
+    expect(found).toBeDefined();
+  });
+
+  it("handles server error when adding owner email", async () => {
+    server.use(
+      http.post("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails", () => {
+        return HttpResponse.json({ detail: "Conflict" }, { status: 409 });
+      })
+    );
+    await expect(
+      addOwnerEmailToLotOwner("lo1", { email: "dup@example.com" })
+    ).rejects.toThrow();
+  });
+});
+
+describe("updateOwnerEmail API function", () => {
+  it("updates owner email and returns updated lot owner", async () => {
+    const result = await updateOwnerEmail("lo1", "em1", { given_name: "Jane" });
+    expect(result.owner_emails).toBeDefined();
+  });
+
+  it("handles server error when updating owner email", async () => {
+    server.use(
+      http.patch("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId", () => {
+        return HttpResponse.json({ detail: "Not found" }, { status: 404 });
+      })
+    );
+    await expect(updateOwnerEmail("lo1", "em-nonexistent", { given_name: "Jane" })).rejects.toThrow();
+  });
+});
+
+describe("removeOwnerEmailById API function", () => {
+  it("removes owner email and returns updated lot owner", async () => {
+    const result = await removeOwnerEmailById("lo1", "em1");
+    expect(result).toBeDefined();
+  });
+
+  it("handles server error when removing owner email", async () => {
+    server.use(
+      http.delete("http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId", () => {
+        return HttpResponse.json({ detail: "Not found" }, { status: 404 });
+      })
+    );
+    await expect(removeOwnerEmailById("lo1", "em-nonexistent")).rejects.toThrow();
   });
 });
 
@@ -633,6 +709,7 @@ const lotOwnerWithoutProxy: LotOwner = {
   lot_number: "1A",
   given_name: null,
   surname: null,
+  owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: null, surname: null }],
   emails: ["owner1@example.com"],
   unit_entitlement: 100,
   financial_position: "normal",
@@ -645,6 +722,7 @@ const lotOwnerWithProxy: LotOwner = {
   lot_number: "2B",
   given_name: null,
   surname: null,
+  owner_emails: [{ id: "em2", email: "owner2@example.com", given_name: null, surname: null }],
   emails: ["owner2@example.com"],
   unit_entitlement: 200,
   financial_position: "normal",
@@ -744,8 +822,8 @@ describe("LotOwnerForm - Edit modal proxy management", () => {
     const onSuccess = vi.fn();
     renderEditForm(lotOwnerWithoutProxy, onSuccess);
     // Add an email
-    await user.type(screen.getByLabelText("Add email"), "added@example.com");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "added@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
       expect(screen.getByText("added@example.com")).toBeInTheDocument();
     });
@@ -835,8 +913,8 @@ describe("LotOwnerForm - RR4-25 error messages have role=alert", () => {
     const user = userEvent.setup();
     renderEditForm(existingLotOwner);
     // Type invalid email into add-email input
-    await user.type(screen.getByLabelText("Add email"), "not-an-email");
-    await user.click(screen.getByRole("button", { name: "Add email" }));
+    await user.type(screen.getByLabelText("Add owner email"), "not-an-email");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     await waitFor(() => {
       const alert = screen.getByRole("alert");
       expect(alert).toBeInTheDocument();
@@ -886,9 +964,9 @@ describe("LotOwnerForm - RR4-25 error messages have role=alert", () => {
 describe("LotOwnerForm - RR4-36 optional field labels", () => {
   it("Given Name label in EditModal contains '(optional)'", () => {
     renderEditForm(existingLotOwner);
-    const label = screen.getByLabelText(/Given Name/i);
-    expect(label).toBeInTheDocument();
+    // Use the specific label element to avoid ambiguity with the "add owner" given-name input
     const labelEl = document.querySelector('label[for="edit-given-name"]');
+    expect(labelEl).not.toBeNull();
     expect(labelEl?.textContent).toContain("(optional)");
   });
 
@@ -915,5 +993,233 @@ describe("LotOwnerForm - RR4-36 optional field labels", () => {
     const labelEl = document.querySelector('label[for="edit-given-name"]');
     // The label element itself should not have aria-hidden
     expect(labelEl).not.toHaveAttribute("aria-hidden");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// New: EditModal owner-email management (US-BO-02)
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - EditModal owner_emails management", () => {
+  const ownerWithNames: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" },
+    ],
+  };
+
+  const ownerWithNoName: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: null, surname: null },
+    ],
+  };
+
+  // --- Happy path ---
+
+  it("renders owner name and email in the list", () => {
+    renderEditForm(ownerWithNames);
+    expect(screen.getByText("Alice Smith")).toBeInTheDocument();
+    expect(screen.getByText("owner1@example.com")).toBeInTheDocument();
+  });
+
+  it("renders '— no name —' placeholder when given_name and surname are null", () => {
+    renderEditForm(ownerWithNoName);
+    expect(screen.getByText("— no name —")).toBeInTheDocument();
+  });
+
+  it("renders Edit button for each owner entry", () => {
+    renderEditForm(ownerWithNames);
+    expect(screen.getByRole("button", { name: "Edit owner1@example.com" })).toBeInTheDocument();
+  });
+
+  it("clicking Edit opens inline edit form with pre-filled values", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    expect(screen.getByLabelText("Edit given name")).toHaveValue("Alice");
+    expect(screen.getByLabelText("Edit surname")).toHaveValue("Smith");
+    expect(screen.getByLabelText("Edit email")).toHaveValue("owner1@example.com");
+    // "Save" button appears in the inline edit form
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  it("clicking Cancel in inline edit closes the inline form", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    // Click the inline "Cancel" button (the one inside the inline edit form)
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    // The inline-edit Cancel is the first one rendered in the list section
+    await user.click(cancelButtons[0]);
+    // Edit form should be gone
+    expect(screen.queryByLabelText("Edit given name")).not.toBeInTheDocument();
+  });
+
+  it("saving inline edit calls updateOwnerEmail and updates the list", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.patch(
+        "http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId",
+        async ({ request }) => {
+          const body = await request.json() as { given_name?: string | null };
+          const updated: LotOwner = {
+            ...ownerWithNames,
+            owner_emails: [
+              { id: "em1", email: "owner1@example.com", given_name: body?.given_name ?? "Alice", surname: "Smith" },
+            ],
+            emails: ["owner1@example.com"],
+          };
+          return HttpResponse.json(updated);
+        }
+      )
+    );
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    await user.clear(screen.getByLabelText("Edit given name"));
+    await user.type(screen.getByLabelText("Edit given name"), "Jane");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Edit given name")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows validation error in inline edit when email is empty", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    await user.clear(screen.getByLabelText("Edit email"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
+
+  it("shows validation error in inline edit when email is invalid", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    await user.clear(screen.getByLabelText("Edit email"));
+    await user.type(screen.getByLabelText("Edit email"), "not-an-email");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
+
+  it("shows server error when updateOwnerEmail fails", async () => {
+    server.use(
+      http.patch(
+        "http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId",
+        () => HttpResponse.json({ detail: "Conflict" }, { status: 409 })
+      )
+    );
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
+
+  it("Remove button calls removeOwnerEmailById", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Remove owner1@example.com" }));
+    await waitFor(() => {
+      expect(screen.queryByText("owner1@example.com")).not.toBeInTheDocument();
+    });
+  });
+
+  it("adds owner with name and email via Add owner form", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.type(screen.getByLabelText("New owner given name"), "Jane");
+    await user.type(screen.getByLabelText("New owner surname"), "Smith");
+    await user.type(screen.getByLabelText("Add owner email"), "jane@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByText("jane@example.com")).toBeInTheDocument();
+    });
+  });
+
+  it("clearing add-owner form after successful add", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.type(screen.getByLabelText("New owner given name"), "Jane");
+    await user.type(screen.getByLabelText("Add owner email"), "jane@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Add owner email")).toHaveValue("");
+      expect(screen.getByLabelText("New owner given name")).toHaveValue("");
+    });
+  });
+
+  it("shows validation error when add owner email is empty", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    expect(screen.getByText("Email is required.")).toBeInTheDocument();
+  });
+
+  it("renders owner email addresses list with aria-label", () => {
+    renderEditForm(existingLotOwner);
+    expect(screen.getByRole("list", { name: "Owner email addresses" })).toBeInTheDocument();
+  });
+
+  // Multi-step sequence test (required by standards)
+  it("multi-step: add owner then edit their name", async () => {
+    const user = userEvent.setup();
+    // Step 1: Add a new owner
+    server.use(
+      http.post(
+        "http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails",
+        async ({ request }) => {
+          const body = await request.json() as { email?: string; given_name?: string | null; surname?: string | null };
+          const updated: LotOwner = {
+            ...existingLotOwner,
+            owner_emails: [
+              ...existingLotOwner.owner_emails,
+              { id: "em-bob", email: body?.email ?? "bob@example.com", given_name: body?.given_name ?? null, surname: body?.surname ?? null },
+            ],
+            emails: [...existingLotOwner.emails, body?.email ?? "bob@example.com"],
+          };
+          return HttpResponse.json(updated, { status: 201 });
+        }
+      )
+    );
+    renderEditForm(existingLotOwner);
+    await user.type(screen.getByLabelText("New owner given name"), "Bob");
+    await user.type(screen.getByLabelText("Add owner email"), "bob@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    // Step 1 done: bob@example.com appears
+    await waitFor(() => {
+      expect(screen.getByText("bob@example.com")).toBeInTheDocument();
+    });
+    // Step 2: Click Edit on the newly added entry and change name
+    server.use(
+      http.patch(
+        "http://localhost:8000/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId",
+        async () => {
+          const updated: LotOwner = {
+            ...existingLotOwner,
+            owner_emails: [
+              existingLotOwner.owner_emails[0],
+              { id: "em-bob", email: "bob@example.com", given_name: "Robert", surname: null },
+            ],
+            emails: [...existingLotOwner.emails, "bob@example.com"],
+          };
+          return HttpResponse.json(updated);
+        }
+      )
+    );
+    const editBtn = screen.getByRole("button", { name: "Edit bob@example.com" });
+    await user.click(editBtn);
+    await user.clear(screen.getByLabelText("Edit given name"));
+    await user.type(screen.getByLabelText("Edit given name"), "Robert");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.getByText("Robert")).toBeInTheDocument();
+    });
   });
 });

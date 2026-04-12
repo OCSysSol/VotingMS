@@ -202,6 +202,48 @@ export interface AddEmailRequest {
   email: string;
 }
 
+export interface AddOwnerEmailRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+}
+
+export interface UpdateOwnerEmailRequest {
+  email?: string | null;
+  given_name?: string | null;
+  surname?: string | null;
+}
+
+export async function addOwnerEmailToLotOwner(
+  lotOwnerId: string,
+  data: AddOwnerEmailRequest
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateOwnerEmail(
+  lotOwnerId: string,
+  emailId: string,
+  data: UpdateOwnerEmailRequest
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails/${emailId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeOwnerEmailById(
+  lotOwnerId: string,
+  emailId: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails/${emailId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function addEmailToLotOwner(
   lotOwnerId: string,
   email: string

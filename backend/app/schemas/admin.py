@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from app.models.motion import MotionType
 
@@ -80,17 +81,32 @@ class BuildingImportResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class LotOwnerEmailOut(BaseModel):
+    id: uuid.UUID
+    email: str | None
+    given_name: str | None = None
+    surname: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 class LotOwnerOut(BaseModel):
     id: uuid.UUID
     lot_number: str
     given_name: str | None = None
     surname: str | None = None
-    emails: list[str]
+    owner_emails: list[LotOwnerEmailOut] = []
     unit_entitlement: int
     financial_position: str
     proxy_email: str | None = None
 
     model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def emails(self) -> list[str]:
+        """Backward-compatible alias: flat list of email strings."""
+        return [e.email for e in self.owner_emails if e.email]
 
 
 class LotOwnerCreate(BaseModel):
@@ -164,6 +180,31 @@ class AddEmailRequest(BaseModel):
         if not v.strip():
             raise ValueError("email must not be empty")
         return v
+
+
+class AddOwnerEmailRequest(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
+class UpdateOwnerEmailRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "UpdateOwnerEmailRequest":
+        if self.email is None and self.given_name is None and self.surname is None:
+            raise ValueError("At least one field must be provided")
+        return self
 
 
 class SetProxyRequest(BaseModel):
