@@ -379,6 +379,7 @@ export function VotingPage() {
   // Derived values for lot panel
   const isMultiLot = allLots.length > 1;
   const allSubmitted = allLots.length > 0 && allLots.every((l) => isLotSubmitted(l));
+  const anySubmitted = allLots.some((l) => isLotSubmitted(l));
   const pendingLots = allLots.filter((l) => !isLotSubmitted(l));
   const votingCount = isMultiLot ? selectedIds.size : pendingLots.length;
 
@@ -763,6 +764,7 @@ export function VotingPage() {
                     isClosed={isClosed}
                     showSidebar={showSidebar}
                     isPending={submitMutation.isPending}
+                    anySubmitted={anySubmitted}
                     onSubmitClick={handleSubmitClick}
                     onViewSubmission={handleViewSubmission}
                   />
