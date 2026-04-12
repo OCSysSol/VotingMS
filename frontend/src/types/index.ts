@@ -15,12 +15,20 @@ export interface Building {
   created_at: string;
 }
 
+export interface LotOwnerEmailEntry {
+  id: string;
+  email: string | null;
+  given_name: string | null;
+  surname: string | null;
+}
+
 export interface LotOwner {
   id: string;
   building_id: string;
   lot_number: string;
   given_name: string | null;
   surname: string | null;
+  owner_emails: LotOwnerEmailEntry[];
   emails: string[];
   unit_entitlement: number;
   financial_position: FinancialPosition;

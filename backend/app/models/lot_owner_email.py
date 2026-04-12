@@ -22,6 +22,8 @@ class LotOwnerEmail(Base):
         nullable=False,
     )
     email: Mapped[str | None] = mapped_column(String, nullable=True)
+    given_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    surname: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Relationships
     lot_owner: Mapped["LotOwner"] = relationship(  # noqa: F821

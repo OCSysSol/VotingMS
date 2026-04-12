@@ -447,6 +447,29 @@ async def count_lot_owners(building_id: uuid.UUID, db: AsyncSession) -> int:
     return result.scalar_one()
 
 
+def _format_financial_position(fp: object) -> str:
+    """Return the string value of a FinancialPosition enum or pass-through a string."""
+    return fp.value if hasattr(fp, "value") else fp  # type: ignore[attr-defined]
+
+
+def _owner_email_to_dict(row: LotOwnerEmail) -> dict:
+    """Serialise a LotOwnerEmail ORM row to the owner_emails dict shape."""
+    return {
+        "id": row.id,
+        "email": row.email,
+        "given_name": row.given_name,
+        "surname": row.surname,
+    }
+
+
+async def _load_owner_emails_for_one(lot_owner_id: uuid.UUID, db: AsyncSession) -> list[dict]:
+    """Return owner_emails list for a single lot owner."""
+    result = await db.execute(
+        select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
+    )
+    return [_owner_email_to_dict(row) for row in result.scalars().all()]
+
+
 async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int = 20, offset: int = 0) -> list[dict]:
     await get_building_or_404(building_id, db)
     result = await db.execute(
@@ -461,14 +484,11 @@ async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int =
     owner_ids = [o.id for o in owners]
 
     emails_result = await db.execute(
-        select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
-            LotOwnerEmail.lot_owner_id.in_(owner_ids)
-        )
+        select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id.in_(owner_ids))
     )
-    emails_by_owner: dict[uuid.UUID, list[str]] = {}
-    for row in emails_result.all():
-        if row[1] is not None:
-            emails_by_owner.setdefault(row[0], []).append(row[1])
+    owner_emails_by_owner: dict[uuid.UUID, list[dict]] = {}
+    for row in emails_result.scalars().all():
+        owner_emails_by_owner.setdefault(row.lot_owner_id, []).append(_owner_email_to_dict(row))
 
     proxies_result = await db.execute(
         select(LotProxy.lot_owner_id, LotProxy.proxy_email).where(
@@ -486,9 +506,9 @@ async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int =
             "lot_number": owner.lot_number,
             "given_name": owner.given_name,
             "surname": owner.surname,
-            "emails": emails_by_owner.get(owner.id, []),
+            "owner_emails": owner_emails_by_owner.get(owner.id, []),
             "unit_entitlement": owner.unit_entitlement,
-            "financial_position": owner.financial_position.value if hasattr(owner.financial_position, "value") else owner.financial_position,
+            "financial_position": _format_financial_position(owner.financial_position),
             "proxy_email": proxy_by_owner.get(owner.id),
         })
     return out
@@ -503,10 +523,7 @@ async def get_lot_owner(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict:
     if lot_owner is None:
         raise HTTPException(status_code=404, detail="Lot owner not found")
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
     proxy_email = await _get_proxy_email(lot_owner_id, db)
 
     return {
@@ -514,9 +531,9 @@ async def get_lot_owner(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict:
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
     }
 
@@ -877,23 +894,22 @@ async def add_lot_owner(
     db.add(lot_owner)
     await db.flush()
 
-    email_strs = []
     for email in data.emails:
         if email.strip():
             normalised = email.strip().lower()
             db.add(LotOwnerEmail(lot_owner_id=lot_owner.id, email=normalised))
-            email_strs.append(normalised)
 
     await db.commit()
 
+    owner_emails = await _load_owner_emails_for_one(lot_owner.id, db)
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": email_strs,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": None,
     }
 
@@ -921,21 +937,16 @@ async def update_lot_owner(
 
     await db.commit()
 
-    # Load emails
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
-
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
     proxy_email = await _get_proxy_email(lot_owner_id, db)
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
     }
 
@@ -968,10 +979,7 @@ async def add_email_to_lot_owner(
     db.add(LotOwnerEmail(lot_owner_id=lot_owner_id, email=email))
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
     proxy_email = await _get_proxy_email(lot_owner_id, db)
 
     return {
@@ -979,9 +987,9 @@ async def add_email_to_lot_owner(
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
     }
 
@@ -1012,10 +1020,7 @@ async def remove_email_from_lot_owner(
     await db.delete(email_obj)
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
     proxy_email = await _get_proxy_email(lot_owner_id, db)
 
     return {
@@ -1023,9 +1028,9 @@ async def remove_email_from_lot_owner(
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
     }
 
@@ -1065,19 +1070,16 @@ async def set_lot_owner_proxy(
 
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
     }
 
@@ -1104,20 +1106,173 @@ async def remove_lot_owner_proxy(
     await db.delete(existing_proxy)
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
         "given_name": lot_owner.given_name,
         "surname": lot_owner.surname,
-        "emails": emails,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": None,
+    }
+
+
+async def add_owner_email_to_lot_owner(
+    lot_owner_id: uuid.UUID,
+    email: str,
+    given_name: str | None,
+    surname: str | None,
+    db: AsyncSession,
+) -> dict:
+    """Add an email+name owner entry to a lot owner. Returns the updated lot owner dict."""
+    result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    normalised_email = email.strip().lower()
+
+    # Sanitise name fields before storage
+    clean_given_name = bleach.clean(given_name, tags=[], strip=True).strip() or None if given_name else None
+    clean_surname = bleach.clean(surname, tags=[], strip=True).strip() or None if surname else None
+
+    # Check if email already exists for this lot owner
+    existing = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+            LotOwnerEmail.email == normalised_email,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Email already exists for this lot owner")
+
+    db.add(LotOwnerEmail(
+        lot_owner_id=lot_owner_id,
+        email=normalised_email,
+        given_name=clean_given_name,
+        surname=clean_surname,
+    ))
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_email = await _get_proxy_email(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_email,
+    }
+
+
+async def update_owner_email(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    email: str | None,
+    given_name: str | None,
+    surname: str | None,
+    db: AsyncSession,
+) -> dict:
+    """Update email, given_name, and/or surname on a LotOwnerEmail row by ID.
+
+    Validates that the email_id belongs to lot_owner_id. Returns the updated lot owner dict.
+    """
+    # Fetch the lot owner first
+    lo_result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = lo_result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    # Fetch the email record, verifying it belongs to this lot owner
+    em_result = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.id == email_id,
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+        )
+    )
+    email_obj = em_result.scalar_one_or_none()
+    if email_obj is None:
+        raise HTTPException(status_code=404, detail="Owner email record not found")
+
+    if email is not None:
+        normalised_email = email.strip().lower()
+        # Check for duplicate email on this lot (excluding this record)
+        dup_result = await db.execute(
+            select(LotOwnerEmail).where(
+                LotOwnerEmail.lot_owner_id == lot_owner_id,
+                LotOwnerEmail.email == normalised_email,
+                LotOwnerEmail.id != email_id,
+            )
+        )
+        if dup_result.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Email already exists for this lot owner")
+        email_obj.email = normalised_email
+
+    if given_name is not None:
+        email_obj.given_name = bleach.clean(given_name, tags=[], strip=True).strip() or None
+    if surname is not None:
+        email_obj.surname = bleach.clean(surname, tags=[], strip=True).strip() or None
+
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_email = await _get_proxy_email(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_email,
+    }
+
+
+async def remove_owner_email_by_id(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """Delete a LotOwnerEmail row by its UUID. Validates it belongs to lot_owner_id."""
+    lo_result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = lo_result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    em_result = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.id == email_id,
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+        )
+    )
+    email_obj = em_result.scalar_one_or_none()
+    if email_obj is None:
+        raise HTTPException(status_code=404, detail="Owner email record not found")
+
+    await db.delete(email_obj)
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_email = await _get_proxy_email(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_email,
     }
 
 
