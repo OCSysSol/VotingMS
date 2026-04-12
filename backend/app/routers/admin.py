@@ -22,6 +22,8 @@ from app.routers.admin_auth import require_admin
 from app.services.email_service import EmailService
 from app.schemas.admin import (
     AddEmailRequest,
+    AddOwnerEmailRequest,
+    UpdateOwnerEmailRequest,
     GeneralMeetingBallotResetOut,
     GeneralMeetingCloseOut,
     GeneralMeetingCreate,
@@ -434,6 +436,56 @@ async def remove_email_from_lot_owner(
 ) -> LotOwnerOut:
     """Remove an email address from a lot owner."""
     owner = await admin_service.remove_email_from_lot_owner(lot_owner_id, email, db)
+    return LotOwnerOut(**owner)
+
+
+@router.post(
+    "/lot-owners/{lot_owner_id}/owner-emails",
+    response_model=LotOwnerOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_owner_email_to_lot_owner(
+    lot_owner_id: uuid.UUID,
+    data: AddOwnerEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    """Add an owner email (with optional name) to a lot owner."""
+    owner = await admin_service.add_owner_email_to_lot_owner(
+        lot_owner_id, data.email, data.given_name, data.surname, db
+    )
+    return LotOwnerOut(**owner)
+
+
+@router.patch(
+    "/lot-owners/{lot_owner_id}/owner-emails/{email_id}",
+    response_model=LotOwnerOut,
+    status_code=status.HTTP_200_OK,
+)
+async def update_owner_email(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    data: UpdateOwnerEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    """Update the email address and/or name on an owner email record."""
+    owner = await admin_service.update_owner_email(
+        lot_owner_id, email_id, data.email, data.given_name, data.surname, db
+    )
+    return LotOwnerOut(**owner)
+
+
+@router.delete(
+    "/lot-owners/{lot_owner_id}/owner-emails/{email_id}",
+    response_model=LotOwnerOut,
+    status_code=status.HTTP_200_OK,
+)
+async def remove_owner_email_by_id(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    """Remove an owner email record by its UUID."""
+    owner = await admin_service.remove_owner_email_by_id(lot_owner_id, email_id, db)
     return LotOwnerOut(**owner)
 
 

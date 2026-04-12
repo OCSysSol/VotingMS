@@ -1167,6 +1167,24 @@ No backend or database changes are required. The `order_index` field remains 0-b
 
 ---
 
+### US-BO-01: Associate a named owner with each email address on a lot
+
+**Status:** ✅ Implemented — branch: `feat/building-owners`, committed 2026-04-12
+
+**Description:** As a building manager, I want each email address on a lot to have a person's name (given name and surname) associated with it, so I can clearly identify which individual owner each contact email belongs to.
+
+**Acceptance Criteria:**
+
+- [ ] Each `LotOwnerEmail` record can store an optional `given_name` and `surname` alongside the email address
+- [ ] The admin API response for a lot owner includes an `owner_emails` field: a list of objects each with `id`, `email`, `given_name`, `surname`
+- [ ] The backward-compatible `emails` field (list of email strings) is still returned in API responses so existing integrations are not broken
+- [ ] Existing lot owner email records that were created without names are valid; name fields default to `null`
+- [ ] Schema migration adds `given_name` and `surname` nullable columns to `lot_owner_emails`
+- [ ] All tests pass at 100% coverage
+- [ ] Typecheck/lint passes
+
+---
+
 ### US-AUIF-02: Admin meeting view — collapsible results report section
 
 **Status:** ✅ Implemented — branch: `fix/admin-ui-fixes`, committed 2026-04-12
@@ -1179,6 +1197,29 @@ No backend or database changes are required. The `order_index` field remains 0-b
 - [ ] The section is expanded by default
 - [ ] The toggle button shows a clear visual indicator of collapsed vs expanded state (e.g. ▶/▼ chevron)
 - [ ] The button has an `aria-expanded` attribute that reflects the current state
+- [ ] Typecheck/lint passes
+
+---
+
+### US-BO-02: Admin can add, edit, and remove named owner email entries in the building edit UI
+
+**Status:** ✅ Implemented — branch: `feat/building-owners`, committed 2026-04-12
+
+**Description:** As a building manager, I want to manage the individual owner contact entries for a lot (each with a name and email) directly in the building edit UI, so I can keep owner records accurate without requiring a CSV re-import.
+
+**Acceptance Criteria:**
+
+- [ ] The lot owner edit modal displays each owner email entry as a row showing: given name + surname (or "— no name —" if not set) and email address
+- [ ] Each row has an "Edit" action that opens an inline edit sub-form pre-filled with the current given name, surname, and email; "Save" updates the entry via `PATCH /api/admin/lot-owners/{id}/owner-emails/{emailId}`
+- [ ] Each row has a "Remove" action that deletes the entry via `DELETE /api/admin/lot-owners/{id}/owner-emails/{emailId}` (uses the UUID, not email string)
+- [ ] An "Add owner" sub-form at the bottom of the list has fields for given name (optional), surname (optional), and email (required); submitting calls `POST /api/admin/lot-owners/{id}/owner-emails`
+- [ ] Adding a duplicate email (already exists on this lot) shows an inline error and does not create a duplicate entry
+- [ ] Editing an email address to one that already exists on the same lot returns a 409 error shown inline
+- [ ] `PATCH /api/admin/lot-owners/{id}/owner-emails/{emailId}` accepts any subset of `{email, given_name, surname}`; at least one field required (422 otherwise); returns the updated `LotOwnerOut` on success
+- [ ] `DELETE /api/admin/lot-owners/{id}/owner-emails/{emailId}` returns 204 or the updated `LotOwnerOut`; returns 404 if the email record does not exist or does not belong to the given lot
+- [ ] `POST /api/admin/lot-owners/{id}/owner-emails` returns 201 with the updated `LotOwnerOut`; returns 404 if the lot does not exist; returns 409 if the email already exists on this lot
+- [ ] Existing `POST /lot-owners/{id}/emails` (email-only, no name) and `DELETE /lot-owners/{id}/emails/{email}` (by email string) endpoints continue to work unchanged
+- [ ] All tests pass at 100% coverage
 - [ ] Typecheck/lint passes
 
 ---
@@ -1304,6 +1345,22 @@ No backend or database changes are required. The `order_index` field remains 0-b
 - [ ] When `favicon_url` is empty or not set, the browser tab favicon uses the OCSS fallback favicon (`https://sentw3x37yabsacv.public.blob.vercel-storage.com/ocss-favicon-4CMVReCEFGq06d9bG9Q8NqTrZqRosj.svg`)
 - [ ] When tenant branding is configured with a custom logo or favicon, the custom values continue to take priority
 - [ ] The fallback logic is centralised in `BrandingContext` — no per-component fallback code
+- [ ] Typecheck/lint passes
+
+---
+
+### US-BO-03: Proxy management retains name + email pattern (verification)
+
+**Status:** ✅ Implemented — branch: `feat/building-owners`, committed 2026-04-12
+
+**Description:** As a building manager, I want proxy assignments to continue supporting a name and email for the proxy holder, consistent with the owner email model, so proxy records are as informative as owner records.
+
+**Acceptance Criteria:**
+
+- [ ] The existing proxy `PUT /api/admin/lot-owners/{id}/proxy` endpoint continues to accept `proxy_email`, `given_name`, and `surname`
+- [ ] The lot owner edit modal proxy section is unchanged in structure — it already shows proxy name and email; no UI changes required for this story
+- [ ] Proxy name fields (`given_name`, `surname`) are displayed in the proxy row in the edit modal
+- [ ] All existing proxy-related tests pass unchanged
 - [ ] Typecheck/lint passes
 
 ---

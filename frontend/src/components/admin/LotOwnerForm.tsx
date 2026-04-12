@@ -1,7 +1,17 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { addLotOwner, updateLotOwner, addEmailToLotOwner, removeEmailFromLotOwner, setLotOwnerProxy, removeLotOwnerProxy } from "../../api/admin";
-import type { LotOwner } from "../../types";
+import {
+  addLotOwner,
+  updateLotOwner,
+  addEmailToLotOwner,
+  removeEmailFromLotOwner,
+  addOwnerEmailToLotOwner,
+  updateOwnerEmail,
+  removeOwnerEmailById,
+  setLotOwnerProxy,
+  removeLotOwnerProxy,
+} from "../../api/admin";
+import type { LotOwner, LotOwnerEmailEntry } from "../../types";
 import type { LotOwnerCreateRequest, LotOwnerUpdateRequest } from "../../api/admin";
 import { isValidEmail } from "../../utils/validation";
 
@@ -34,11 +44,19 @@ function EditModal({
   const [surname, setSurname] = useState(lotOwner.surname ?? "");
   const [formError, setFormError] = useState<string | null>(null);
 
-  // Email management
-  const [emails, setEmails] = useState<string[]>(lotOwner.emails);
-  const [newEmail, setNewEmail] = useState("");
+  // Owner email management
+  const [ownerEmails, setOwnerEmails] = useState<LotOwnerEmailEntry[]>(lotOwner.owner_emails);
+  const [newOwnerEmail, setNewOwnerEmail] = useState("");
+  const [newOwnerGivenName, setNewOwnerGivenName] = useState("");
+  const [newOwnerSurname, setNewOwnerSurname] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailsModified, setEmailsModified] = useState(false);
+  // Inline edit state: which entry is being edited
+  const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
+  const [editEmailValue, setEditEmailValue] = useState("");
+  const [editGivenName, setEditGivenName] = useState("");
+  const [editSurname, setEditSurname] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Proxy management
   const [proxyEmail, setProxyEmail] = useState<string | null>(lotOwner.proxy_email ?? null);
@@ -56,10 +74,17 @@ function EditModal({
     setGivenName(lotOwner.given_name ?? "");
     setSurname(lotOwner.surname ?? "");
     setFormError(null);
-    setEmails(lotOwner.emails);
-    setNewEmail("");
+    setOwnerEmails(lotOwner.owner_emails);
+    setNewOwnerEmail("");
+    setNewOwnerGivenName("");
+    setNewOwnerSurname("");
     setEmailError(null);
     setEmailsModified(false);
+    setEditingEmailId(null);
+    setEditEmailValue("");
+    setEditGivenName("");
+    setEditSurname("");
+    setEditError(null);
     setProxyEmail(lotOwner.proxy_email ?? null);
     setNewProxyEmail("");
     setProxyError(null);
@@ -88,11 +113,17 @@ function EditModal({
     },
   });
 
-  const addEmailMutation = useMutation<LotOwner, Error, string>({
-    mutationFn: (email) => addEmailToLotOwner(lotOwner.id, email),
+  const addOwnerEmailMutation = useMutation<
+    LotOwner,
+    Error,
+    { email: string; given_name: string | null; surname: string | null }
+  >({
+    mutationFn: (data) => addOwnerEmailToLotOwner(lotOwner.id, data),
     onSuccess: (updated) => {
-      setEmails(updated.emails);
-      setNewEmail("");
+      setOwnerEmails(updated.owner_emails);
+      setNewOwnerEmail("");
+      setNewOwnerGivenName("");
+      setNewOwnerSurname("");
       setEmailError(null);
       setEmailsModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
@@ -102,10 +133,28 @@ function EditModal({
     },
   });
 
-  const removeEmailMutation = useMutation<LotOwner, Error, string>({
-    mutationFn: (email) => removeEmailFromLotOwner(lotOwner.id, email),
+  const updateOwnerEmailMutation = useMutation<
+    LotOwner,
+    Error,
+    { emailId: string; email?: string | null; given_name?: string | null; surname?: string | null }
+  >({
+    mutationFn: ({ emailId, ...data }) => updateOwnerEmail(lotOwner.id, emailId, data),
     onSuccess: (updated) => {
-      setEmails(updated.emails);
+      setOwnerEmails(updated.owner_emails);
+      setEditingEmailId(null);
+      setEditError(null);
+      setEmailsModified(true);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
+    },
+    onError: (err) => {
+      setEditError(err.message);
+    },
+  });
+
+  const removeOwnerEmailMutation = useMutation<LotOwner, Error, string>({
+    mutationFn: (emailId) => removeOwnerEmailById(lotOwner.id, emailId),
+    onSuccess: (updated) => {
+      setOwnerEmails(updated.owner_emails);
       setEmailError(null);
       setEmailsModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
@@ -176,23 +225,59 @@ function EditModal({
     editMutation.mutate(updateData);
   }
 
-  function handleAddEmail() {
+  function handleAddOwnerEmail() {
     setEmailError(null);
-    const trimmed = newEmail.trim().toLowerCase();
-    if (!trimmed) {
+    const trimmedEmail = newOwnerEmail.trim().toLowerCase();
+    if (!trimmedEmail) {
       setEmailError("Email is required.");
       return;
     }
-    if (!isValidEmail(trimmed)) {
+    if (!isValidEmail(trimmedEmail)) {
       setEmailError("Please enter a valid email address.");
       return;
     }
-    addEmailMutation.mutate(trimmed);
+    addOwnerEmailMutation.mutate({
+      email: trimmedEmail,
+      given_name: newOwnerGivenName.trim() || null,
+      surname: newOwnerSurname.trim() || null,
+    });
   }
 
-  function handleRemoveEmail(email: string) {
+  function handleRemoveOwnerEmail(emailId: string) {
     setEmailError(null);
-    removeEmailMutation.mutate(email);
+    removeOwnerEmailMutation.mutate(emailId);
+  }
+
+  function handleStartEdit(entry: LotOwnerEmailEntry) {
+    setEditingEmailId(entry.id);
+    setEditEmailValue(entry.email ?? "");
+    setEditGivenName(entry.given_name ?? "");
+    setEditSurname(entry.surname ?? "");
+    setEditError(null);
+  }
+
+  function handleCancelEdit() {
+    setEditingEmailId(null);
+    setEditError(null);
+  }
+
+  function handleSaveEdit(emailId: string) {
+    setEditError(null);
+    const trimmedEmail = editEmailValue.trim().toLowerCase();
+    if (!trimmedEmail) {
+      setEditError("Email is required.");
+      return;
+    }
+    if (!isValidEmail(trimmedEmail)) {
+      setEditError("Please enter a valid email address.");
+      return;
+    }
+    updateOwnerEmailMutation.mutate({
+      emailId,
+      email: trimmedEmail,
+      given_name: editGivenName.trim() || null,
+      surname: editSurname.trim() || null,
+    });
   }
 
   function handleSetProxy() {
@@ -211,8 +296,9 @@ function EditModal({
 
   const isPending =
     editMutation.isPending ||
-    addEmailMutation.isPending ||
-    removeEmailMutation.isPending ||
+    addOwnerEmailMutation.isPending ||
+    updateOwnerEmailMutation.isPending ||
+    removeOwnerEmailMutation.isPending ||
     setProxyMutation.isPending ||
     removeProxyMutation.isPending;
 
@@ -237,66 +323,162 @@ function EditModal({
           Edit Lot Owner
         </h3>
 
-        {/* Email list */}
+        {/* Owner email list */}
         <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field__label">Email Addresses</label>
+          <label className="field__label">Owners (name + email)</label>
           <ul
             style={{ listStyle: "none", padding: 0, margin: "0 0 10px" }}
-            aria-label="Email addresses"
+            aria-label="Owner email addresses"
           >
-            {emails.map((email) => (
+            {ownerEmails.map((entry) => (
               <li
-                key={email}
+                key={entry.id}
                 style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "6px 0",
-                  borderBottom: "1px solid var(--border-subtle, #e5e7eb)",
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--border-subtle)",
                   fontSize: "0.875rem",
                 }}
               >
-                <span>{email}</span>
-                <button
-                  type="button"
-                  className="btn btn--secondary"
-                  style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                  onClick={() => handleRemoveEmail(email)}
-                  disabled={isPending}
-                  aria-label={`Remove ${email}`}
-                >
-                  Remove
-                </button>
+                {editingEmailId === entry.id ? (
+                  // Inline edit form
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <input
+                        className="field__input"
+                        type="text"
+                        placeholder="Given name"
+                        value={editGivenName}
+                        onChange={(e) => setEditGivenName(e.target.value)}
+                        aria-label="Edit given name"
+                      />
+                      <input
+                        className="field__input"
+                        type="text"
+                        placeholder="Surname"
+                        value={editSurname}
+                        onChange={(e) => setEditSurname(e.target.value)}
+                        aria-label="Edit surname"
+                      />
+                    </div>
+                    <input
+                      className="field__input"
+                      type="email"
+                      placeholder="email@example.com"
+                      value={editEmailValue}
+                      onChange={(e) => setEditEmailValue(e.target.value)}
+                      aria-label="Edit email"
+                    />
+                    {editError && (
+                      <p className="field__error" role="alert" style={{ margin: 0 }}>{editError}</p>
+                    )}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button
+                        type="button"
+                        className="btn btn--primary"
+                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                        onClick={() => handleSaveEdit(entry.id)}
+                        disabled={isPending}
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                        onClick={handleCancelEdit}
+                        disabled={isPending}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  // Display row
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <span>
+                      {entry.given_name || entry.surname
+                        ? `${entry.given_name ?? ""} ${entry.surname ?? ""}`.trim()
+                        : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
+                      }
+                      {" "}
+                      <span style={{ color: "var(--text-secondary)" }}>{entry.email ?? ""}</span>
+                    </span>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                        onClick={() => handleStartEdit(entry)}
+                        disabled={isPending}
+                        aria-label={`Edit ${entry.email ?? "owner"}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--secondary"
+                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                        onClick={() => handleRemoveOwnerEmail(entry.id)}
+                        disabled={isPending}
+                        aria-label={`Remove ${entry.email ?? "owner"}`}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
 
-          {/* Add email */}
-          <div style={{ display: "flex", gap: 8 }}>
-            <input
-              id="add-email-input"
-              className="field__input"
-              type="email"
-              placeholder="new@example.com"
-              value={newEmail}
-              onChange={(e) => setNewEmail(e.target.value)}
-              aria-label="Add email"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleAddEmail();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={handleAddEmail}
-              disabled={isPending}
-              style={{ whiteSpace: "nowrap" }}
-            >
-              Add email
-            </button>
+          {/* Add owner row */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                id="add-owner-given-name"
+                className="field__input"
+                type="text"
+                placeholder="Given name (optional)"
+                value={newOwnerGivenName}
+                onChange={(e) => setNewOwnerGivenName(e.target.value)}
+                aria-label="New owner given name"
+              />
+              <input
+                id="add-owner-surname"
+                className="field__input"
+                type="text"
+                placeholder="Surname (optional)"
+                value={newOwnerSurname}
+                onChange={(e) => setNewOwnerSurname(e.target.value)}
+                aria-label="New owner surname"
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                id="add-owner-email-input"
+                className="field__input"
+                type="email"
+                placeholder="email@example.com"
+                value={newOwnerEmail}
+                onChange={(e) => setNewOwnerEmail(e.target.value)}
+                aria-label="Add owner email"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAddOwnerEmail();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={handleAddOwnerEmail}
+                disabled={isPending}
+                style={{ whiteSpace: "nowrap" }}
+              >
+                Add owner
+              </button>
+            </div>
           </div>
           {emailError && (
             <p className="field__error" style={{ marginTop: 6 }} role="alert">

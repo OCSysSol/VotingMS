@@ -94,6 +94,9 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     lot_number: "1A",
     given_name: "Alice",
     surname: "Smith",
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" },
+    ],
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
     financial_position: "normal",
@@ -105,6 +108,9 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     lot_number: "2B",
     given_name: null,
     surname: null,
+    owner_emails: [
+      { id: "em2", email: "owner2@example.com", given_name: null, surname: null },
+    ],
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
     financial_position: "normal",
@@ -607,6 +613,7 @@ export const adminHandlers = [
       lot_number: body?.lot_number ?? "NEW",
       given_name: null,
       surname: null,
+      owner_emails: [{ id: "em-new", email: "new@example.com", given_name: null, surname: null }],
       emails: ["new@example.com"],
       unit_entitlement: 50,
       financial_position: "normal",
@@ -617,10 +624,15 @@ export const adminHandlers = [
 
   http.post(`${BASE}/api/admin/lot-owners/:lotOwnerId/emails`, async ({ request, params }) => {
     const body = await request.json() as { email?: string };
+    const newEmail = body?.email ?? "new@example.com";
     const updated: LotOwner = {
       ...ADMIN_LOT_OWNERS[0],
       id: params.lotOwnerId as string,
-      emails: [...ADMIN_LOT_OWNERS[0].emails, body?.email ?? "new@example.com"],
+      owner_emails: [
+        ...ADMIN_LOT_OWNERS[0].owner_emails,
+        { id: "em-added", email: newEmail, given_name: null, surname: null },
+      ],
+      emails: [...ADMIN_LOT_OWNERS[0].emails, newEmail],
     };
     return HttpResponse.json(updated);
   }),
@@ -630,7 +642,56 @@ export const adminHandlers = [
     const updated: LotOwner = {
       ...ADMIN_LOT_OWNERS[0],
       id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.filter((e) => e.email !== emailToRemove),
       emails: ADMIN_LOT_OWNERS[0].emails.filter((e) => e !== emailToRemove),
+    };
+    return HttpResponse.json(updated);
+  }),
+
+  // New owner-emails endpoints
+  http.post(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails`, async ({ request, params }) => {
+    const body = await request.json() as { email?: string; given_name?: string | null; surname?: string | null };
+    const newEmail = body?.email ?? "new@example.com";
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: [
+        ...ADMIN_LOT_OWNERS[0].owner_emails,
+        { id: "em-owner-new", email: newEmail, given_name: body?.given_name ?? null, surname: body?.surname ?? null },
+      ],
+      emails: [...ADMIN_LOT_OWNERS[0].emails, newEmail],
+    };
+    return HttpResponse.json(updated, { status: 201 });
+  }),
+
+  http.patch(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId`, async ({ request, params }) => {
+    const body = await request.json() as { email?: string | null; given_name?: string | null; surname?: string | null };
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.map((e) =>
+        e.id === params.emailId
+          ? {
+              ...e,
+              email: body?.email !== undefined ? body.email : e.email,
+              given_name: body?.given_name !== undefined ? body.given_name : e.given_name,
+              surname: body?.surname !== undefined ? body.surname : e.surname,
+            }
+          : e
+      ),
+      emails: ADMIN_LOT_OWNERS[0].emails,
+    };
+    return HttpResponse.json(updated);
+  }),
+
+  http.delete(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId`, ({ params }) => {
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.filter((e) => e.id !== params.emailId),
+      emails: ADMIN_LOT_OWNERS[0].emails.filter(
+        (email) => !ADMIN_LOT_OWNERS[0].owner_emails.find((e) => e.id === params.emailId && e.email === email)
+      ),
     };
     return HttpResponse.json(updated);
   }),
