@@ -269,31 +269,7 @@ class TestEmailTemplateRendering:
             "voting_closes_at": "2026-03-09 18:00:00+00:00",
             "total_eligible_voters": 5,
             "total_submitted": 3,
-            "motions": [
-                {
-                    "title": "Approve Budget",
-                    "description": "Approve the 2026 budget",
-                    "motion_number": "3",
-                    "tally": {
-                        "yes": {"voter_count": 2, "entitlement_sum": 200},
-                        "no": {"voter_count": 1, "entitlement_sum": 50},
-                        "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                        "absent": {"voter_count": 2, "entitlement_sum": 150},
-                    },
-                    "voter_lists": {
-                        "yes": [
-                            {"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100},
-                            {"voter_email": "bob@example.com", "lot_number": "1B", "entitlement": 100},
-                        ],
-                        "no": [{"voter_email": "carol@example.com", "lot_number": "2A", "entitlement": 50}],
-                        "abstained": [],
-                        "absent": [
-                            {"voter_email": "dave@example.com", "lot_number": "3A", "entitlement": 75},
-                            {"voter_email": "eve@example.com", "lot_number": "3B", "entitlement": 75},
-                        ],
-                    },
-                }
-            ],
+            "meeting_url": "http://localhost:5173/admin/general-meetings/abc-123",
         }
 
     def test_renders_building_name(self):
@@ -317,322 +293,35 @@ class TestEmailTemplateRendering:
         assert "5" in html  # total eligible
         assert "3" in html  # total submitted
 
-    def test_renders_motion_title(self):
+    def test_renders_meeting_url_link(self):
+        """Email must contain a link to the admin meeting page."""
         html = self._render_template(self._default_context())
-        assert "Approve Budget" in html
+        assert "http://localhost:5173/admin/general-meetings/abc-123" in html
 
-    def test_renders_motion_number_from_field_not_loop_index(self):
-        """Template must show motion.motion_number, not the Jinja loop.index position."""
-        ctx = self._default_context()
-        # motion_number is "3" but it is the first (and only) motion in the list,
-        # so loop.index would produce "1". If we see "Motion 3" the field is used.
-        html = self._render_template(ctx)
-        assert "Motion 3" in html
-        assert "Motion 1" not in html
-
-    def test_renders_motion_description(self):
+    def test_renders_view_full_results_cta(self):
+        """Email must include a 'View Full Results' call-to-action."""
         html = self._render_template(self._default_context())
-        assert "Approve the 2026 budget" in html
+        assert "View Full Results" in html
 
-    def test_renders_tally_yes(self):
+    def test_does_not_render_motion_tally_tables(self):
+        """Simplified email must not contain motion tally tables."""
         html = self._render_template(self._default_context())
-        assert "200" in html  # entitlement_sum for yes
+        # Tally-specific column headers should not appear
+        assert "Entitlement Sum" not in html
+        assert "Voter Count" not in html
 
-    def test_renders_tally_no(self):
+    def test_does_not_render_voter_lists(self):
+        """Simplified email must not contain individual voter email addresses."""
         html = self._render_template(self._default_context())
-        assert "50" in html  # entitlement_sum for no
-
-    def test_renders_voter_lists_yes(self):
-        html = self._render_template(self._default_context())
-        assert "alice@example.com" in html
-        assert "bob@example.com" in html
-
-    def test_renders_voter_lists_no(self):
-        html = self._render_template(self._default_context())
-        assert "carol@example.com" in html
-
-    def test_renders_absent_voter_list(self):
-        html = self._render_template(self._default_context())
-        assert "dave@example.com" in html
-
-    def test_renders_lot_number_in_voter_rows(self):
-        html = self._render_template(self._default_context())
-        # Lot number should appear alongside voter email in each vote row
-        assert "Lot 1A" in html
-        assert "Lot 2A" in html
-        assert "Lot 3A" in html
-
-    def test_null_description_handled_gracefully(self):
-        ctx = self._default_context()
-        ctx["motions"][0]["description"] = None
-        html = self._render_template(ctx)
-        # Should not crash; motion title still present
-        assert "Approve Budget" in html
-
-    def test_multiple_motions_rendered(self):
-        ctx = self._default_context()
-        ctx["motions"].append(
-            {
-                "title": "Elect New Chair",
-                "description": None,
-                "motion_number": "7",
-                "tally": {
-                    "yes": {"voter_count": 3, "entitlement_sum": 300},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 2, "entitlement_sum": 150},
-                },
-                "voter_lists": {
-                    "yes": [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                },
-            }
-        )
-        html = self._render_template(ctx)
-        assert "Approve Budget" in html
-        assert "Elect New Chair" in html
-
-    def test_empty_voter_lists_do_not_render_section(self):
-        ctx = self._default_context()
-        ctx["motions"][0]["voter_lists"]["abstained"] = []
-        html = self._render_template(ctx)
-        # abstained section shouldn't appear since the list is empty
-        assert "Abstained" in html  # tally row still shows
+        # No voter list rows should appear (no email addresses in body outside CTA link)
+        assert "alice@example.com" not in html
+        assert "Voted Yes" not in html
+        assert "Voted No" not in html
 
     def test_template_is_valid_html(self):
         html = self._render_template(self._default_context())
         assert "<!DOCTYPE html>" in html
         assert "</html>" in html
-
-    # --- Multi-choice motion rendering ---
-
-    def _multi_choice_motion_context(self) -> dict:
-        """Return a template context with one multi-choice motion."""
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Member Election",
-                "description": "Select up to 2 candidates",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 1, "entitlement_sum": 80},
-                    "absent": {"voter_count": 1, "entitlement_sum": 50},
-                    "options": [
-                        {
-                            "option_text": "Alice Smith",
-                            "for_voter_count": 2, "for_entitlement_sum": 200,
-                            "against_voter_count": 0, "against_entitlement_sum": 0,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                        {
-                            "option_text": "Bob Jones",
-                            "for_voter_count": 1, "for_entitlement_sum": 100,
-                            "against_voter_count": 0, "against_entitlement_sum": 0,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [{"voter_email": "carol@example.com", "lot_number": "2A", "entitlement": 80}],
-                    "absent": [{"voter_email": "dave@example.com", "lot_number": "3A", "entitlement": 50}],
-                    "options_for": {},
-                    "options_against": {},
-                    "options_abstained": {},
-                    "options": {},
-                },
-            }
-        ]
-        return ctx
-
-    def test_multi_choice_renders_option_names(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Alice Smith" in html
-        assert "Bob Jones" in html
-
-    def test_multi_choice_renders_option_voter_count(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "200" in html  # entitlement_sum for Alice Smith
-
-    def test_multi_choice_renders_abstained_and_absent(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Abstained" in html
-        assert "Absent" in html
-
-    def test_multi_choice_does_not_render_yes_no_rows(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        # The yes/no tally rows should not appear for multi-choice motions
-        assert ">Yes<" not in html
-        assert ">No<" not in html
-
-    def test_standard_motion_does_not_render_option_header(self):
-        # When is_multi_choice is False (default context), Option column header absent
-        html = self._render_template(self._default_context())
-        assert ">Option<" not in html
-
-    def test_multi_choice_renders_option_column_header(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Option" in html
-
-    def test_multi_choice_with_no_options_renders_cleanly(self):
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["tally"]["options"] = []
-        html = self._render_template(ctx)
-        assert "Board Member Election" in html
-        assert "<!DOCTYPE html>" in html
-
-    def test_multi_choice_renders_per_option_voter_lists(self):
-        """Per-option For/Against/Abstained voter lists are rendered in the email for multi-choice motions."""
-        import uuid as _uuid
-        opt_id_alice = str(_uuid.uuid4())
-        opt_id_bob = str(_uuid.uuid4())
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Election",
-                "description": None,
-                "motion_number": "1",
-                "motion_type": "general",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 0, "entitlement_sum": 0},
-                    "options": [
-                        {
-                            "option_id": opt_id_alice, "option_text": "Alice Smith", "display_order": 1,
-                            "for_voter_count": 1, "for_entitlement_sum": 100,
-                            "against_voter_count": 0, "against_entitlement_sum": 0,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                        {
-                            "option_id": opt_id_bob, "option_text": "Bob Jones", "display_order": 2,
-                            "for_voter_count": 0, "for_entitlement_sum": 0,
-                            "against_voter_count": 1, "against_entitlement_sum": 80,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                    "options_for": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                    "options_against": {
-                        opt_id_bob: [{"voter_email": "carol@example.com", "lot_number": "2A", "entitlement": 80}],
-                    },
-                    "options_abstained": {},
-                    "options": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                },
-            }
-        ]
-        html = self._render_template(ctx)
-        # Voter for Alice Smith (For) option should appear
-        assert "alice@example.com" in html
-        assert "For: Alice Smith" in html
-        # Against voter for Bob Jones should appear
-        assert "carol@example.com" in html
-        assert "Against: Bob Jones" in html
-
-    def test_multi_choice_option_with_no_voters_not_rendered(self):
-        """Options with no voters do not produce a voter-list section."""
-        import uuid as _uuid
-        opt_id_alice = str(_uuid.uuid4())
-        opt_id_bob = str(_uuid.uuid4())
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Election",
-                "description": None,
-                "motion_number": "1",
-                "motion_type": "general",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 0, "entitlement_sum": 0},
-                    "options": [
-                        {
-                            "option_id": opt_id_alice, "option_text": "Alice Smith", "display_order": 1,
-                            "for_voter_count": 1, "for_entitlement_sum": 100,
-                            "against_voter_count": 0, "against_entitlement_sum": 0,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                        {
-                            "option_id": opt_id_bob, "option_text": "Bob Jones", "display_order": 2,
-                            "for_voter_count": 0, "for_entitlement_sum": 0,
-                            "against_voter_count": 0, "against_entitlement_sum": 0,
-                            "abstained_voter_count": 0, "abstained_entitlement_sum": 0,
-                        },
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                    "options_for": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                    "options_against": {},
-                    "options_abstained": {},
-                    "options": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                },
-            }
-        ]
-        html = self._render_template(ctx)
-        # Bob Jones voter section should not appear (empty lists for all categories)
-        assert "For: Bob Jones" not in html
-        assert "Against: Bob Jones" not in html
-
-    def test_motion_type_general_label_rendered(self):
-        """General resolution label is shown for general motion type."""
-        html = self._render_template(self._default_context())
-        assert "General Resolution" in html
-
-    def test_motion_type_special_label_rendered(self):
-        """Special resolution label is shown for special motion type."""
-        ctx = self._default_context()
-        ctx["motions"][0]["motion_type"] = "special"
-        html = self._render_template(ctx)
-        assert "Special Resolution" in html
-
-    def test_motion_type_general_not_special_in_standard_context(self):
-        """General motion does not show Special Resolution label."""
-        html = self._render_template(self._default_context())
-        assert "Special Resolution" not in html
-
-    def test_multi_choice_general_resolution_label(self):
-        """Multi-choice motion still shows General Resolution label when motion_type=general."""
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["motion_type"] = "general"
-        html = self._render_template(ctx)
-        assert "General Resolution" in html
-
-    def test_multi_choice_special_resolution_label(self):
-        """Multi-choice motion shows Special Resolution label when motion_type=special."""
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["motion_type"] = "special"
-        html = self._render_template(ctx)
-        assert "Special Resolution" in html
 
 
 # ---------------------------------------------------------------------------
