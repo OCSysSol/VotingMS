@@ -47,261 +47,36 @@
             </td>
           </tr>
 
-          <!-- Summary -->
+          <!-- Participation summary -->
           <tr>
             <td style="padding:16px 32px;">
               <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f0f4f8;border-radius:4px;">
                 <tr>
                   <td style="padding:16px;border-right:1px solid #d0dce8;" width="50%" align="center">
-                    <div style="font-size:28px;font-weight:bold;color:#1a3c5e;">{{ total_eligible_voters }}</div>
-                    <div style="font-size:12px;color:#666666;margin-top:4px;">Eligible Voters</div>
-                  </td>
-                  <td style="padding:16px;" width="50%" align="center">
                     <div style="font-size:28px;font-weight:bold;color:#1a3c5e;">{{ total_submitted }}</div>
                     <div style="font-size:12px;color:#666666;margin-top:4px;">Ballots Submitted</div>
                   </td>
+                  <td style="padding:16px;" width="50%" align="center">
+                    <div style="font-size:28px;font-weight:bold;color:#1a3c5e;">{{ total_eligible_voters }}</div>
+                    <div style="font-size:12px;color:#666666;margin-top:4px;">Eligible Voters</div>
+                  </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Motions -->
-          {% for motion in motions %}
+          <!-- CTA -->
           <tr>
-            <td style="padding:0 32px 24px 32px;">
-              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border:1px solid #e0e0e0;border-radius:4px;">
-
-                <!-- Motion header -->
-                <tr>
-                  <td style="background-color:#f7f7f7;padding:12px 16px;border-bottom:1px solid #e0e0e0;border-radius:4px 4px 0 0;">
-                    <div style="font-size:11px;color:#888888;text-transform:uppercase;letter-spacing:0.5px;">Motion {{ motion.motion_number }}</div>
-                    <div style="font-size:15px;font-weight:bold;color:#1a3c5e;margin-top:2px;">{{ motion.title }}</div>
-                    {% if motion.motion_type == "special" %}
-                    <div style="font-size:11px;color:#7b5ea7;font-weight:bold;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">Special Resolution</div>
-                    {% else %}
-                    <div style="font-size:11px;color:#2e7d32;font-weight:bold;margin-top:4px;text-transform:uppercase;letter-spacing:0.5px;">General Resolution</div>
-                    {% endif %}
-                    {% if motion.description %}
-                    <div style="font-size:13px;color:#555555;margin-top:6px;">{{ motion.description }}</div>
-                    {% endif %}
-                  </td>
-                </tr>
-
-                <!-- Tally table -->
-                <tr>
-                  <td style="padding:16px;">
-                    {% if motion.is_multi_choice %}
-                    <!-- Multi-choice: per-option For/Against/Abstained tally -->
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-                      <thead>
-                        <tr style="background-color:#f0f4f8;">
-                          <th style="text-align:left;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Option / Category</th>
-                          <th style="text-align:right;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Voter Count</th>
-                          <th style="text-align:right;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Entitlement Sum</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {% for opt in motion.tally.options %}
-                        <tr style="background-color:#f7f7f7;">
-                          <td colspan="3" style="padding:8px 10px;font-size:13px;font-weight:bold;color:#1a3c5e;border-bottom:1px solid #e0e0e0;">
-                            {{ opt.option_text }}
-                            {% if opt.outcome == 'pass' %}
-                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#1b7a40;text-transform:uppercase;letter-spacing:0.4px;">&#10003; Pass</span>
-                            {% elif opt.outcome == 'fail' %}
-                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#a3220e;text-transform:uppercase;letter-spacing:0.4px;">&#10007; Fail</span>
-                            {% elif opt.outcome == 'tie' %}
-                            <span style="margin-left:6px;font-size:11px;font-weight:bold;color:#c05621;text-transform:uppercase;letter-spacing:0.4px;">&#8776; Tie</span>
-                            {% endif %}
-                          </td>
-                        </tr>
-                        <tr style="background-color:#eaf7ea;">
-                          <td style="padding:4px 10px 4px 24px;font-size:12px;color:#2e7d32;border-bottom:1px solid #e8e8e8;">&#8594; For</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.for_voter_count }}</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.for_entitlement_sum }}</td>
-                        </tr>
-                        <tr style="background-color:#fdecea;">
-                          <td style="padding:4px 10px 4px 24px;font-size:12px;color:#c62828;border-bottom:1px solid #e8e8e8;">&#8594; Against</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.against_voter_count }}</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.against_entitlement_sum }}</td>
-                        </tr>
-                        <tr style="background-color:#fafafa;">
-                          <td style="padding:4px 10px 4px 24px;font-size:12px;color:#f57c00;border-bottom:1px solid #e8e8e8;">&#8594; Abstained</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.abstained_voter_count }}</td>
-                          <td style="padding:4px 10px;font-size:12px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ opt.abstained_entitlement_sum }}</td>
-                        </tr>
-                        {% endfor %}
-                        <tr style="background-color:#fafafa;">
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#f57c00;border-bottom:1px solid #e8e8e8;">Abstained (motion-level)</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.abstained.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.abstained.entitlement_sum }}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#777777;">Absent</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;">{{ motion.tally.absent.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;">{{ motion.tally.absent.entitlement_sum }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    {% else %}
-                    <!-- Standard yes/no motion -->
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-                      <thead>
-                        <tr style="background-color:#f0f4f8;">
-                          <th style="text-align:left;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Category</th>
-                          <th style="text-align:right;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Voter Count</th>
-                          <th style="text-align:right;padding:8px 10px;font-size:12px;color:#555555;border-bottom:2px solid #d0dce8;">Entitlement Sum</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr style="background-color:#eaf7ea;">
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#2e7d32;border-bottom:1px solid #e8e8e8;">Yes</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.yes.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.yes.entitlement_sum }}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#c62828;border-bottom:1px solid #e8e8e8;">No</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.no.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.no.entitlement_sum }}</td>
-                        </tr>
-                        <tr style="background-color:#fafafa;">
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#f57c00;border-bottom:1px solid #e8e8e8;">Abstained</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.abstained.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;border-bottom:1px solid #e8e8e8;">{{ motion.tally.abstained.entitlement_sum }}</td>
-                        </tr>
-                        <tr>
-                          <td style="padding:8px 10px;font-size:13px;font-weight:bold;color:#777777;">Absent</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;">{{ motion.tally.absent.voter_count }}</td>
-                          <td style="padding:8px 10px;font-size:13px;text-align:right;">{{ motion.tally.absent.entitlement_sum }}</td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    {% endif %}
-                  </td>
-                </tr>
-
-                <!-- Voter lists -->
-                {% if motion.is_multi_choice %}
-                <!-- Multi-choice: per-option For/Against/Abstained voter lists -->
-                {% for opt in motion.tally.options %}
-                {% set for_voters = motion.voter_lists.options_for[opt.option_id | string] if motion.voter_lists.options_for is defined and (opt.option_id | string) in motion.voter_lists.options_for else [] %}
-                {% set against_voters = motion.voter_lists.options_against[opt.option_id | string] if motion.voter_lists.options_against is defined and (opt.option_id | string) in motion.voter_lists.options_against else [] %}
-                {% set abstained_voters = motion.voter_lists.options_abstained[opt.option_id | string] if motion.voter_lists.options_abstained is defined and (opt.option_id | string) in motion.voter_lists.options_abstained else [] %}
-                {% if for_voters %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#2e7d32;margin-bottom:4px;">For: {{ opt.option_text }}</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in for_voters %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-                {% if against_voters %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#c62828;margin-bottom:4px;">Against: {{ opt.option_text }}</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in against_voters %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-                {% if abstained_voters %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#f57c00;margin-bottom:4px;">Abstained: {{ opt.option_text }}</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in abstained_voters %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-                {% endfor %}
-                {% else %}
-                {% if motion.voter_lists.yes %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#2e7d32;margin-bottom:4px;">Voted Yes</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in motion.voter_lists.yes %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-
-                {% if motion.voter_lists.no %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#c62828;margin-bottom:4px;">Voted No</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in motion.voter_lists.no %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-                {% endif %}
-
-                {% if motion.voter_lists.abstained %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#f57c00;margin-bottom:4px;">Abstained</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in motion.voter_lists.abstained %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-
-                {% if motion.voter_lists.absent %}
-                <tr>
-                  <td style="padding:0 16px 8px 16px;">
-                    <div style="font-size:12px;font-weight:bold;color:#777777;margin-bottom:4px;">Absent</div>
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0">
-                      {% for voter in motion.voter_lists.absent %}
-                      <tr>
-                        <td style="padding:2px 0;font-size:12px;color:#333333;">Lot {{ voter.lot_number }} | {{ voter.voter_email }}</td>
-                        <td style="padding:2px 0;font-size:12px;color:#666666;text-align:right;">entitlement: {{ voter.entitlement }}</td>
-                      </tr>
-                      {% endfor %}
-                    </table>
-                  </td>
-                </tr>
-                {% endif %}
-
-              </table>
+            <td style="padding:8px 32px 32px 32px;" align="center">
+              <p style="margin:0 0 20px 0;font-size:14px;color:#555555;">
+                The full voting tally and per-motion results are available on the admin meeting page.
+              </p>
+              <a href="{{ meeting_url }}"
+                 style="display:inline-block;background-color:#1a3c5e;color:#ffffff;text-decoration:none;font-size:15px;font-weight:bold;padding:14px 32px;border-radius:4px;">
+                View Full Results
+              </a>
             </td>
           </tr>
-          {% endfor %}
 
           <!-- Footer -->
           <tr>

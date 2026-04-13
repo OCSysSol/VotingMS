@@ -174,6 +174,7 @@ class EmailService:
         manager_email: str = building.manager_email
 
         # Render template
+        meeting_url = f"{settings.allowed_origin}/admin/general-meetings/{agm_id}"
         env = _get_jinja_env()
         template = env.get_template("report_email.html")
         html_body = template.render(
@@ -183,7 +184,7 @@ class EmailService:
             voting_closes_at=voting_closes_at,
             total_eligible_voters=detail["total_eligible_voters"],
             total_submitted=detail["total_submitted"],
-            motions=detail["motions"],
+            meeting_url=meeting_url,
         )
 
         # Load SMTP config from DB
