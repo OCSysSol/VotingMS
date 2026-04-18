@@ -1688,16 +1688,27 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             "entitlement": w.unit_entitlement_snapshot,
         }
 
+    # Maps (lot_owner_id, email) -> display_name ("Given Surname" or None)
+    lot_owner_email_to_name: dict[tuple, str | None] = {}
+
     if lot_entitlement:
-        # Batch-load emails for all lots in the snapshot — single query (RR3-12)
+        # Batch-load emails (with names) for all lots in the snapshot — single query (RR3-12)
         batch_emails_result = await db.execute(
-            select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
+            select(
+                LotOwnerEmail.lot_owner_id,
+                LotOwnerEmail.email,
+                LotOwnerEmail.given_name,
+                LotOwnerEmail.surname,
+            ).where(
                 LotOwnerEmail.lot_owner_id.in_(list(lot_entitlement.keys()))
             )
         )
         for row in batch_emails_result.all():
             if row[1] and row[0] in lot_info:
                 lot_info[row[0]]["emails"].append(row[1])
+            if row[1]:
+                name_parts = [p for p in [row[2], row[3]] if p]
+                lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
 
     # Track whether the weight snapshot exists; SQL aggregation entitlement sums are only
     # accurate when the snapshot rows exist (they JOIN on GeneralMeetingLotWeight).
@@ -1719,13 +1730,21 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             }
         if fallback_owners:
             fallback_emails_result = await db.execute(
-                select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
+                select(
+                    LotOwnerEmail.lot_owner_id,
+                    LotOwnerEmail.email,
+                    LotOwnerEmail.given_name,
+                    LotOwnerEmail.surname,
+                ).where(
                     LotOwnerEmail.lot_owner_id.in_([lo.id for lo in fallback_owners])
                 )
             )
             for row in fallback_emails_result.all():
                 if row[1] and row[0] in lot_info:
                     lot_info[row[0]]["emails"].append(row[1])
+                if row[1]:
+                    name_parts = [p for p in [row[2], row[3]] if p]
+                    lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
 
     eligible_lot_owner_ids: set[uuid.UUID] = set(lot_entitlement.keys())
     total_eligible_voters = len(eligible_lot_owner_ids)
@@ -1831,8 +1850,10 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     ballot_hash_val = lot_owner_to_ballot_hash.get(lid)
                     submitted_by_admin_val = lot_owner_to_submitted_by_admin.get(lid, False)
                     submitted_by_admin_username_val = lot_owner_to_submitted_by_admin_username.get(lid)
+                voter_name = lot_owner_email_to_name.get((lid, voter_email))
                 result_list.append({
                     "voter_email": voter_email,
+                    "voter_name": voter_name,
                     "lot_number": info["lot_number"],
                     "entitlement": info["entitlement"],
                     "proxy_email": proxy_email_val,

@@ -1328,4 +1328,152 @@ describe("AGMReportView", () => {
     // Multiple "Not eligible" text nodes may exist (tally row + badge) — assert at least one is present
     expect(screen.getAllByText("Not eligible").length).toBeGreaterThan(0);
   });
+
+  // --- Fix 2: voter_name display in voter lists ---
+
+  it("Fix 2: BinaryVoterList shows 'Given Surname <email>' when voter_name is present", async () => {
+    const user = userEvent.setup();
+    const motionWithName: typeof motions[0] = {
+      ...motions[0],
+      voter_lists: {
+        yes: [{ voter_email: "jane@example.com", voter_name: "Jane Smith", lot_number: "L1", entitlement: 100 }],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options: {},
+      },
+    };
+    render(<AGMReportView motions={[motionWithName]} />);
+    await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
+    expect(screen.getByText("Jane Smith <jane@example.com>")).toBeInTheDocument();
+  });
+
+  it("Fix 2: BinaryVoterList shows plain email when voter_name is null", async () => {
+    const user = userEvent.setup();
+    const motionWithNoName: typeof motions[0] = {
+      ...motions[0],
+      voter_lists: {
+        yes: [{ voter_email: "anon@example.com", voter_name: null, lot_number: "L1", entitlement: 100 }],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options: {},
+      },
+    };
+    render(<AGMReportView motions={[motionWithNoName]} />);
+    await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
+    expect(screen.getByText("anon@example.com")).toBeInTheDocument();
+    expect(screen.queryByText(/</)).not.toBeInTheDocument();
+  });
+
+  it("Fix 2: MultiChoiceOptionRows shows 'Given Surname <email>' when voter_name is present", async () => {
+    const user = userEvent.setup();
+    const mcWithName: MotionDetail = {
+      ...mcMotionFixture,
+      voter_lists: {
+        ...mcMotionFixture.voter_lists,
+        options_for: {
+          "opt-a": [{ voter_email: "bob@example.com", voter_name: "Bob Jones", lot_number: "L1", entitlement: 100 }],
+          "opt-b": [],
+        },
+        options_against: {},
+        options_abstained: {},
+        options: {
+          "opt-a": [{ voter_email: "bob@example.com", voter_name: "Bob Jones", lot_number: "L1", entitlement: 100 }],
+          "opt-b": [],
+        },
+      },
+    };
+    render(<AGMReportView motions={[mcWithName]} />);
+    const showBtn = screen.getAllByRole("button", { name: /Show voting details for Alice/ })[0];
+    await user.click(showBtn);
+    expect(screen.getByText("Bob Jones <bob@example.com>")).toBeInTheDocument();
+  });
+
+  it("Fix 2: MultiChoiceOptionRows shows plain email when voter_name is null", async () => {
+    const user = userEvent.setup();
+    const mcWithNoName: MotionDetail = {
+      ...mcMotionFixture,
+      voter_lists: {
+        ...mcMotionFixture.voter_lists,
+        options_for: {
+          "opt-a": [{ voter_email: "plain@example.com", voter_name: null, lot_number: "L1", entitlement: 100 }],
+          "opt-b": [],
+        },
+        options_against: {},
+        options_abstained: {},
+        options: {
+          "opt-a": [{ voter_email: "plain@example.com", voter_name: null, lot_number: "L1", entitlement: 100 }],
+          "opt-b": [],
+        },
+      },
+    };
+    render(<AGMReportView motions={[mcWithNoName]} />);
+    const showBtn = screen.getAllByRole("button", { name: /Show voting details for Alice/ })[0];
+    await user.click(showBtn);
+    expect(screen.getByText("plain@example.com")).toBeInTheDocument();
+  });
+
+  it("Fix 2: CSV export includes 'Given Surname <email>' for voter with voter_name", async () => {
+    const singleMotion: MotionDetail[] = [
+      {
+        ...motions[0],
+        voter_lists: {
+          ...motions[0].voter_lists,
+          yes: [{ voter_email: "alice@example.com", voter_name: "Alice Brown", lot_number: "L1", entitlement: 100 }],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+        },
+      },
+    ];
+    const csv = await captureCSVFromExport(singleMotion);
+    expect(csv).toContain("Alice Brown <alice@example.com>");
+  });
+
+  it("Fix 2: CSV export includes plain email when voter_name is null", async () => {
+    const singleMotion: MotionDetail[] = [
+      {
+        ...motions[0],
+        voter_lists: {
+          ...motions[0].voter_lists,
+          yes: [{ voter_email: "noname@example.com", voter_name: null, lot_number: "L1", entitlement: 100 }],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+        },
+      },
+    ];
+    const csv = await captureCSVFromExport(singleMotion);
+    expect(csv).toContain('"noname@example.com"');
+    expect(csv).not.toContain("<noname@example.com>");
+  });
+
+  it("Fix 2: CSV export for voter with voter_name and proxy shows 'Given Surname <email> (proxy)'", async () => {
+    const singleMotion: MotionDetail[] = [
+      {
+        ...motions[0],
+        voter_lists: {
+          ...motions[0].voter_lists,
+          yes: [{
+            voter_email: "carol@example.com",
+            voter_name: "Carol White",
+            lot_number: "L1",
+            entitlement: 100,
+            proxy_email: "proxy@example.com",
+          }],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+        },
+      },
+    ];
+    const csv = await captureCSVFromExport(singleMotion);
+    expect(csv).toContain("Carol White <carol@example.com> (proxy)");
+  });
 });

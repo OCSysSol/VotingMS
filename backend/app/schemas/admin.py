@@ -445,6 +445,7 @@ class GeneralMeetingListItem(BaseModel):
 
 class VoterEntry(BaseModel):
     voter_email: str
+    voter_name: str | None = None
     lot_number: str
     entitlement: int
     proxy_email: str | None = None

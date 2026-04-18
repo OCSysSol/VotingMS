@@ -74,6 +74,7 @@ export interface GeneralMeetingListItem {
 
 export interface VoterEntry {
   voter_email?: string;
+  voter_name?: string | null;
   lot_number?: string;
   entitlement: number;
   proxy_email?: string | null;

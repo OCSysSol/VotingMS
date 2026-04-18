@@ -859,6 +859,14 @@ async def get_my_ballot(
                     is_multi_choice=motion.is_multi_choice,
                 ))
 
+        # Sort option_choices by display_order for multi-choice items so the
+        # confirmation page shows options in the same order as the voting page.
+        for item in lot_votes_by_motion.values():
+            item.option_choices.sort(
+                key=lambda oc: options_by_id[oc.option_id].display_order
+                if oc.option_id in options_by_id else 0
+            )
+
         sub = submission_by_lot.get(lot_owner_id)
         submitted_lots.append(LotBallotSummary(
             lot_owner_id=lot_owner_id,
