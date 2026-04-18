@@ -1868,6 +1868,164 @@ class TestGetGeneralMeetingDetail:
         assert tally["no"]["entitlement_sum"] == 75
         assert tally["abstained"]["voter_count"] == 0, "against must not appear in abstained"
 
+    # --- voter_name in voter lists (Fix 2) ---
+
+    async def test_get_general_meeting_detail_voter_list_includes_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Voter with given_name + surname has voter_name included in voter list entry."""
+        b = Building(name="VN Name Building", manager_email="vn_name@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="VN1", unit_entitlement=50)
+        db_session.add(lo)
+        await db_session.flush()
+
+        db_session.add(LotOwnerEmail(
+            lot_owner_id=lo.id, email="jane@vn.com",
+            given_name="Jane", surname="Smith",
+        ))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="VN Name Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(general_meeting_id=agm.id, title="VN Motion", display_order=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=50,
+        ))
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email="jane@vn.com", lot_owner_id=lo.id,
+            choice=VoteChoice.yes, status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="jane@vn.com",
+        ))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 200
+        voter_lists = response.json()["motions"][0]["voter_lists"]
+        yes_voters = voter_lists["yes"]
+        assert len(yes_voters) == 1
+        assert yes_voters[0]["voter_email"] == "jane@vn.com"
+        assert yes_voters[0]["voter_name"] == "Jane Smith"
+
+    async def test_get_general_meeting_detail_voter_list_name_absent_when_no_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Voter with no given_name/surname has voter_name as None in voter list entry."""
+        b = Building(name="VN NoName Building", manager_email="vn_noname@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="VN2", unit_entitlement=40)
+        db_session.add(lo)
+        await db_session.flush()
+
+        # No given_name or surname set
+        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="anon@vn.com"))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="VN NoName Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(general_meeting_id=agm.id, title="VN NoName Motion", display_order=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=40,
+        ))
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email="anon@vn.com", lot_owner_id=lo.id,
+            choice=VoteChoice.no, status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="anon@vn.com",
+        ))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 200
+        voter_lists = response.json()["motions"][0]["voter_lists"]
+        no_voters = voter_lists["no"]
+        assert len(no_voters) == 1
+        assert no_voters[0]["voter_email"] == "anon@vn.com"
+        assert no_voters[0]["voter_name"] is None
+
+    async def test_get_general_meeting_detail_fallback_path_voter_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fallback path (no GeneralMeetingLotWeight snapshot) still includes voter_name."""
+        b = Building(name="VN Fallback Building", manager_email="vn_fallback@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="VNF1", unit_entitlement=60)
+        db_session.add(lo)
+        await db_session.flush()
+
+        db_session.add(LotOwnerEmail(
+            lot_owner_id=lo.id, email="fallback@vn.com",
+            given_name="Bob", surname="Jones",
+        ))
+        await db_session.flush()
+
+        # No GeneralMeetingLotWeight rows — forces the fallback path
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="VN Fallback Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(general_meeting_id=agm.id, title="VNF Motion", display_order=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        # Intentionally NO GeneralMeetingLotWeight rows added
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email="fallback@vn.com", lot_owner_id=lo.id,
+            choice=VoteChoice.yes, status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id, lot_owner_id=lo.id, voter_email="fallback@vn.com",
+        ))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 200
+        voter_lists = response.json()["motions"][0]["voter_lists"]
+        yes_voters = voter_lists["yes"]
+        assert len(yes_voters) == 1
+        assert yes_voters[0]["voter_email"] == "fallback@vn.com"
+        assert yes_voters[0]["voter_name"] == "Bob Jones"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/admin/general-meetings/{agm_id}/close

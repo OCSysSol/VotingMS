@@ -1586,6 +1586,120 @@ class TestMyBallotMultiChoice:
         assert option_choices[str(alice_opt_id)] == "for"
         assert option_choices[str(bob_opt_id)] == "abstained"
 
+    async def test_get_my_ballot_multi_choice_options_ordered_by_display_order(
+        self,
+        client: AsyncClient,
+        mc_meeting: dict,
+        db_session: AsyncSession,
+        mc_building: Building,
+    ):
+        """Fix 1: option_choices are returned sorted by display_order ascending,
+        not in DB insertion order.
+
+        Creates votes for 3 options in reverse display_order (Carol=3, Alice=1, Bob=2).
+        Asserts the returned option_choices are ordered Alice (1), Bob (2), Carol (3).
+        """
+        meeting_id = uuid.UUID(mc_meeting["id"])
+        mc_motion = next(m for m in mc_meeting["motions"] if m["is_multi_choice"])
+        # options are created with display_order 1=Alice, 2=Bob, 3=Carol
+        alice_opt_id = uuid.UUID(mc_motion["options"][0]["id"])
+        bob_opt_id = uuid.UUID(mc_motion["options"][1]["id"])
+        carol_opt_id = uuid.UUID(mc_motion["options"][2]["id"])
+
+        lots_result = await db_session.execute(
+            select(LotOwner).where(LotOwner.building_id == mc_building.id).limit(1)
+        )
+        lot = lots_result.scalars().first()
+        emails_result = await db_session.execute(
+            select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id == lot.id).limit(1)
+        )
+        email_row = emails_result.scalars().first()
+        voter_email = email_row.email
+        token = await _create_voter_session(db_session, meeting_id, voter_email, mc_building.id)
+
+        # Insert votes in REVERSE display_order (Carol=3, Alice=1, Bob=2) with explicit
+        # timestamps so Carol is processed first by the ORDER BY created_at query.
+        base_ts = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+        for i, opt_id in enumerate([carol_opt_id, alice_opt_id, bob_opt_id]):
+            db_session.add(Vote(
+                general_meeting_id=meeting_id,
+                motion_id=uuid.UUID(mc_motion["id"]),
+                voter_email=voter_email,
+                lot_owner_id=lot.id,
+                choice=VoteChoice.selected,
+                motion_option_id=opt_id,
+                status=VoteStatus.submitted,
+                created_at=base_ts + timedelta(seconds=i),
+            ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=meeting_id,
+            lot_owner_id=lot.id,
+            voter_email=voter_email,
+        ))
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/general-meeting/{meeting_id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        lot_ballot = data["submitted_lots"][0]
+        mc_item = next(v for v in lot_ballot["votes"] if v["motion_id"] == mc_motion["id"])
+        returned_option_ids = [oc["option_id"] for oc in mc_item["option_choices"]]
+        # Must be in display_order ascending: Alice(1), Bob(2), Carol(3)
+        assert returned_option_ids == [str(alice_opt_id), str(bob_opt_id), str(carol_opt_id)]
+
+    async def test_get_my_ballot_multi_choice_abstain_no_option_choices_sort_noop(
+        self,
+        client: AsyncClient,
+        mc_meeting: dict,
+        db_session: AsyncSession,
+        mc_building: Building,
+    ):
+        """Fix 1: abstained MC vote has empty option_choices — sort is a no-op, no crash."""
+        meeting_id = uuid.UUID(mc_meeting["id"])
+        mc_motion = next(m for m in mc_meeting["motions"] if m["is_multi_choice"])
+
+        lots_result = await db_session.execute(
+            select(LotOwner).where(LotOwner.building_id == mc_building.id).limit(1)
+        )
+        lot = lots_result.scalars().first()
+        emails_result = await db_session.execute(
+            select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id == lot.id).limit(1)
+        )
+        email_row = emails_result.scalars().first()
+        voter_email = email_row.email
+        token = await _create_voter_session(db_session, meeting_id, voter_email, mc_building.id)
+
+        # Insert motion-level abstain (no option_id)
+        db_session.add(Vote(
+            general_meeting_id=meeting_id,
+            motion_id=uuid.UUID(mc_motion["id"]),
+            voter_email=voter_email,
+            lot_owner_id=lot.id,
+            choice=VoteChoice.abstained,
+            motion_option_id=None,
+            status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=meeting_id,
+            lot_owner_id=lot.id,
+            voter_email=voter_email,
+        ))
+        await db_session.commit()
+
+        resp = await client.get(
+            f"/api/general-meeting/{meeting_id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        lot_ballot = data["submitted_lots"][0]
+        mc_item = next(v for v in lot_ballot["votes"] if v["motion_id"] == mc_motion["id"])
+        # Abstained MC vote has no option_choices — empty list, no crash
+        assert mc_item["option_choices"] == []
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schema unit tests

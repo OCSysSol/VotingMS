@@ -182,7 +182,9 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
                             {voter.lot_number ?? "—"}
                           </td>
                           <td style={{ fontSize: "0.875rem" }}>
-                            {voter.voter_email ?? "—"}
+                            {voter.voter_name
+                              ? `${voter.voter_name} <${voter.voter_email ?? ""}>`
+                              : (voter.voter_email ?? "—")}
                             {voter.proxy_email && (
                               <span style={{ marginLeft: 6, fontSize: "0.75rem", color: "var(--text-muted)" }}>
                                 (proxy)
@@ -259,7 +261,9 @@ function BinaryVoterList({ motion }: { motion: MotionDetail }) {
                   {voter.lot_number ?? "—"}
                 </td>
                 <td style={{ fontSize: "0.875rem" }}>
-                  {voter.voter_email ?? "—"}
+                  {voter.voter_name
+                    ? `${voter.voter_name} <${voter.voter_email ?? ""}>`
+                    : (voter.voter_email ?? "—")}
                   {voter.proxy_email && (
                     <span style={{ marginLeft: 6, fontSize: "0.75rem", color: "var(--text-muted)" }}>
                       (proxy)
@@ -311,6 +315,15 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
     });
   }
   function handleExportCSV() {
+    // Build "Given Surname <email>" when name is present, plain email otherwise.
+    // Appends " (proxy)" suffix when proxy_email is set.
+    function buildEmailCell(v: { voter_email?: string; voter_name?: string | null; proxy_email?: string | null }): string {
+      const displayName = v.voter_name
+        ? `${v.voter_name} <${v.voter_email ?? ""}>`
+        : (v.voter_email || "");
+      return v.proxy_email ? `${displayName} (proxy)` : displayName;
+    }
+
     const rows: string[] = ["Motion,Category,Lot Number,Entitlement (UOE),Voter Email,Submitted By"];
     for (const motion of motions) {
       const motionLabel = `${motion.motion_number?.trim() || String(motion.display_order)}. ${motion.title.replace(/"/g, '""')}`;
@@ -321,23 +334,17 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
           const againstVoters = motion.voter_lists.options_against?.[optTally.option_id] ?? [];
           const abstainedVoters = motion.voter_lists.options_abstained?.[optTally.option_id] ?? [];
           for (const v of forVoters) {
-            const emailCell = v.proxy_email
-              ? `${v.voter_email || ""} (proxy)`
-              : (v.voter_email || "");
+            const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
             rows.push(`"${motionLabel}","Option: ${optTally.option_text.replace(/"/g, '""')} — For","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
           for (const v of againstVoters) {
-            const emailCell = v.proxy_email
-              ? `${v.voter_email || ""} (proxy)`
-              : (v.voter_email || "");
+            const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
             rows.push(`"${motionLabel}","Option: ${optTally.option_text.replace(/"/g, '""')} — Against","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
           for (const v of abstainedVoters) {
-            const emailCell = v.proxy_email
-              ? `${v.voter_email || ""} (proxy)`
-              : (v.voter_email || "");
+            const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
             rows.push(`"${motionLabel}","Option: ${optTally.option_text.replace(/"/g, '""')} — Abstained","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
@@ -345,9 +352,7 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
         // Abstained / absent / not_eligible rows
         for (const cat of ["abstained", "absent", "not_eligible"] as const) {
           for (const v of motion.voter_lists[cat]) {
-            const emailCell = v.proxy_email
-              ? `${v.voter_email || ""} (proxy)`
-              : (v.voter_email || "");
+            const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
             rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
@@ -355,9 +360,7 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
       } else {
         for (const cat of ["yes", "no", "abstained", "absent", "not_eligible"] as const) {
           for (const v of motion.voter_lists[cat]) {
-            const emailCell = v.proxy_email
-              ? `${v.voter_email || ""} (proxy)`
-              : (v.voter_email || "");
+            const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
             rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
