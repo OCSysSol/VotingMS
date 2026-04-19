@@ -1390,6 +1390,113 @@ class TestAdminVoteEntry:
         )
         assert vote_result.scalar_one_or_none() is not None
 
+    async def test_mc_motion_not_auto_abstained_for_already_submitted_lot(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """MC no-options skip for already-submitted lot (covers admin_service line 3984).
+
+        When the already-submitted lot is explicitly included in the entries payload and
+        provides an MC motion entry with empty option_ids, the service must skip (not
+        auto-abstain) because the lot already has a BallotSubmission.
+
+        This is distinct from the sibling test where lo_submitted is omitted from entries
+        entirely — here mc_lookup[m2.id] == [] is reached and the already_submitted guard
+        on the continue branch must fire.
+        """
+        b = make_building("VE MC SkipAbs")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = make_lot_owner(b, "VE-MCSA1")
+        db_session.add(lo)
+        await db_session.flush()
+
+        agm = make_open_meeting(b, "VE MC SkipAbs AGM")
+        db_session.add(agm)
+        await db_session.flush()
+
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=lo.unit_entitlement,
+            financial_position_snapshot=FinancialPositionSnapshot.normal,
+        ))
+
+        # A standard motion M1 (already voted on by lo)
+        m1 = Motion(
+            general_meeting_id=agm.id,
+            title="MC SkipAbs M1",
+            display_order=1,
+            is_visible=True,
+        )
+        db_session.add(m1)
+        # A multi-choice motion M2 (newly visible — lot has no vote for it yet)
+        m2 = Motion(
+            general_meeting_id=agm.id,
+            title="MC SkipAbs M2",
+            display_order=2,
+            is_visible=True,
+            is_multi_choice=True,
+            option_limit=2,
+        )
+        db_session.add(m2)
+        await db_session.flush()
+
+        opt = MotionOption(motion_id=m2.id, text="Opt1", display_order=1)
+        db_session.add(opt)
+
+        # lo already has BallotSubmission + Vote for M1
+        existing_sub = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email="voter@test.com",
+            submitted_by_admin=False,
+        )
+        db_session.add(existing_sub)
+        existing_vote = Vote(
+            general_meeting_id=agm.id,
+            motion_id=m1.id,
+            voter_email="voter@test.com",
+            lot_owner_id=lo.id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(existing_vote)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        await db_session.refresh(m2)
+
+        # Admin includes lo in entries with an MC entry for M2 but empty option_ids.
+        # Because lo already has a BallotSubmission, the service must skip M2 rather than
+        # recording a motion-level abstain (the continue on line 3984).
+        payload = {
+            "entries": [
+                {
+                    "lot_owner_id": str(lo.id),
+                    "votes": [],
+                    "multi_choice_votes": [
+                        {"motion_id": str(m2.id), "option_ids": []}
+                    ],
+                }
+            ]
+        }
+        resp = await client.post(f"/api/admin/general-meetings/{agm.id}/enter-votes", json=payload)
+        assert resp.status_code == 200
+
+        await db_session.flush()
+        # lo must still have exactly 1 vote — the original M1 vote.
+        # No Vote for M2 must have been created (not auto-abstained).
+        votes_result = await db_session.execute(
+            select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        votes = list(votes_result.scalars().all())
+        assert len(votes) == 1
+        assert votes[0].motion_id == m1.id
+        assert votes[0].choice == VoteChoice.yes
+
 
 # ---------------------------------------------------------------------------
 # Slice 9 — US-AVE2-01: For/Against/Abstain per multi-choice option
