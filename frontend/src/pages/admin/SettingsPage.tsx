@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon } from "../../api/config";
+import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, testSmtpConfig } from "../../api/config";
 import type { TenantConfig } from "../../api/config";
 
 export default function SettingsPage() {
@@ -18,17 +18,43 @@ export default function SettingsPage() {
   const [saveError, setSaveError] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [uploadLogoSuccess, setUploadLogoSuccess] = useState(false);
   const [isUploadingFavicon, setIsUploadingFavicon] = useState(false);
   const [uploadFaviconError, setUploadFaviconError] = useState("");
+  const [uploadFaviconSuccess, setUploadFaviconSuccess] = useState(false);
+
+  // SMTP state
+  const [smtpHost, setSmtpHost] = useState("");
+  const [smtpPort, setSmtpPort] = useState(587);
+  const [smtpUsername, setSmtpUsername] = useState("");
+  const [smtpFromEmail, setSmtpFromEmail] = useState("");
+  const [smtpPassword, setSmtpPassword] = useState("");
+  const [smtpPasswordIsSet, setSmtpPasswordIsSet] = useState(false);
+  const [isSmtpUnconfigured, setIsSmtpUnconfigured] = useState(false);
+  const [isSmtpSaving, setIsSmtpSaving] = useState(false);
+  const [smtpSaveSuccess, setSmtpSaveSuccess] = useState(false);
+  const [smtpSaveError, setSmtpSaveError] = useState("");
+  const [isTestingSmtp, setIsTestingSmtp] = useState(false);
+  const [smtpTestResult, setSmtpTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [showTestEmailModal, setShowTestEmailModal] = useState(false);
+  const [testEmailRecipient, setTestEmailRecipient] = useState("");
 
   useEffect(() => {
-    getAdminConfig()
-      .then((data: TenantConfig) => {
-        setAppName(data.app_name);
-        setLogoUrl(data.logo_url);
-        setFaviconUrl(data.favicon_url);
-        setPrimaryColour(data.primary_colour);
-        setSupportEmail(data.support_email);
+    Promise.all([getAdminConfig(), getSmtpConfig()])
+      .then(([config, smtp]) => {
+        setAppName(config.app_name);
+        setLogoUrl(config.logo_url);
+        setFaviconUrl(config.favicon_url);
+        setPrimaryColour(config.primary_colour);
+        setSupportEmail(config.support_email);
+
+        setSmtpHost(smtp.smtp_host);
+        setSmtpPort(smtp.smtp_port);
+        setSmtpUsername(smtp.smtp_username);
+        setSmtpFromEmail(smtp.smtp_from_email);
+        setSmtpPasswordIsSet(smtp.password_is_set);
+        const isUnconfigured = !smtp.smtp_host || !smtp.smtp_username || !smtp.smtp_from_email || !smtp.password_is_set;
+        setIsSmtpUnconfigured(isUnconfigured);
       })
       .catch(() => {
         setSaveError("Failed to load settings.");
@@ -42,10 +68,12 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadError("");
+    setUploadLogoSuccess(false);
     setIsUploading(true);
     try {
       const result = await uploadLogo(file);
       setLogoUrl(result.url);
+      setUploadLogoSuccess(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to upload logo.";
       setUploadError(message);
@@ -58,10 +86,12 @@ export default function SettingsPage() {
     const file = e.target.files?.[0];
     if (!file) return;
     setUploadFaviconError("");
+    setUploadFaviconSuccess(false);
     setIsUploadingFavicon(true);
     try {
       const result = await uploadFavicon(file);
       setFaviconUrl(result.url);
+      setUploadFaviconSuccess(true);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to upload favicon.";
       setUploadFaviconError(message);
@@ -70,11 +100,61 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleSmtpSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSmtpSaveError("");
+    setSmtpSaveSuccess(false);
+    setSmtpTestResult(null);
+    setIsSmtpSaving(true);
+    try {
+      const payload: Parameters<typeof updateSmtpConfig>[0] = {
+        smtp_host: smtpHost,
+        smtp_port: smtpPort,
+        smtp_username: smtpUsername,
+        smtp_from_email: smtpFromEmail,
+      };
+      if (smtpPassword) {
+        payload.smtp_password = smtpPassword;
+      }
+      const updated = await updateSmtpConfig(payload);
+      setSmtpPasswordIsSet(updated.password_is_set);
+      setSmtpPassword("");
+      const isUnconfigured = !updated.smtp_host || !updated.smtp_username || !updated.smtp_from_email || !updated.password_is_set;
+      setIsSmtpUnconfigured(isUnconfigured);
+      setSmtpSaveSuccess(true);
+      setTimeout(() => setSmtpSaveSuccess(false), 3000);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to save SMTP settings.";
+      setSmtpSaveError(message);
+    } finally {
+      setIsSmtpSaving(false);
+    }
+  }
+
+  async function handleSmtpTest() {
+    setShowTestEmailModal(false);
+    setSmtpTestResult(null);
+    setIsTestingSmtp(true);
+    try {
+      await testSmtpConfig(testEmailRecipient);
+      setSmtpTestResult({ ok: true, message: `Test email sent to ${testEmailRecipient}` });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Test email failed.";
+      setSmtpTestResult({ ok: false, message });
+    } finally {
+      setIsTestingSmtp(false);
+      setTestEmailRecipient("");
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaveError("");
     setSaveSuccess(false);
     setIsSaving(true);
+    // Clear upload success prompts when the user saves
+    setUploadLogoSuccess(false);
+    setUploadFaviconSuccess(false);
     try {
       const updated: TenantConfig = {
         app_name: appName,
@@ -84,12 +164,13 @@ export default function SettingsPage() {
         support_email: supportEmail,
       };
       await updateAdminConfig(updated);
-      // Update the cache immediately so branding re-renders without a page refresh,
-      // then invalidate to trigger a background re-fetch confirming server state.
-      queryClient.setQueryData(["public-config"], updated);
-      await queryClient.invalidateQueries({ queryKey: ["public-config"] });
+      // Show success immediately — don't block on cache refresh.
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
+      // Update the cache immediately so branding re-renders without a page refresh,
+      // then trigger a background re-fetch to confirm server state.
+      queryClient.setQueryData(["public-config"], updated);
+      void queryClient.invalidateQueries({ queryKey: ["public-config"] });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to save settings.";
       setSaveError(message);
@@ -158,6 +239,11 @@ export default function SettingsPage() {
                 />
               </div>
               {uploadError && <span className="field__error">{uploadError}</span>}
+              {uploadLogoSuccess && (
+                <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
+                  Logo uploaded successfully
+                </p>
+              )}
             </div>
 
             <div className="field">
@@ -187,6 +273,11 @@ export default function SettingsPage() {
                 />
               </div>
               {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
+              {uploadFaviconSuccess && (
+                <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
+                  Favicon uploaded successfully
+                </p>
+              )}
             </div>
 
             <div className="field">
@@ -230,17 +321,198 @@ export default function SettingsPage() {
             {saveError && (
               <p className="field__error" style={{ marginBottom: 12 }}>{saveError}</p>
             )}
+            {(uploadLogoSuccess || uploadFaviconSuccess) && (
+              <p
+                role="status"
+                style={{
+                  color: "var(--amber)",
+                  background: "var(--amber-bg)",
+                  border: "1px solid #F6C190",
+                  borderRadius: "var(--r-md)",
+                  padding: "8px 12px",
+                  fontSize: "0.875rem",
+                  marginBottom: 12,
+                }}
+              >
+                Save settings to apply the changes
+              </p>
+            )}
 
             <button
               type="submit"
               className="btn btn--primary"
               disabled={isSaving}
+              data-testid="branding-save-btn"
             >
               {isSaving ? "Saving…" : "Save"}
             </button>
           </form>
         </div>
       </div>
+
+      <div className="admin-card">
+        <div className="admin-card__header">
+          <p className="admin-card__title">Mail Server</p>
+        </div>
+        <div className="admin-card__body">
+          {isSmtpUnconfigured && (
+            <div className="warning-banner" role="alert">
+              ⚠️ Mail server is not configured — emails will not be sent until SMTP settings are saved.
+            </div>
+          )}
+          <form onSubmit={(e) => { void handleSmtpSubmit(e); }} className="admin-form">
+            <div className="field">
+              <label className="field__label" htmlFor="smtp-host">Host</label>
+              <input
+                id="smtp-host"
+                className="field__input"
+                type="text"
+                value={smtpHost}
+                onChange={(e) => setSmtpHost(e.target.value)}
+                required
+                placeholder="smtp.example.com"
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="smtp-port">Port</label>
+              <input
+                id="smtp-port"
+                className="field__input"
+                type="number"
+                min={1}
+                max={65535}
+                value={smtpPort}
+                onChange={(e) => setSmtpPort(Number(e.target.value))}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="smtp-username">Username</label>
+              <input
+                id="smtp-username"
+                className="field__input"
+                type="text"
+                value={smtpUsername}
+                onChange={(e) => setSmtpUsername(e.target.value)}
+                required
+                placeholder="user@example.com"
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="smtp-from-email">From email address</label>
+              <input
+                id="smtp-from-email"
+                className="field__input"
+                type="email"
+                value={smtpFromEmail}
+                onChange={(e) => setSmtpFromEmail(e.target.value)}
+                required
+                placeholder="noreply@example.com"
+              />
+            </div>
+
+            <div className="field">
+              <label className="field__label" htmlFor="smtp-password">Password</label>
+              <input
+                id="smtp-password"
+                className="field__input"
+                type="password"
+                value={smtpPassword}
+                onChange={(e) => setSmtpPassword(e.target.value)}
+                placeholder={smtpPasswordIsSet ? "Enter new password to change" : "Enter password"}
+                autoComplete="new-password"
+              />
+            </div>
+
+            {smtpSaveSuccess && (
+              <p style={{ color: "var(--green)", marginBottom: 12 }}>SMTP settings saved.</p>
+            )}
+            {smtpSaveError && (
+              <p className="field__error" style={{ marginBottom: 12 }}>{smtpSaveError}</p>
+            )}
+
+            {smtpTestResult && (
+              <p
+                style={{
+                  color: smtpTestResult.ok ? "var(--green)" : "var(--red)",
+                  marginBottom: 12,
+                }}
+                role="status"
+              >
+                {smtpTestResult.message}
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="submit"
+                className="btn btn--primary"
+                data-testid="smtp-save-btn"
+                disabled={isSmtpSaving}
+              >
+                {isSmtpSaving ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={isTestingSmtp || isSmtpUnconfigured}
+                onClick={() => { setSmtpTestResult(null); setShowTestEmailModal(true); }}
+              >
+                {isTestingSmtp ? "Sending…" : "Send test email"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {showTestEmailModal && (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="test-email-modal-title"
+          onKeyDown={(e) => { if (e.key === "Escape") setShowTestEmailModal(false); }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowTestEmailModal(false); }}
+        >
+          <div className="dialog">
+            <h2 id="test-email-modal-title" className="dialog__title">Send test email</h2>
+            <div className="dialog__body">
+              <div className="field">
+                <label className="field__label" htmlFor="test-email-recipient">Recipient email</label>
+                <input
+                  id="test-email-recipient"
+                  className="field__input"
+                  type="email"
+                  value={testEmailRecipient}
+                  onChange={(e) => setTestEmailRecipient(e.target.value)}
+                  placeholder="you@example.com"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="dialog__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setShowTestEmailModal(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!testEmailRecipient || isTestingSmtp}
+                onClick={() => { void handleSmtpTest(); }}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

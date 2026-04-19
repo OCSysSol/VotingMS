@@ -1,13 +1,19 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBuilding, listLotOwners, archiveBuilding, updateBuilding, deleteBuilding } from "../../api/admin";
+import { getBuilding, listLotOwners, countLotOwners, archiveBuilding, updateBuilding, deleteBuilding } from "../../api/admin";
 import type { Building, LotOwner } from "../../types";
 import LotOwnerTable from "../../components/admin/LotOwnerTable";
 import LotOwnerForm from "../../components/admin/LotOwnerForm";
 import LotOwnerCSVUpload from "../../components/admin/LotOwnerCSVUpload";
 import ProxyNominationsUpload from "../../components/admin/ProxyNominationsUpload";
 import FinancialPositionUpload from "../../components/admin/FinancialPositionUpload";
+import Pagination from "../../components/admin/Pagination";
+
+const PAGE_SIZE = 20;
+
+const FOCUSABLE_SELECTORS =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface DeleteBuildingConfirmModalProps {
   buildingName: string;
@@ -17,6 +23,15 @@ interface DeleteBuildingConfirmModalProps {
 }
 
 function DeleteBuildingConfirmModal({ buildingName, deleting, onConfirm, onCancel }: DeleteBuildingConfirmModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // Focus first element on open
+  useEffect(() => {
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (focusable && focusable.length > 0) focusable[0].focus();
+  }, []);
+
+  // Escape key dismisses (only when not loading)
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && !deleting) onCancel();
@@ -25,11 +40,27 @@ function DeleteBuildingConfirmModal({ buildingName, deleting, onConfirm, onCance
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [deleting, onCancel]);
 
+  // Tab/Shift+Tab focus trap
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Delete Building"
+      ref={dialogRef}
+      onKeyDown={handleKeyDown}
       style={{
         position: "fixed",
         inset: 0,
@@ -43,13 +74,13 @@ function DeleteBuildingConfirmModal({ buildingName, deleting, onConfirm, onCance
     >
       <div
         style={{
-          background: "#fff",
-          borderRadius: 8,
+          background: "var(--white)",
+          borderRadius: "var(--r-md)",
           padding: 32,
           minWidth: 360,
           maxWidth: 480,
           width: "100%",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
         <h2 style={{ marginTop: 0, marginBottom: 16 }}>Delete "{buildingName}"?</h2>
@@ -77,11 +108,44 @@ interface ArchiveConfirmModalProps {
 }
 
 function ArchiveConfirmModal({ buildingName, archiving, onConfirm, onCancel }: ArchiveConfirmModalProps) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // RR3-07: Focus first element on open
+  useEffect(() => {
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (focusable && focusable.length > 0) focusable[0].focus();
+  }, []);
+
+  // RR3-07: Escape key dismisses (only when not loading)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !archiving) onCancel();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [archiving, onCancel]);
+
+  // RR3-07: Tab/Shift+Tab focus trap
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Archive Building"
+      ref={dialogRef}
+      onKeyDown={handleKeyDown}
       style={{
         position: "fixed",
         inset: 0,
@@ -94,13 +158,13 @@ function ArchiveConfirmModal({ buildingName, archiving, onConfirm, onCancel }: A
     >
       <div
         style={{
-          background: "#fff",
-          borderRadius: 8,
+          background: "var(--white)",
+          borderRadius: "var(--r-md)",
           padding: 32,
           minWidth: 360,
           maxWidth: 480,
           width: "100%",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
         <h2 style={{ marginTop: 0, marginBottom: 16 }}>Archive "{buildingName}"?</h2>
@@ -132,6 +196,36 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
   const [managerEmail, setManagerEmail] = useState(building.manager_email);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  // RR3-07: Focus first element on open
+  useEffect(() => {
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (focusable && focusable.length > 0) focusable[0].focus();
+  }, []);
+
+  // RR3-07: Escape key dismisses (only when not saving)
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && !saving) onCancel();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [saving, onCancel]);
+
+  // RR3-07: Tab/Shift+Tab focus trap
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (!focusable || focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -159,6 +253,8 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
       role="dialog"
       aria-modal="true"
       aria-label="Edit Building"
+      ref={dialogRef}
+      onKeyDown={handleKeyDown}
       style={{
         position: "fixed",
         inset: 0,
@@ -171,44 +267,40 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
     >
       <div
         style={{
-          background: "#fff",
-          borderRadius: 8,
+          background: "var(--white)",
+          borderRadius: "var(--r-md)",
           padding: 32,
           minWidth: 360,
           maxWidth: 480,
           width: "100%",
-          boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
+          boxShadow: "var(--shadow-lg)",
         }}
       >
         <h2 style={{ marginTop: 0, marginBottom: 20 }}>Edit Building</h2>
         <form onSubmit={(e) => { void handleSubmit(e); }}>
-          <div style={{ marginBottom: 16 }}>
-            <label htmlFor="edit-building-name" style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>
-              Name
-            </label>
+          <div className="field">
+            <label className="field__label" htmlFor="edit-building-name">Name</label>
             <input
               id="edit-building-name"
               type="text"
+              className="field__input"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
             />
           </div>
-          <div style={{ marginBottom: 16 }}>
-            <label htmlFor="edit-building-manager-email" style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>
-              Manager Email
-            </label>
+          <div className="field">
+            <label className="field__label" htmlFor="edit-building-manager-email">Manager Email</label>
             <input
               id="edit-building-manager-email"
               type="email"
+              className="field__input"
               value={managerEmail}
               onChange={(e) => setManagerEmail(e.target.value)}
               required
-              style={{ width: "100%", padding: "8px 10px", boxSizing: "border-box" }}
             />
           </div>
-          {error && <p style={{ color: "red", marginBottom: 12 }}>{error}</p>}
+          {error && <p className="field__error" style={{ marginBottom: 12 }}>{error}</p>}
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button type="button" className="btn btn--ghost" onClick={onCancel} disabled={saving}>
               Cancel
@@ -227,6 +319,7 @@ export default function BuildingDetailPage() {
   const { buildingId } = useParams<{ buildingId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [editTarget, setEditTarget] = useState<LotOwner | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -238,21 +331,56 @@ export default function BuildingDetailPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
 
+  // Read lotPage from URL search params; default to 1
+  const lotPageParam = parseInt(searchParams.get("lotPage") ?? "1", 10);
+  const lotPage = isNaN(lotPageParam) || lotPageParam < 1 ? 1 : lotPageParam;
+
   const { data: building } = useQuery<Building>({
     queryKey: ["admin", "buildings", buildingId],
     queryFn: () => getBuilding(buildingId!),
     enabled: !!buildingId,
   });
 
+  const { data: lotCountData } = useQuery<number>({
+    queryKey: ["admin", "lot-owners", "count", buildingId],
+    queryFn: () => countLotOwners(buildingId!),
+    enabled: !!buildingId,
+  });
+
+  const totalLotCount = lotCountData ?? 0;
+  const totalLotPages = Math.max(1, Math.ceil(totalLotCount / PAGE_SIZE));
+  const safeLotPage = Math.min(lotPage, totalLotPages);
+
   const {
     data: lotOwners = [],
     isLoading,
     error,
   } = useQuery<LotOwner[]>({
-    queryKey: ["admin", "lot-owners", buildingId],
-    queryFn: () => listLotOwners(buildingId!),
+    queryKey: ["admin", "lot-owners", buildingId, safeLotPage],
+    queryFn: () => listLotOwners(buildingId!, { limit: PAGE_SIZE, offset: (safeLotPage - 1) * PAGE_SIZE }),
     enabled: !!buildingId,
   });
+
+  // Prefetch next page
+  useEffect(() => {
+    const nextOffset = safeLotPage * PAGE_SIZE;
+    if (nextOffset < totalLotCount && buildingId) {
+      void queryClient.prefetchQuery({
+        queryKey: ["admin", "lot-owners", buildingId, safeLotPage + 1],
+        queryFn: () => listLotOwners(buildingId, { limit: PAGE_SIZE, offset: nextOffset }),
+      });
+    }
+  }, [safeLotPage, totalLotCount, buildingId, queryClient]);
+
+  function handleLotPageChange(newPage: number) {
+    const next = new URLSearchParams(searchParams);
+    if (newPage === 1) {
+      next.delete("lotPage");
+    } else {
+      next.set("lotPage", String(newPage));
+    }
+    setSearchParams(next, { replace: true });
+  }
 
   function handleEdit(lo: LotOwner) {
     setEditTarget(lo);
@@ -401,7 +529,25 @@ export default function BuildingDetailPage() {
       )}
 
       <div className="admin-card">
-        <LotOwnerTable lotOwners={lotOwners} onEdit={handleEdit} isLoading={isLoading} />
+        <Pagination
+          page={safeLotPage}
+          totalPages={totalLotPages}
+          totalItems={totalLotCount}
+          pageSize={PAGE_SIZE}
+          onPageChange={handleLotPageChange}
+          isLoading={isLoading}
+        />
+        <div style={{ opacity: isLoading ? 0.5 : 1, transition: "opacity 0.15s", pointerEvents: isLoading ? "none" : "auto" }}>
+          <LotOwnerTable lotOwners={lotOwners} onEdit={handleEdit} isLoading={isLoading} />
+        </div>
+        <Pagination
+          page={safeLotPage}
+          totalPages={totalLotPages}
+          totalItems={totalLotCount}
+          pageSize={PAGE_SIZE}
+          onPageChange={handleLotPageChange}
+          isLoading={isLoading}
+        />
       </div>
 
       <LotOwnerCSVUpload

@@ -45,11 +45,13 @@ from app.models import (
 )
 from app.services.email_service import (
     EmailService,
+    SmtpNotConfiguredError,
     _TEMPLATES_DIR,
     _MAX_ATTEMPTS,
     _backoff_seconds,
     _get_jinja_env,
     _send_with_limit,
+    _try_acquire_email_lock,
 )
 
 
@@ -91,7 +93,8 @@ async def _create_agm(db: AsyncSession, building: Building) -> GeneralMeeting:
     return agm
 
 
-async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int = 0, description: str | None = "A motion") -> Motion:
+async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int = 1, description: str | None = "A motion") -> Motion:
+    """Create a motion for test fixtures. order_index must be > 0 (RR3-37 constraint)."""
     motion = Motion(
         general_meeting_id=agm.id,
         title=f"Motion {order_index}",
@@ -195,6 +198,37 @@ class TestSendWithLimit:
 
 
 # ---------------------------------------------------------------------------
+# Advisory lock helper
+# ---------------------------------------------------------------------------
+
+
+class TestTryAcquireEmailLock:
+    async def test_returns_true_when_lock_acquired(self, db_session: AsyncSession):
+        """_try_acquire_email_lock returns True when the lock is not yet held."""
+        agm_id = uuid.uuid4()
+        # Start a transaction so the advisory xact lock has a scope
+        async with db_session.begin_nested():
+            result = await _try_acquire_email_lock(db_session, agm_id)
+        assert result is True
+
+    async def test_returns_false_when_lock_already_held(self, db_session: AsyncSession):
+        """_try_acquire_email_lock returns False when the same lock is already held
+        in the same session/transaction (pg_try_advisory_xact_lock is non-reentrant
+        for different transactions; we simulate the False path by mocking the scalar
+        return value).
+        """
+        agm_id = uuid.uuid4()
+        # Mock the DB execute to return False as pg would when lock is taken
+        mock_result = MagicMock()
+        mock_result.scalar.return_value = False
+        mock_db = AsyncMock(spec=AsyncSession)
+        mock_db.execute = AsyncMock(return_value=mock_result)
+
+        result = await _try_acquire_email_lock(mock_db, agm_id)
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
 # Backoff helper
 # ---------------------------------------------------------------------------
 
@@ -235,31 +269,7 @@ class TestEmailTemplateRendering:
             "voting_closes_at": "2026-03-09 18:00:00+00:00",
             "total_eligible_voters": 5,
             "total_submitted": 3,
-            "motions": [
-                {
-                    "title": "Approve Budget",
-                    "description": "Approve the 2026 budget",
-                    "motion_number": "3",
-                    "tally": {
-                        "yes": {"voter_count": 2, "entitlement_sum": 200},
-                        "no": {"voter_count": 1, "entitlement_sum": 50},
-                        "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                        "absent": {"voter_count": 2, "entitlement_sum": 150},
-                    },
-                    "voter_lists": {
-                        "yes": [
-                            {"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100},
-                            {"voter_email": "bob@example.com", "lot_number": "1B", "entitlement": 100},
-                        ],
-                        "no": [{"voter_email": "carol@example.com", "lot_number": "2A", "entitlement": 50}],
-                        "abstained": [],
-                        "absent": [
-                            {"voter_email": "dave@example.com", "lot_number": "3A", "entitlement": 75},
-                            {"voter_email": "eve@example.com", "lot_number": "3B", "entitlement": 75},
-                        ],
-                    },
-                }
-            ],
+            "meeting_url": "http://localhost:5173/admin/general-meetings/abc-123",
         }
 
     def test_renders_building_name(self):
@@ -283,271 +293,35 @@ class TestEmailTemplateRendering:
         assert "5" in html  # total eligible
         assert "3" in html  # total submitted
 
-    def test_renders_motion_title(self):
+    def test_renders_meeting_url_link(self):
+        """Email must contain a link to the admin meeting page."""
         html = self._render_template(self._default_context())
-        assert "Approve Budget" in html
+        assert "http://localhost:5173/admin/general-meetings/abc-123" in html
 
-    def test_renders_motion_number_from_field_not_loop_index(self):
-        """Template must show motion.motion_number, not the Jinja loop.index position."""
-        ctx = self._default_context()
-        # motion_number is "3" but it is the first (and only) motion in the list,
-        # so loop.index would produce "1". If we see "Motion 3" the field is used.
-        html = self._render_template(ctx)
-        assert "Motion 3" in html
-        assert "Motion 1" not in html
-
-    def test_renders_motion_description(self):
+    def test_renders_view_full_results_cta(self):
+        """Email must include a 'View Full Results' call-to-action."""
         html = self._render_template(self._default_context())
-        assert "Approve the 2026 budget" in html
+        assert "View Full Results" in html
 
-    def test_renders_tally_yes(self):
+    def test_does_not_render_motion_tally_tables(self):
+        """Simplified email must not contain motion tally tables."""
         html = self._render_template(self._default_context())
-        assert "200" in html  # entitlement_sum for yes
+        # Tally-specific column headers should not appear
+        assert "Entitlement Sum" not in html
+        assert "Voter Count" not in html
 
-    def test_renders_tally_no(self):
+    def test_does_not_render_voter_lists(self):
+        """Simplified email must not contain individual voter email addresses."""
         html = self._render_template(self._default_context())
-        assert "50" in html  # entitlement_sum for no
-
-    def test_renders_voter_lists_yes(self):
-        html = self._render_template(self._default_context())
-        assert "alice@example.com" in html
-        assert "bob@example.com" in html
-
-    def test_renders_voter_lists_no(self):
-        html = self._render_template(self._default_context())
-        assert "carol@example.com" in html
-
-    def test_renders_absent_voter_list(self):
-        html = self._render_template(self._default_context())
-        assert "dave@example.com" in html
-
-    def test_renders_lot_number_in_voter_rows(self):
-        html = self._render_template(self._default_context())
-        # Lot number should appear alongside voter email in each vote row
-        assert "Lot 1A" in html
-        assert "Lot 2A" in html
-        assert "Lot 3A" in html
-
-    def test_null_description_handled_gracefully(self):
-        ctx = self._default_context()
-        ctx["motions"][0]["description"] = None
-        html = self._render_template(ctx)
-        # Should not crash; motion title still present
-        assert "Approve Budget" in html
-
-    def test_multiple_motions_rendered(self):
-        ctx = self._default_context()
-        ctx["motions"].append(
-            {
-                "title": "Elect New Chair",
-                "description": None,
-                "motion_number": "7",
-                "tally": {
-                    "yes": {"voter_count": 3, "entitlement_sum": 300},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 2, "entitlement_sum": 150},
-                },
-                "voter_lists": {
-                    "yes": [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                },
-            }
-        )
-        html = self._render_template(ctx)
-        assert "Approve Budget" in html
-        assert "Elect New Chair" in html
-
-    def test_empty_voter_lists_do_not_render_section(self):
-        ctx = self._default_context()
-        ctx["motions"][0]["voter_lists"]["abstained"] = []
-        html = self._render_template(ctx)
-        # abstained section shouldn't appear since the list is empty
-        assert "Abstained" in html  # tally row still shows
+        # No voter list rows should appear (no email addresses in body outside CTA link)
+        assert "alice@example.com" not in html
+        assert "Voted Yes" not in html
+        assert "Voted No" not in html
 
     def test_template_is_valid_html(self):
         html = self._render_template(self._default_context())
         assert "<!DOCTYPE html>" in html
         assert "</html>" in html
-
-    # --- Multi-choice motion rendering ---
-
-    def _multi_choice_motion_context(self) -> dict:
-        """Return a template context with one multi-choice motion."""
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Member Election",
-                "description": "Select up to 2 candidates",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 1, "entitlement_sum": 80},
-                    "absent": {"voter_count": 1, "entitlement_sum": 50},
-                    "options": [
-                        {"option_text": "Alice Smith", "voter_count": 2, "entitlement_sum": 200},
-                        {"option_text": "Bob Jones", "voter_count": 1, "entitlement_sum": 100},
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [{"voter_email": "carol@example.com", "lot_number": "2A", "entitlement": 80}],
-                    "absent": [{"voter_email": "dave@example.com", "lot_number": "3A", "entitlement": 50}],
-                    "options": {},
-                },
-            }
-        ]
-        return ctx
-
-    def test_multi_choice_renders_option_names(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Alice Smith" in html
-        assert "Bob Jones" in html
-
-    def test_multi_choice_renders_option_voter_count(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "200" in html  # entitlement_sum for Alice Smith
-
-    def test_multi_choice_renders_abstained_and_absent(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Abstained" in html
-        assert "Absent" in html
-
-    def test_multi_choice_does_not_render_yes_no_rows(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        # The yes/no tally rows should not appear for multi-choice motions
-        assert ">Yes<" not in html
-        assert ">No<" not in html
-
-    def test_standard_motion_does_not_render_option_header(self):
-        # When is_multi_choice is False (default context), Option column header absent
-        html = self._render_template(self._default_context())
-        assert ">Option<" not in html
-
-    def test_multi_choice_renders_option_column_header(self):
-        html = self._render_template(self._multi_choice_motion_context())
-        assert "Option" in html
-
-    def test_multi_choice_with_no_options_renders_cleanly(self):
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["tally"]["options"] = []
-        html = self._render_template(ctx)
-        assert "Board Member Election" in html
-        assert "<!DOCTYPE html>" in html
-
-    def test_multi_choice_renders_per_option_voter_lists(self):
-        """Per-option voter lists are rendered in the email for multi-choice motions."""
-        import uuid as _uuid
-        opt_id_alice = str(_uuid.uuid4())
-        opt_id_bob = str(_uuid.uuid4())
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Election",
-                "description": None,
-                "motion_number": "1",
-                "motion_type": "general",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 0, "entitlement_sum": 0},
-                    "options": [
-                        {"option_id": opt_id_alice, "option_text": "Alice Smith", "display_order": 1, "voter_count": 1, "entitlement_sum": 100},
-                        {"option_id": opt_id_bob, "option_text": "Bob Jones", "display_order": 2, "voter_count": 0, "entitlement_sum": 0},
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                    "options": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                },
-            }
-        ]
-        html = self._render_template(ctx)
-        # Voter for Alice Smith option should appear
-        assert "alice@example.com" in html
-        assert "Voted: Alice Smith" in html
-
-    def test_multi_choice_option_with_no_voters_not_rendered(self):
-        """Options with no voters do not produce a voter-list section."""
-        import uuid as _uuid
-        opt_id_alice = str(_uuid.uuid4())
-        opt_id_bob = str(_uuid.uuid4())
-        ctx = self._default_context()
-        ctx["motions"] = [
-            {
-                "title": "Board Election",
-                "description": None,
-                "motion_number": "1",
-                "motion_type": "general",
-                "is_multi_choice": True,
-                "tally": {
-                    "yes": {"voter_count": 0, "entitlement_sum": 0},
-                    "no": {"voter_count": 0, "entitlement_sum": 0},
-                    "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                    "absent": {"voter_count": 0, "entitlement_sum": 0},
-                    "options": [
-                        {"option_id": opt_id_alice, "option_text": "Alice Smith", "display_order": 1, "voter_count": 1, "entitlement_sum": 100},
-                        {"option_id": opt_id_bob, "option_text": "Bob Jones", "display_order": 2, "voter_count": 0, "entitlement_sum": 0},
-                    ],
-                },
-                "voter_lists": {
-                    "yes": [],
-                    "no": [],
-                    "abstained": [],
-                    "absent": [],
-                    "options": {
-                        opt_id_alice: [{"voter_email": "alice@example.com", "lot_number": "1A", "entitlement": 100}],
-                        opt_id_bob: [],
-                    },
-                },
-            }
-        ]
-        html = self._render_template(ctx)
-        # Bob Jones voter section should not appear (empty list)
-        assert "Voted: Bob Jones" not in html
-
-    def test_motion_type_general_label_rendered(self):
-        """General resolution label is shown for general motion type."""
-        html = self._render_template(self._default_context())
-        assert "General Resolution" in html
-
-    def test_motion_type_special_label_rendered(self):
-        """Special resolution label is shown for special motion type."""
-        ctx = self._default_context()
-        ctx["motions"][0]["motion_type"] = "special"
-        html = self._render_template(ctx)
-        assert "Special Resolution" in html
-
-    def test_motion_type_general_not_special_in_standard_context(self):
-        """General motion does not show Special Resolution label."""
-        html = self._render_template(self._default_context())
-        assert "Special Resolution" not in html
-
-    def test_multi_choice_general_resolution_label(self):
-        """Multi-choice motion still shows General Resolution label when motion_type=general."""
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["motion_type"] = "general"
-        html = self._render_template(ctx)
-        assert "General Resolution" in html
-
-    def test_multi_choice_special_resolution_label(self):
-        """Multi-choice motion shows Special Resolution label when motion_type=special."""
-        ctx = self._multi_choice_motion_context()
-        ctx["motions"][0]["motion_type"] = "special"
-        html = self._render_template(ctx)
-        assert "Special Resolution" in html
 
 
 # ---------------------------------------------------------------------------
@@ -679,11 +453,26 @@ class TestSendReport:
         await _create_vote(db_session, agm, motion, "voter@example.com", VoteChoice.yes, lot_owner_id=lo.id)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch(
+            "app.services.email_service.get_smtp_config",
+            AsyncMock(return_value=mock_smtp_config),
+        )
+        mocker.patch(
+            "app.services.email_service.get_decrypted_password",
+            return_value="pass",
+        )
 
         service = EmailService()
         # Should not raise
-        await service.send_report(agm.id, db_session)
+        await service.send_report(agm.id, db_session, "https://example.com")
 
         mock_send.assert_called_once()
         # First positional arg is the MIMEMultipart message object
@@ -695,23 +484,37 @@ class TestSendReport:
         assert "<html" in html_part.lower()
 
     async def test_send_report_uses_smtp_settings(self, db_session: AsyncSession, mocker):
-        """send_report passes SMTP settings from config to aiosmtplib.send."""
+        """send_report passes SMTP settings from DB config to aiosmtplib.send."""
         building = await _create_building(db_session)
         agm = await _create_agm(db_session, building)
         await _create_motion(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.example.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "testuser"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch(
+            "app.services.email_service.get_smtp_config",
+            AsyncMock(return_value=mock_smtp_config),
+        )
+        mocker.patch(
+            "app.services.email_service.get_decrypted_password",
+            return_value="testpass",
+        )
 
         service = EmailService()
-        await service.send_report(agm.id, db_session)
+        await service.send_report(agm.id, db_session, "https://example.com")
 
-        from app.config import settings
         call_kwargs = mock_send.call_args[1]
-        assert call_kwargs["hostname"] == settings.smtp_host
-        assert call_kwargs["port"] == settings.smtp_port
-        assert call_kwargs["username"] == settings.smtp_username
-        assert call_kwargs["password"] == settings.smtp_password
+        assert call_kwargs["hostname"] == "smtp.example.com"
+        assert call_kwargs["port"] == 587
+        assert call_kwargs["username"] == "testuser"
+        assert call_kwargs["password"] == "testpass"
         assert call_kwargs["start_tls"] is True
 
     # --- Error cases ---
@@ -723,11 +526,19 @@ class TestSendReport:
         await _create_motion(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
         mocker.patch("aiosmtplib.send", new_callable=AsyncMock, side_effect=Exception("SMTP error"))
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
         service = EmailService()
         with pytest.raises(Exception, match="SMTP error"):
-            await service.send_report(agm.id, db_session)
+            await service.send_report(agm.id, db_session, "https://example.com")
 
     async def test_send_report_agm_not_found_raises(self, db_session: AsyncSession, mocker):
         """GeneralMeeting not found → get_agm_detail raises HTTPException(404)."""
@@ -736,7 +547,7 @@ class TestSendReport:
 
         service = EmailService()
         with pytest.raises(HTTPException) as exc_info:
-            await service.send_report(uuid.uuid4(), db_session)
+            await service.send_report(uuid.uuid4(), db_session, "https://example.com")
         assert exc_info.value.status_code == 404
 
     async def test_send_report_no_manager_email_raises(self, db_session: AsyncSession, mocker):
@@ -749,11 +560,19 @@ class TestSendReport:
         await _create_motion(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
         mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
         service = EmailService()
         with pytest.raises(ValueError, match="no manager_email"):
-            await service.send_report(agm.id, db_session)
+            await service.send_report(agm.id, db_session, "https://example.com")
 
     async def test_send_report_with_null_motion_description(self, db_session: AsyncSession, mocker):
         """Motion with null description → template renders without error."""
@@ -762,10 +581,73 @@ class TestSendReport:
         await _create_motion(db_session, agm, description=None)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
         service = EmailService()
-        await service.send_report(agm.id, db_session)
+        await service.send_report(agm.id, db_session, "https://example.com")
         mock_send.assert_called_once()
+
+    async def test_send_report_uses_base_url_in_meeting_link(self, db_session: AsyncSession, mocker):
+        """send_report builds the meeting_url from the provided base_url, not settings.allowed_origin."""
+        building = await _create_building(db_session, manager_email="mgr@example.com")
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
+
+        service = EmailService()
+        await service.send_report(agm.id, db_session, "https://vms-demo.ocss.tech")
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        html_part = msg.get_payload()[0].get_payload()
+        expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
+        assert expected_url in html_part
+
+    async def test_send_report_base_url_trailing_slash_stripped(self, db_session: AsyncSession, mocker):
+        """Trailing slash on base_url is stripped so the meeting URL is well-formed."""
+        building = await _create_building(db_session, manager_email="mgr@example.com")
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
+
+        service = EmailService()
+        # Pass base_url with a trailing slash — should still produce a clean URL
+        await service.send_report(agm.id, db_session, "https://vms-demo.ocss.tech/")
+
+        mock_send.assert_called_once()
+        msg = mock_send.call_args[0][0]
+        html_part = msg.get_payload()[0].get_payload()
+        expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
+        assert expected_url in html_part
+        # Confirm there is no double-slash in the path
+        assert "//admin" not in html_part
 
 
 # ---------------------------------------------------------------------------
@@ -784,17 +666,20 @@ class TestTriggerWithRetry:
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
         mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
-        # Patch session factory to use our test session
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         await db_session.refresh(delivery)
         assert delivery.status == EmailDeliveryStatus.delivered
@@ -811,6 +696,15 @@ class TestTriggerWithRetry:
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
+
         call_count = {"n": 0}
 
         async def send_side_effect(*args, **kwargs):
@@ -824,13 +718,9 @@ class TestTriggerWithRetry:
         mocker.patch("asyncio.sleep", new=AsyncMock())
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         await db_session.refresh(delivery)
         assert delivery.status == EmailDeliveryStatus.delivered
@@ -846,22 +736,70 @@ class TestTriggerWithRetry:
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
         mocker.patch("aiosmtplib.send", new_callable=AsyncMock, side_effect=Exception("always fails"))
         mocker.patch("asyncio.sleep", new=AsyncMock())
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         await db_session.refresh(delivery)
         assert delivery.status == EmailDeliveryStatus.failed
         assert delivery.total_attempts == 30
         assert delivery.last_error == "always fails"
+
+    # --- Non-retryable errors ---
+
+    async def test_smtp_auth_error_fails_immediately(self, db_session: AsyncSession, mocker):
+        """SMTPAuthenticationError (535) marks delivery failed on the first attempt without retrying.
+
+        Wrong credentials will never become right — retrying wastes Lambda time on every
+        cold start and causes Lambda timeouts when many stale emails are requeued.
+        """
+        import aiosmtplib
+
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        delivery = await _create_email_delivery(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="bad-password")
+        mocker.patch(
+            "aiosmtplib.send",
+            side_effect=aiosmtplib.SMTPAuthenticationError(535, "5.7.8 Authentication failed"),
+        )
+        sleep_mock = mocker.patch("asyncio.sleep", new=AsyncMock())
+
+        mock_factory = _make_mock_factory(db_session)
+
+        service = EmailService()
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
+
+        await db_session.refresh(delivery)
+        # Must fail immediately — no retries
+        assert delivery.status == EmailDeliveryStatus.failed
+        assert delivery.total_attempts == 1
+        assert delivery.next_retry_at is None
+        assert "535" in (delivery.last_error or "") or "Authentication" in (delivery.last_error or "")
+        # Sleep (backoff) must NOT have been called
+        sleep_mock.assert_not_called()
 
     # --- Already delivered ---
 
@@ -878,13 +816,9 @@ class TestTriggerWithRetry:
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         mock_send.assert_not_called()
 
@@ -903,13 +837,9 @@ class TestTriggerWithRetry:
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         mock_send.assert_not_called()
 
@@ -920,14 +850,10 @@ class TestTriggerWithRetry:
         mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
         # Should not raise
-        await service.trigger_with_retry(uuid.uuid4())
+        await service.trigger_with_retry(uuid.uuid4(), "https://example.com", session_factory=mock_factory)
         mock_send.assert_not_called()
 
     # --- Exponential backoff ---
@@ -939,6 +865,15 @@ class TestTriggerWithRetry:
         await _create_motion(db_session, agm)
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
         # Fail 3 times, succeed on 4th
         call_count = {"n": 0}
@@ -952,13 +887,9 @@ class TestTriggerWithRetry:
         sleep_mock = mocker.patch("asyncio.sleep", new=AsyncMock())
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         # 3 failures → 3 sleep calls with delays 2^1=2, 2^2=4, 2^3=8
         sleep_calls = [c.args[0] for c in sleep_mock.call_args_list]
@@ -974,13 +905,17 @@ class TestTriggerWithRetry:
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
         mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         log_events: list[dict] = []
 
@@ -1001,10 +936,91 @@ class TestTriggerWithRetry:
             pass
 
         # Just verify the call succeeds without error
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         await db_session.refresh(delivery)
         assert delivery.status == EmailDeliveryStatus.delivered
+
+    # --- C-9: concurrent calls — only one send ---
+
+    async def test_concurrent_calls_send_exactly_once(self, db_session: AsyncSession, mocker):
+        """Two concurrent trigger_with_retry calls for the same AGM → send_report called exactly once.
+
+        The first call acquires the advisory lock and sends. The second call finds
+        the lock already held and exits immediately without sending.
+        """
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        await _create_email_delivery(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
+
+        send_call_count = {"n": 0}
+
+        async def counting_send(*args, **kwargs):
+            send_call_count["n"] += 1
+
+        mocker.patch("aiosmtplib.send", side_effect=counting_send)
+
+        # The second trigger_with_retry call must skip because the lock is held.
+        # We simulate this by making _try_acquire_email_lock return False on the
+        # second call (as it would when a real advisory lock is already held in
+        # another session).
+        original_lock_fn = _try_acquire_email_lock
+        lock_call_count = {"n": 0}
+
+        async def mock_lock(db, agm_id):
+            lock_call_count["n"] += 1
+            if lock_call_count["n"] == 1:
+                return True   # first caller acquires the lock
+            return False       # second caller finds it taken
+
+        mock_factory = _make_mock_factory(db_session)
+        mocker.patch("app.services.email_service._try_acquire_email_lock", side_effect=mock_lock)
+
+        service = EmailService()
+        # Run two concurrent invocations
+        await asyncio.gather(
+            service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory),
+            service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory),
+        )
+
+        # Exactly one send should have occurred
+        assert send_call_count["n"] == 1
+
+    # --- C-9: restart scenario — already delivered, do not re-send ---
+
+    async def test_already_delivered_before_lock_check_skips(self, db_session: AsyncSession, mocker):
+        """Restart scenario: EmailDelivery.status=delivered when trigger_with_retry
+        is called (e.g. Lambda restart after send but before status update was
+        persisted in a previous run that did persist it).  send_report must not
+        be called again.
+        """
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.delivered
+        delivery.total_attempts = 1
+        await db_session.commit()
+
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+
+        mock_factory = _make_mock_factory(db_session)
+
+        service = EmailService()
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
+
+        mock_send.assert_not_called()
 
     # --- next_retry_at is set on failure ---
 
@@ -1015,6 +1031,15 @@ class TestTriggerWithRetry:
         await _create_motion(db_session, agm)
         delivery = await _create_email_delivery(db_session, agm)
         await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mocker.patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config))
+        mocker.patch("app.services.email_service.get_decrypted_password", return_value="pass")
 
         call_count = {"n": 0}
 
@@ -1027,13 +1052,9 @@ class TestTriggerWithRetry:
         mocker.patch("asyncio.sleep", new=AsyncMock())
 
         mock_factory = _make_mock_factory(db_session)
-        mocker.patch(
-            "app.services.email_service._make_session_factory",
-            return_value=mock_factory,
-        )
 
         service = EmailService()
-        await service.trigger_with_retry(agm.id)
+        await service.trigger_with_retry(agm.id, "https://example.com", session_factory=mock_factory)
 
         # After success on attempt 2, next_retry_at should be None
         await db_session.refresh(delivery)
@@ -1067,8 +1088,55 @@ class TestRequeuePendingOnStartup:
 
     # --- Happy path ---
 
+    async def test_startup_summary_warning_logged_when_pending_found(
+        self, db_session: AsyncSession, mocker
+    ):
+        """startup_email_requeue warning is emitted at WARNING level when emails are requeued.
+
+        A single 'startup_email_requeue count=N' line is immediately visible in function
+        logs; a burst of N individual requeueing_pending_email lines is easy to scroll past.
+        """
+        await self._clear_pending_deliveries(db_session)
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.pending
+        delivery.total_attempts = 2
+        await db_session.commit()
+
+        mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
+
+        warning_events: list[str] = []
+
+        def capture(event: str, **kw: object) -> None:
+            warning_events.append(event)
+
+        import app.services.email_service as _email_svc
+        mocker.patch.object(_email_svc.logger, "warning", side_effect=capture)
+
+        service = EmailService()
+        await service.requeue_pending_on_startup(db_session)
+
+        assert "startup_email_requeue" in warning_events
+
+    async def test_no_summary_warning_when_nothing_pending(
+        self, db_session: AsyncSession, mocker
+    ):
+        """No startup_email_requeue log emitted when there are no due pending emails."""
+        await self._clear_pending_deliveries(db_session)
+        mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
+
+        import app.services.email_service as _email_svc
+        warning_events: list[str] = []
+        mocker.patch.object(_email_svc.logger, "warning", side_effect=lambda e, **kw: warning_events.append(e))
+
+        service = EmailService()
+        await service.requeue_pending_on_startup(db_session)
+
+        assert "startup_email_requeue" not in warning_events
+
     async def test_requeues_pending_deliveries(self, db_session: AsyncSession, mocker):
-        """Pending deliveries with attempts < 30 are re-launched."""
+        """Pending deliveries due for retry are awaited via asyncio.gather on startup."""
         await self._clear_pending_deliveries(db_session)
         building = await _create_building(db_session)
         agm = await _create_agm(db_session, building)
@@ -1077,29 +1145,12 @@ class TestRequeuePendingOnStartup:
         delivery.total_attempts = 5
         await db_session.commit()
 
-        # Patch trigger_with_retry as AsyncMock and capture the tasks created.
-        # We use a real asyncio.create_task wrapper that immediately cancels the task
-        # so the coroutine is consumed without side effects.
         trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
-        tasks: list = []
-
-        real_create_task = asyncio.create_task
-
-        def _capturing_create_task(coro, **kwargs):
-            task = real_create_task(coro, **kwargs)
-            tasks.append(task)
-            return task
-
-        mocker.patch("asyncio.create_task", side_effect=_capturing_create_task)
 
         service = EmailService()
         await service.requeue_pending_on_startup(db_session)
 
-        # Allow the event loop to run the tasks
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-
-        assert len(tasks) == 1
+        assert trigger_mock.call_count == 1
 
     async def test_ignores_delivered_records(self, db_session: AsyncSession, mocker):
         """Delivered records are not re-queued."""
@@ -1111,12 +1162,12 @@ class TestRequeuePendingOnStartup:
         delivery.total_attempts = 1
         await db_session.commit()
 
-        create_task_mock = mocker.patch("asyncio.create_task")
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
 
         service = EmailService()
         await service.requeue_pending_on_startup(db_session)
 
-        create_task_mock.assert_not_called()
+        trigger_mock.assert_not_called()
 
     async def test_ignores_records_at_max_attempts(self, db_session: AsyncSession, mocker):
         """Records with total_attempts >= 30 are not re-queued."""
@@ -1128,12 +1179,54 @@ class TestRequeuePendingOnStartup:
         delivery.total_attempts = 30
         await db_session.commit()
 
-        create_task_mock = mocker.patch("asyncio.create_task")
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
 
         service = EmailService()
         await service.requeue_pending_on_startup(db_session)
 
-        create_task_mock.assert_not_called()
+        trigger_mock.assert_not_called()
+
+    async def test_skips_deliveries_with_future_next_retry_at(self, db_session: AsyncSession, mocker):
+        """Pending delivery with next_retry_at in the future is not re-queued on cold start.
+
+        Without this guard, every cold start would immediately retry all pending emails,
+        ignoring the exponential backoff schedule and blocking startup.
+        """
+        from datetime import timedelta
+        await self._clear_pending_deliveries(db_session)
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.pending
+        delivery.total_attempts = 3
+        delivery.next_retry_at = datetime.now(UTC) + timedelta(hours=1)  # not due yet
+        await db_session.commit()
+
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
+
+        service = EmailService()
+        await service.requeue_pending_on_startup(db_session)
+
+        trigger_mock.assert_not_called()
+
+    async def test_requeues_deliveries_with_past_next_retry_at(self, db_session: AsyncSession, mocker):
+        """Pending delivery with next_retry_at in the past IS re-queued on cold start."""
+        from datetime import timedelta
+        await self._clear_pending_deliveries(db_session)
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.pending
+        delivery.total_attempts = 3
+        delivery.next_retry_at = datetime.now(UTC) - timedelta(minutes=5)  # overdue
+        await db_session.commit()
+
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
+
+        service = EmailService()
+        await service.requeue_pending_on_startup(db_session)
+
+        assert trigger_mock.call_count == 1
 
     async def test_ignores_failed_records(self, db_session: AsyncSession, mocker):
         """Failed records are not re-queued."""
@@ -1145,45 +1238,58 @@ class TestRequeuePendingOnStartup:
         delivery.total_attempts = 30
         await db_session.commit()
 
-        create_task_mock = mocker.patch("asyncio.create_task")
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
 
         service = EmailService()
         await service.requeue_pending_on_startup(db_session)
 
-        create_task_mock.assert_not_called()
+        trigger_mock.assert_not_called()
 
     async def test_multiple_pending_deliveries_all_requeued(self, db_session: AsyncSession, mocker):
-        """Multiple pending deliveries all get re-launched."""
+        """Multiple pending deliveries all get re-launched as non-blocking background tasks."""
         await self._clear_pending_deliveries(db_session)
-        tasks_created = []
         for _ in range(3):
             building = await _create_building(db_session)
             agm = await _create_agm(db_session, building)
             delivery = await _create_email_delivery(db_session, agm)
             delivery.status = EmailDeliveryStatus.pending
             delivery.total_attempts = 0
-            tasks_created.append(delivery)
         await db_session.commit()
 
-        mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
-        tasks: list = []
-
-        real_create_task = asyncio.create_task
-
-        def _capturing_create_task(coro, **kwargs):
-            task = real_create_task(coro, **kwargs)
-            tasks.append(task)
-            return task
-
-        mocker.patch("asyncio.create_task", side_effect=_capturing_create_task)
+        trigger_mock = mocker.patch.object(EmailService, "trigger_with_retry", new_callable=AsyncMock)
 
         service = EmailService()
         await service.requeue_pending_on_startup(db_session)
 
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+        assert trigger_mock.call_count == 3
 
-        assert len(tasks) == 3
+    async def test_gather_exceptions_are_logged_not_raised(self, db_session: AsyncSession, mocker):
+        """If a trigger_with_retry task raises, the error is logged and startup completes without raising."""
+        await self._clear_pending_deliveries(db_session)
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.pending
+        delivery.total_attempts = 0
+        await db_session.commit()
+
+        mocker.patch.object(
+            EmailService, "trigger_with_retry", new_callable=AsyncMock,
+            side_effect=Exception("unexpected gather error"),
+        )
+
+        import app.services.email_service as _email_svc
+        error_events: list[str] = []
+        mocker.patch.object(
+            _email_svc.logger, "error",
+            side_effect=lambda e, **kw: error_events.append(e),
+        )
+
+        service = EmailService()
+        # Must not raise even though the task failed
+        await service.requeue_pending_on_startup(db_session)
+
+        assert "startup_email_requeue_task_error" in error_events
 
 
 # ---------------------------------------------------------------------------
@@ -1214,7 +1320,7 @@ class TestCloseAgmEmailIntegration:
         await db_session.flush()
 
         motion = Motion(
-            general_meeting_id=agm.id, title="M1", description=None, display_order=0
+            general_meeting_id=agm.id, title="M1", description=None, display_order=1
         )
         db_session.add(motion)
         await db_session.commit()
@@ -1237,7 +1343,7 @@ class TestCloseAgmEmailIntegration:
         assert delivery.status == EmailDeliveryStatus.pending
 
         # trigger_with_retry should have been scheduled via BackgroundTasks
-        trigger_mock.assert_called_once_with(agm.id)
+        trigger_mock.assert_called_once_with(agm.id, "http://test")
 
     async def test_resend_report_triggers_email(
         self, client: AsyncClient, db_session: AsyncSession, mocker
@@ -1283,7 +1389,7 @@ class TestCloseAgmEmailIntegration:
         assert delivery.total_attempts == 0
 
         # trigger_with_retry should have been scheduled via BackgroundTasks
-        trigger_mock.assert_called_once_with(agm.id)
+        trigger_mock.assert_called_once_with(agm.id, "http://test")
 
     async def test_resend_report_succeeds_when_already_delivered(
         self, client: AsyncClient, db_session: AsyncSession, mocker

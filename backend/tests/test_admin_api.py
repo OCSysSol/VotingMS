@@ -629,10 +629,13 @@ class TestImportLotOwners:
         assert data["imported"] == 2
         assert data["emails"] == 2
 
-    async def test_import_multi_email_same_lot(
+    async def test_import_multi_email_same_lot_returns_422_since_rr3_31(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
-        """Multiple rows with same lot_number → multiple emails for one lot."""
+        """Multiple rows with same lot_number → 422 with duplicate row detail (RR3-31).
+
+        Use semicolons (single row) to specify multiple emails for one lot.
+        """
         csv_data = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [
@@ -644,17 +647,11 @@ class TestImportLotOwners:
             f"/api/admin/buildings/{building.id}/lot-owners/import",
             files={"file": ("owners.csv", csv_data, "text/csv")},
         )
-        assert response.status_code == 200
-        data = response.json()
-        assert data["imported"] == 1  # one lot
-        assert data["emails"] == 2    # two email rows
-
-        owners_response = await client.get(
-            f"/api/admin/buildings/{building.id}/lot-owners"
-        )
-        owners = owners_response.json()
-        assert len(owners) == 1
-        assert len(owners[0]["emails"]) == 2
+        # Since RR3-31, duplicate lot numbers are an error
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert isinstance(detail, list)
+        assert any("101" in e for e in detail)
 
     async def test_import_semicolon_separated_emails(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
@@ -696,9 +693,14 @@ class TestImportLotOwners:
         assert data["imported"] == 1
         assert data["emails"] == 0
 
-    async def test_import_replaces_existing_owners(
+    async def test_import_adds_new_owners_without_removing_absent_lots(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
+        """Pure upsert: existing lots absent from a re-import are preserved, not deleted.
+
+        This guards the architecture decision that import never deletes lots — doing so
+        would cascade-delete AGMLotWeight records and destroy historical vote tallies.
+        """
         # First import
         csv1 = make_csv(
             ["lot_number", "email", "unit_entitlement"],
@@ -709,7 +711,7 @@ class TestImportLotOwners:
             files={"file": ("owners.csv", csv1, "text/csv")},
         )
 
-        # Second import should replace
+        # Second import introduces new lots; A1 is absent but must NOT be deleted
         csv2 = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [["B1", "new@test.com", "75"], ["B2", "new2@test.com", "25"]],
@@ -721,7 +723,6 @@ class TestImportLotOwners:
         assert response.status_code == 200
         assert response.json()["imported"] == 2
 
-        # Verify replacement
         owners_response = await client.get(
             f"/api/admin/buildings/{building.id}/lot-owners"
         )
@@ -729,11 +730,13 @@ class TestImportLotOwners:
         lot_numbers = {o["lot_number"] for o in owners}
         assert "B1" in lot_numbers
         assert "B2" in lot_numbers
-        assert "A1" not in lot_numbers
+        # A1 was absent from csv2 — pure upsert must preserve it
+        assert "A1" in lot_numbers, "Absent lot deleted by re-import (pure-upsert violated)"
 
-    async def test_empty_csv_clears_owners(
+    async def test_empty_csv_import_preserves_existing_owners(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
+        """An empty re-import must not clear existing lots (pure upsert, never delete)."""
         # Seed
         csv1 = make_csv(
             ["lot_number", "email", "unit_entitlement"],
@@ -744,7 +747,7 @@ class TestImportLotOwners:
             files={"file": ("owners.csv", csv1, "text/csv")},
         )
 
-        # Import empty
+        # Import empty file
         csv2 = make_csv(["lot_number", "email", "unit_entitlement"], [])
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners/import",
@@ -753,11 +756,12 @@ class TestImportLotOwners:
         assert response.status_code == 200
         assert response.json()["imported"] == 0
 
-        # Verify cleared
+        # X1 must still exist — empty import must not clear existing lots
         owners_response = await client.get(
             f"/api/admin/buildings/{building.id}/lot-owners"
         )
-        assert owners_response.json() == []
+        lot_numbers = {o["lot_number"] for o in owners_response.json()}
+        assert "X1" in lot_numbers, "Empty import deleted existing lots (pure-upsert violated)"
 
     async def test_extra_columns_ignored(
         self, client: AsyncClient, building: Building
@@ -773,9 +777,10 @@ class TestImportLotOwners:
         assert response.status_code == 200
         assert response.json()["imported"] == 1
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected (must be > 0)."""
         csv_data = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [["ZERO1", "zero@test.com", "0"]],
@@ -784,8 +789,7 @@ class TestImportLotOwners:
             f"/api/admin/buildings/{building.id}/lot-owners/import",
             files={"file": ("owners.csv", csv_data, "text/csv")},
         )
-        assert response.status_code == 200
-        assert response.json()["imported"] == 1
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -816,11 +820,10 @@ class TestImportLotOwners:
         )
         assert response.status_code == 422
 
-    async def test_duplicate_lot_numbers_in_csv(
+    async def test_duplicate_lot_numbers_in_csv_returns_422_with_row_detail(
         self, client: AsyncClient, building: Building
     ):
-        """Two rows with same lot_number but different emails → merged into one lot with both emails.
-        The unit_entitlement from the first row is used; the second email is added."""
+        """Two rows with the same lot_number → 422 with row-level detail (RR3-31)."""
         csv_data = make_csv(
             ["lot_number", "email", "unit_entitlement"],
             [["DUP1", "a@test.com", "100"], ["DUP1", "b@test.com", "100"]],
@@ -829,11 +832,12 @@ class TestImportLotOwners:
             f"/api/admin/buildings/{building.id}/lot-owners/import",
             files={"file": ("owners.csv", csv_data, "text/csv")},
         )
-        assert response.status_code == 200
-        data = response.json()
-        # One lot owner upserted (DUP1), two email addresses imported
-        assert data["imported"] == 1
-        assert data["emails"] == 2
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert isinstance(detail, list)
+        duplicate_errors = [e for e in detail if "DUP1" in e]
+        assert len(duplicate_errors) == 1
+        assert "rows" in duplicate_errors[0].lower() or "row" in duplicate_errors[0].lower()
 
     async def test_negative_unit_entitlement(
         self, client: AsyncClient, building: Building
@@ -1067,15 +1071,15 @@ class TestAddLotOwner:
         data = response.json()
         assert data["emails"] == []
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected (must be > 0)."""
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners",
             json={"lot_number": "ZERO01", "emails": [], "unit_entitlement": 0},
         )
-        assert response.status_code == 201
-        assert response.json()["unit_entitlement"] == 0
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -1200,9 +1204,10 @@ class TestUpdateLotOwner:
 
     # --- Boundary values ---
 
-    async def test_unit_entitlement_zero_accepted(
+    async def test_unit_entitlement_zero_rejected(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):
+        """RR3-37: unit_entitlement=0 is rejected on update (must be > 0)."""
         lo = LotOwner(
             building_id=building.id,
             lot_number="UPD05",
@@ -1216,8 +1221,7 @@ class TestUpdateLotOwner:
             f"/api/admin/lot-owners/{lo.id}",
             json={"unit_entitlement": 0},
         )
-        assert response.status_code == 200
-        assert response.json()["unit_entitlement"] == 0
+        assert response.status_code == 422
 
     # --- Input validation ---
 
@@ -3108,6 +3112,20 @@ class TestResendReport:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture
+def enable_ballot_reset():
+    """Patch settings.enable_ballot_reset=True for the duration of a test (RR5-01).
+
+    The endpoint imports settings at call time via 'from app.config import settings as _settings'.
+    Patching the attribute on the already-imported module-level singleton is the correct approach.
+    """
+    from app.config import settings as _cfg_settings
+    original = _cfg_settings.enable_ballot_reset
+    _cfg_settings.enable_ballot_reset = True
+    yield
+    _cfg_settings.enable_ballot_reset = original
+
+
 class TestResetAGMBallots:
     async def _create_agm_with_ballot(
         self, db_session: AsyncSession, name: str
@@ -3163,7 +3181,7 @@ class TestResetAGMBallots:
     # --- Happy path ---
 
     async def test_reset_ballots_deletes_submissions_and_returns_count(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, enable_ballot_reset
     ):
         agm, _lo, _motion = await self._create_agm_with_ballot(db_session, "Happy Reset")
         response = await client.delete(f"/api/admin/general-meetings/{agm.id}/ballots")
@@ -3178,7 +3196,7 @@ class TestResetAGMBallots:
         assert subs.scalars().all() == []
 
     async def test_reset_ballots_deletes_submitted_votes(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, enable_ballot_reset
     ):
         agm, _lo, _motion = await self._create_agm_with_ballot(db_session, "Vote Delete Reset")
         response = await client.delete(f"/api/admin/general-meetings/{agm.id}/ballots")
@@ -3191,7 +3209,7 @@ class TestResetAGMBallots:
         assert votes.scalars().all() == []
 
     async def test_reset_ballots_on_agm_with_no_submissions_returns_zero(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, enable_ballot_reset
     ):
         b = Building(name="Empty Reset Building", manager_email="empty_reset@test.com")
         db_session.add(b)
@@ -3211,7 +3229,7 @@ class TestResetAGMBallots:
         assert response.json()["deleted"] == 0
 
     async def test_reset_ballots_preserves_draft_votes(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, enable_ballot_reset
     ):
         b = Building(name="Draft Preserve Building", manager_email="draft_pres@test.com")
         db_session.add(b)
@@ -3256,7 +3274,7 @@ class TestResetAGMBallots:
         assert len(remaining.scalars().all()) == 1
 
     async def test_reset_multiple_submissions_deletes_all(
-        self, client: AsyncClient, db_session: AsyncSession
+        self, client: AsyncClient, db_session: AsyncSession, enable_ballot_reset
     ):
         b = Building(name="Multi Reset Building", manager_email="multi_reset@test.com")
         db_session.add(b)
@@ -3303,7 +3321,7 @@ class TestResetAGMBallots:
 
     # --- State / precondition errors ---
 
-    async def test_reset_ballots_not_found_returns_404(self, client: AsyncClient):
+    async def test_reset_ballots_not_found_returns_404(self, client: AsyncClient, enable_ballot_reset):
         response = await client.delete(f"/api/admin/general-meetings/{uuid.uuid4()}/ballots")
         assert response.status_code == 404
 
@@ -4257,7 +4275,11 @@ class TestAdminAuth:
             _verify_admin_password("admin", "admin")
 
     async def test_login_plaintext_password_returns_500(self, db_session: AsyncSession):
-        """If ADMIN_PASSWORD is not a bcrypt hash, login returns 500 with a clear error."""
+        """If ADMIN_PASSWORD is not a bcrypt hash, login returns 500 with a generic error (LOW-7).
+
+        The raw ValueError message must not be exposed to clients — only a generic
+        'Server configuration error' is returned so internal details stay hidden.
+        """
         from app.main import create_app
 
         # Use default settings which has admin_password="admin" (plaintext)
@@ -4276,7 +4298,11 @@ class TestAdminAuth:
                 json={"username": "admin", "password": "admin"},
             )
         assert response.status_code == 500
-        assert "bcrypt hash" in response.json()["detail"]
+        detail = response.json()["detail"]
+        assert detail == "Server configuration error"
+        # Raw error message must NOT be exposed to the client (LOW-7)
+        assert "bcrypt" not in detail.lower()
+        assert "ADMIN_PASSWORD" not in detail
 
     # --- Rate limiting ---
 
@@ -4457,7 +4483,8 @@ class TestAdminAuth:
         assert r6.status_code == 429
 
     async def test_hash_password_endpoint_returns_bcrypt_hash(self, db_session: AsyncSession):
-        """POST /api/admin/auth/hash-password returns a bcrypt hash in non-production."""
+        """POST /api/admin/auth/hash-password returns a bcrypt hash when called by authenticated admin."""
+        import bcrypt
         from unittest.mock import patch
         from app.main import create_app
 
@@ -4468,23 +4495,63 @@ class TestAdminAuth:
 
         app_instance.dependency_overrides[get_db] = override_get_db
 
-        # Patch _bcrypt_lib to avoid real bcrypt computation in test env
-        with patch("app.routers.admin_auth._bcrypt_lib") as mock_bcrypt:
-            mock_bcrypt.hashpw.return_value = b"$2b$12$mockedhashvalue"
-            mock_bcrypt.gensalt.return_value = b"fakesalt"
-            async with AsyncClient(
-                transport=ASGITransport(app=app_instance), base_url="http://test"
-            ) as c:
-                response = await c.post(
-                    "/api/admin/auth/hash-password",
-                    json={"password": "mypassword"},
-                )
+        hashed_admin_pw = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode()
+
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "admin_password",
+            hashed_admin_pw,
+        ), patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "admin_username",
+            "admin",
+        ):
+            # Patch _bcrypt_lib only for the hash-password call itself
+            with patch("app.routers.admin_auth._bcrypt_lib") as mock_bcrypt:
+                mock_bcrypt.hashpw.return_value = b"$2b$12$mockedhashvalue"
+                mock_bcrypt.gensalt.return_value = b"fakesalt"
+                # checkpw must still work for the login step — delegate to real bcrypt
+                mock_bcrypt.checkpw.side_effect = lambda plain, stored: bcrypt.checkpw(plain, stored)
+                async with AsyncClient(
+                    transport=ASGITransport(app=app_instance), base_url="http://test"
+                ) as c:
+                    # Establish an admin session first
+                    login_resp = await c.post(
+                        "/api/admin/auth/login",
+                        json={"username": "admin", "password": "admin"},
+                    )
+                    assert login_resp.status_code == 200
+                    response = await c.post(
+                        "/api/admin/auth/hash-password",
+                        json={"password": "mypassword"},
+                    )
         assert response.status_code == 200
         data = response.json()
         assert data["hash"] == "$2b$12$mockedhashvalue"
 
+    async def test_hash_password_endpoint_returns_401_without_auth(self, db_session: AsyncSession):
+        """POST /api/admin/auth/hash-password returns 401 when called without admin session."""
+        from app.main import create_app
+
+        app_instance = create_app()
+
+        async def override_get_db():
+            yield db_session
+
+        app_instance.dependency_overrides[get_db] = override_get_db
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app_instance), base_url="http://test"
+        ) as c:
+            response = await c.post(
+                "/api/admin/auth/hash-password",
+                json={"password": "mypassword"},
+            )
+        assert response.status_code == 401
+
     async def test_hash_password_endpoint_returns_404_in_production(self, db_session: AsyncSession):
-        """POST /api/admin/auth/hash-password returns 404 when ENVIRONMENT=production."""
+        """POST /api/admin/auth/hash-password returns 404 when ENVIRONMENT=production (even with auth)."""
+        import bcrypt
         from unittest.mock import patch
         from app.main import create_app
 
@@ -4495,10 +4562,29 @@ class TestAdminAuth:
 
         app_instance.dependency_overrides[get_db] = override_get_db
 
-        with patch.object(__import__("app.config", fromlist=["settings"]).settings, "environment", "production"):
+        hashed_admin_pw = bcrypt.hashpw(b"admin", bcrypt.gensalt()).decode()
+
+        with patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "admin_password",
+            hashed_admin_pw,
+        ), patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "admin_username",
+            "admin",
+        ), patch.object(
+            __import__("app.config", fromlist=["settings"]).settings,
+            "environment",
+            "production",
+        ):
             async with AsyncClient(
                 transport=ASGITransport(app=app_instance), base_url="http://test"
             ) as c:
+                # Establish admin session first (require_admin runs before the production check)
+                await c.post(
+                    "/api/admin/auth/login",
+                    json={"username": "admin", "password": "admin"},
+                )
                 response = await c.post(
                     "/api/admin/auth/hash-password",
                     json={"password": "mypassword"},
@@ -6877,7 +6963,7 @@ class TestMotionManagement:
         label: str,
         status: GeneralMeetingStatus = GeneralMeetingStatus.open,
         is_visible: bool = False,
-        order_index: int = 0,
+        order_index: int = 1,
     ) -> tuple[GeneralMeeting, Motion]:
         agm = await self._create_meeting(db_session, label, status)
         motion = Motion(
@@ -6941,13 +7027,13 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Second motion gets display_order = max + 1."""
-        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=0)
+        agm, _motion = await self._create_meeting_with_motion(db_session, "IncrOrder", order_index=1)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Motion"},
         )
         assert response.status_code == 201
-        assert response.json()["display_order"] == 1
+        assert response.json()["display_order"] == 2
 
     async def test_add_multiple_motions_sequential_order_indexes(
         self, client: AsyncClient, db_session: AsyncSession
@@ -7206,7 +7292,7 @@ class TestMotionManagement:
         )
         assert response.status_code == 201
         data = response.json()
-        # First motion on a meeting with no motions → display_order=0, motion_number="0"
+        # First motion on a meeting with no motions → display_order=1, motion_number="1"
         assert data["motion_number"] == str(data["display_order"])
 
     async def test_add_motion_null_motion_number_auto_assigns(
@@ -7267,16 +7353,16 @@ class TestMotionManagement:
     async def test_add_motion_second_motion_auto_assigns_correct_number(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Second motion auto-assigns motion_number = str(display_order) = '1'."""
-        agm, _first = await self._create_meeting_with_motion(db_session, "SecondAutoMN", order_index=0)
+        """Second motion auto-assigns motion_number = str(display_order) = '2' when first is at order 1."""
+        agm, _first = await self._create_meeting_with_motion(db_session, "SecondAutoMN", order_index=1)
         response = await client.post(
             f"/api/admin/general-meetings/{agm.id}/motions",
             json={"title": "Second Auto"},
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["display_order"] == 1
-        assert data["motion_number"] == "1"
+        assert data["display_order"] == 2
+        assert data["motion_number"] == "2"
 
     async def test_add_motion_motion_number_persisted_in_db(
         self, client: AsyncClient, db_session: AsyncSession
@@ -7556,11 +7642,11 @@ class TestMotionManagement:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Deleting one motion does not affect remaining motions (no renumbering)."""
-        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=0)
+        agm, motion_a = await self._create_meeting_with_motion(db_session, "DeleteOther", order_index=1)
         motion_b = Motion(
             general_meeting_id=agm.id,
             title="Motion B",
-            display_order=1,
+            display_order=2,
             is_visible=False,
         )
         db_session.add(motion_b)
@@ -7572,7 +7658,7 @@ class TestMotionManagement:
         result = await db_session.execute(select(Motion).where(Motion.id == motion_b.id))
         surviving = result.scalar_one_or_none()
         assert surviving is not None
-        assert surviving.display_order == 1  # Not renumbered
+        assert surviving.display_order == 2  # Not renumbered
 
     # --- State / precondition errors (delete) ---
 

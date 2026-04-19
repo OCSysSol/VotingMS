@@ -1,21 +1,32 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   fetchMotions,
   submitBallot,
-  fetchGeneralMeetings,
-  fetchBuildings,
+  fetchGeneralMeeting,
   restoreSession,
+  logout,
 } from "../../api/voter";
+import { optionChoiceMapToRequest } from "../../components/vote/MultiChoiceOptionList";
 import type { VoteChoice } from "../../types";
-import type { GeneralMeetingOut, LotInfo } from "../../api/voter";
+import type { GeneralMeetingWithBuildingOut, LotInfo } from "../../api/voter";
+
+type OptionChoiceMap = Record<string, "for" | "against" | "abstained">;
+
+interface SubmitPayload {
+  lotsToSubmit: string[];
+  votes: { motion_id: string; choice: VoteChoice }[];
+  multiChoiceVotes: { motion_id: string; option_choices: { option_id: string; choice: "for" | "against" | "abstained" }[] }[];
+}
 import { MotionCard } from "../../components/vote/MotionCard";
 import { ProgressBar } from "../../components/vote/ProgressBar";
 import { CountdownTimer } from "../../components/vote/CountdownTimer";
 import { SubmitDialog } from "../../components/vote/SubmitDialog";
 import { MixedSelectionWarningDialog } from "../../components/vote/MixedSelectionWarningDialog";
 import { ClosedBanner } from "../../components/vote/ClosedBanner";
+import { LotSelectionSection } from "../../components/vote/LotSelectionSection";
+import { SubmitSection } from "../../components/vote/SubmitSection";
 import { useServerTime } from "../../hooks/useServerTime";
 import { formatLocalDateTime } from "../../utils/dateTime";
 
@@ -26,23 +37,29 @@ export function VotingPage() {
   const serverTime = useServerTime();
 
   const [choices, setChoices] = useState<Record<string, VoteChoice | null>>({});
-  // Multi-choice state: motion_id -> selected option_ids
-  // A motion is considered "answered" once the voter interacts (key exists in map, even if [])
-  const [multiChoiceSelections, setMultiChoiceSelections] = useState<Record<string, string[]>>({});
+  // Multi-choice state: motion_id -> { option_id: "for" | "against" | "abstained" }
+  // A motion is considered "answered" once the voter interacts (key exists in map, even if {})
+  const [multiChoiceSelections, setMultiChoiceSelections] = useState<Record<string, OptionChoiceMap>>({});
   const [showDialog, setShowDialog] = useState(false);
   const [showMixedWarning, setShowMixedWarning] = useState(false);
   const [highlightUnanswered, setHighlightUnanswered] = useState(false);
   const [isClosed, setIsClosed] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [meetingNotFound, setMeetingNotFound] = useState(false);
 
   // Current meeting metadata
-  const [currentMeeting, setCurrentMeeting] = useState<GeneralMeetingOut | null>(null);
-  const [buildingName, setBuildingName] = useState("");
+  const [currentMeeting, setCurrentMeeting] = useState<GeneralMeetingWithBuildingOut | null>(null);
 
   // Lot selection state
   const [allLots, setAllLots] = useState<LotInfo[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showNoSelectionError, setShowNoSelectionError] = useState(false);
+
+  // Tracks the motions count from the previous re-seed run.
+  // Used to detect when genuinely new motions are revealed (count increases),
+  // distinguishing that from a normal poll refetch of the same motion list.
+  // Prevents the re-seed effect from overwriting an explicit "Deselect All" action.
+  const prevMotionsLengthRef = useRef(0);
 
   // Load allLots from sessionStorage on mount, then immediately restore from server
   // if a session token is available. This ensures voted_motion_ids is always fresh
@@ -62,6 +79,25 @@ export function VotingPage() {
       // ignore parse errors
     }
   }, [meetingId]);
+
+  // RR4-13: Restore multiChoiceSelections from sessionStorage on mount.
+  // This runs after initial render and only seeds state that has not yet been
+  // set by the motions-based seeding effect (which runs later when motions load).
+  // Using a useEffect (rather than a lazy useState initializer) so that the
+  // restore does not interfere with server-seeded selections from already-voted motions.
+  useEffect(() => {
+    if (!meetingId) return;
+    try {
+      const raw = sessionStorage.getItem(`meeting_mc_selections_${meetingId}`);
+      if (!raw) return;
+      const stored = JSON.parse(raw) as Record<string, OptionChoiceMap>;
+      // Merge stored selections with any existing state; existing state takes priority
+      // so that server-seeded choices (from the motions effect) are not overwritten.
+      setMultiChoiceSelections((prev) => ({ ...stored, ...prev }));
+    } catch {
+      // ignore parse errors — stale or corrupted sessionStorage is acceptable
+    }
+  }, [meetingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // On every VotingPage mount: call restoreSession via the HttpOnly agm_session cookie
   // to get server-authoritative voted_motion_ids from the DB. This ensures that:
@@ -85,38 +121,31 @@ export function VotingPage() {
       });
   }, [meetingId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch buildings to find the building for this meeting
-  const { data: buildings } = useQuery({
-    queryKey: ["buildings"],
-    queryFn: fetchBuildings,
+  // Fetch motions and meeting data in parallel — both are independent of each other (RR6)
+  const {
+    data: motionsAndMeeting,
+    isError: meetingFetchError,
+  } = useQuery({
+    queryKey: ["voting-init", meetingId],
+    queryFn: () => Promise.all([fetchMotions(meetingId!), fetchGeneralMeeting(meetingId!)]),
+    enabled: !!meetingId,
+    retry: false,
   });
+
+  const motions = motionsAndMeeting?.[0];
+  const meetingData = motionsAndMeeting?.[1];
 
   useEffect(() => {
-    if (!buildings || !meetingId) return;
-
-    const findBuilding = async () => {
-      for (const building of buildings) {
-        try {
-          const meetings = await fetchGeneralMeetings(building.id);
-          const found = meetings.find((a) => a.id === meetingId);
-          if (found) {
-            setCurrentMeeting(found);
-            setBuildingName(building.name);
-            return;
-          }
-        } catch {
-          // continue
-        }
-      }
-    };
-    void findBuilding();
-  }, [buildings, meetingId]);
-
-  const { data: motions } = useQuery({
-    queryKey: ["motions", meetingId],
-    queryFn: () => fetchMotions(meetingId!),
-    enabled: !!meetingId,
-  });
+    if (!meetingId) return;
+    if (meetingFetchError) {
+      setMeetingNotFound(true);
+      return;
+    }
+    if (meetingData) {
+      setMeetingNotFound(false);
+      setCurrentMeeting(meetingData);
+    }
+  }, [meetingData, meetingFetchError, meetingId]);
 
   // Derive selectedLots early so that readOnlyReferenceLots and isMotionReadOnly can be
   // defined before the choices seeding effect that depends on them.
@@ -170,17 +199,18 @@ export function VotingPage() {
       return seeded;
     });
     // Seed multiChoiceSelections for read-only multi-choice motions so previously
-    // selected options are shown when the voter returns to this page.
+    // submitted option choices are shown when the voter returns to this page.
     setMultiChoiceSelections((prev) => {
-      const seeded: Record<string, string[]> = { ...prev };
+      const seeded: Record<string, OptionChoiceMap> = { ...prev };
       for (const m of motions) {
         if (
           m.is_multi_choice &&
           isMotionReadOnly(m) &&
-          m.submitted_option_ids?.length &&
+          m.submitted_option_choices &&
+          Object.keys(m.submitted_option_choices).length > 0 &&
           !(m.id in seeded)
         ) {
-          seeded[m.id] = m.submitted_option_ids;
+          seeded[m.id] = m.submitted_option_choices as OptionChoiceMap;
         }
       }
       return seeded;
@@ -204,11 +234,18 @@ export function VotingPage() {
     [motions]
   );
 
-  // Re-seed selectedIds whenever motions or allLots change.
-  // This handles the case where motions refetch reveals new motions that make a
-  // previously-submitted lot not-yet-submitted again (it was locked, now unlocked).
+  // Re-seed selectedIds when new motions are revealed (motions count increases).
+  // Skipping on normal poll refetches (same count) preserves explicit user deselections
+  // such as "Deselect All", which would otherwise be overwritten every refetch cycle.
+  // The `prevMotionsLengthRef.current > 0` guard ensures the initial seed on page load
+  // still runs even when the previous count is 0.
   useEffect(() => {
     if (!motions || allLots.length === 0) return;
+
+    // Only re-seed when new motions are revealed (motions count increased).
+    if (motions.length <= prevMotionsLengthRef.current && prevMotionsLengthRef.current > 0) return;
+    prevMotionsLengthRef.current = motions.length;
+
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const lot of allLots) {
@@ -222,50 +259,49 @@ export function VotingPage() {
     });
   }, [motions, allLots, isLotSubmitted]);
 
-  // Poll meeting status every 10s
+  // Poll meeting status every 10s — single endpoint, clears interval on closure (RR5-07, RR5-14)
   useEffect(() => {
-    if (!meetingId || !buildings) return;
+    if (!meetingId) return;
+
+    let intervalId: ReturnType<typeof setInterval> | null = null;
 
     const poll = async () => {
-      for (const building of buildings) {
-        try {
-          const meetings = await fetchGeneralMeetings(building.id);
-          const found = meetings.find((a) => a.id === meetingId);
-          if (found && found.status === "closed") {
-            setIsClosed(true);
-            return;
+      try {
+        const meeting = await fetchGeneralMeeting(meetingId);
+        if (meeting.status === "closed") {
+          setIsClosed(true);
+          if (intervalId !== null) {
+            clearInterval(intervalId);
+            intervalId = null;
           }
-          if (found) return;
-        } catch {
-          // continue
         }
+      } catch {
+        // transient error — continue polling
       }
     };
 
-    const id = setInterval(() => void poll(), 10000);
-    return () => clearInterval(id);
-  }, [meetingId, buildings]);
+    intervalId = setInterval(() => void poll(), 10000);
+    return () => {
+      if (intervalId !== null) clearInterval(intervalId);
+    };
+  }, [meetingId]);
 
   const submitMutation = useMutation({
-    mutationFn: () => {
-      // For multi-lot voters: use the currently selected IDs (written to sessionStorage
-      // when Submit is clicked). For single-lot voters: fall back to stored lots.
-      const storedLots = sessionStorage.getItem(`meeting_lots_${meetingId}`);
-      const lotOwnerIds: string[] = storedLots ? (JSON.parse(storedLots) as string[]) : [];
-      const votes = Object.entries(choices)
-        .filter(([, choice]) => choice !== null)
-        .map(([motion_id, choice]) => ({ motion_id, choice: choice as VoteChoice }));
-      const multi_choice_votes = Object.entries(multiChoiceSelections).map(
-        ([motion_id, option_ids]) => ({ motion_id, option_ids })
-      );
-      return submitBallot(meetingId!, { lot_owner_ids: lotOwnerIds, votes, multi_choice_votes });
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["motions", meetingId] });
+    mutationFn: ({ lotsToSubmit, votes, multiChoiceVotes }: SubmitPayload) =>
+      submitBallot(meetingId!, {
+        lot_owner_ids: lotsToSubmit,
+        votes,
+        multi_choice_votes: multiChoiceVotes.map(({ motion_id, option_choices }) => ({
+          motion_id,
+          option_choices,
+        })),
+      }),
+    onSuccess: (_data, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["voting-init", meetingId] });
 
-      // Determine which lot IDs were just submitted (written to sessionStorage by handleSubmitClick)
-      const raw = sessionStorage.getItem(`meeting_lots_${meetingId}`);
-      const submittedIds: string[] = raw ? (JSON.parse(raw) as string[]) : [];
+      // Use the lot IDs captured at trigger time (passed as mutation variables),
+      // not a re-read from sessionStorage which may have been cleared.
+      const submittedIds = variables.lotsToSubmit;
       const submittedSet = new Set(submittedIds);
 
       // Collect the current motion IDs so we can merge them into voted_motion_ids.
@@ -321,6 +357,14 @@ export function VotingPage() {
         return next;
       });
 
+      // Fix 8: Clear multiChoiceSelections so the next lot starts with a clean slate.
+      // The choices seeding effect will re-seed read-only motions from submitted_option_choices
+      // once the query invalidation resolves.
+      setMultiChoiceSelections({});
+      if (meetingId) {
+        sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+      }
+
       navigate(`/vote/${meetingId}/confirmation`);
     },
     onError: (error: Error) => {
@@ -336,6 +380,7 @@ export function VotingPage() {
   // Derived values for lot panel
   const isMultiLot = allLots.length > 1;
   const allSubmitted = allLots.length > 0 && allLots.every((l) => isLotSubmitted(l));
+  const anySubmitted = allLots.some((l) => (l.voted_motion_ids?.length ?? 0) > 0);
   const pendingLots = allLots.filter((l) => !isLotSubmitted(l));
   const votingCount = isMultiLot ? selectedIds.size : pendingLots.length;
 
@@ -391,16 +436,48 @@ export function VotingPage() {
     navigate(`/vote/${meetingId}/confirmation`);
   };
 
+  const handleSignOut = useCallback(() => {
+    // Best-effort server logout — never block navigation on failure
+    logout().catch(() => {});
+    // Clear all meeting-scoped sessionStorage keys
+    if (meetingId) {
+      sessionStorage.removeItem(`meeting_lots_${meetingId}`);
+      sessionStorage.removeItem(`meeting_lots_info_${meetingId}`);
+      sessionStorage.removeItem(`meeting_lot_info_${meetingId}`);
+      sessionStorage.removeItem(`meeting_building_name_${meetingId}`);
+      sessionStorage.removeItem(`meeting_title_${meetingId}`);
+      sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+    }
+    queryClient.clear();
+    navigate("/");
+  }, [meetingId, queryClient, navigate]);
+
   const handleChoiceChange = (motionId: string, choice: VoteChoice | null) => {
     setChoices((prev) => ({ ...prev, [motionId]: choice }));
   };
 
-  const handleMultiChoiceChange = (motionId: string, optionIds: string[]) => {
-    setMultiChoiceSelections((prev) => ({ ...prev, [motionId]: optionIds }));
+  const handleMultiChoiceChange = (motionId: string, newChoices: OptionChoiceMap) => {
+    setMultiChoiceSelections((prev) => {
+      const next = { ...prev, [motionId]: newChoices };
+      // RR4-13: persist to sessionStorage on every update so state survives page refresh
+      if (meetingId) {
+        sessionStorage.setItem(`meeting_mc_selections_${meetingId}`, JSON.stringify(next));
+      }
+      return next;
+    });
   };
 
+  // A motion is "individually closed" when voting_closed_at is set and the voter
+  // has not already answered it. These motions are excluded from the progress bar
+  // denominator and their controls are disabled (voter cannot interact with them).
+  const isMotionIndividuallyClosed = (m: { id: string; voting_closed_at?: string | null }) =>
+    !!m.voting_closed_at && !isMotionReadOnly(m);
+
   // Only count motions the voter can still interact with towards the progress bar.
-  const unvotedMotions = motions ? motions.filter((m) => !isMotionReadOnly(m)) : [];
+  // Exclude individually-closed motions (voter had no chance to answer them).
+  const unvotedMotions = motions
+    ? motions.filter((m) => !isMotionReadOnly(m) && !isMotionIndividuallyClosed(m))
+    : [];
   const answeredCount = unvotedMotions.filter((m) =>
     m.is_multi_choice
       ? m.id in multiChoiceSelections  // answered once any interaction recorded
@@ -458,8 +535,28 @@ export function VotingPage() {
 
   const handleConfirm = () => {
     setShowDialog(false);
-    // Vote choices live in React state only — submit directly, no draft flush needed.
-    submitMutation.mutate();
+    // Capture all submission values synchronously at confirm time and pass directly
+    // into mutate() — never re-read from sessionStorage inside the async mutationFn.
+    const lotsToSubmit = isMultiLot ? [...selectedIds] : allLots.map((l) => l.lot_owner_id);
+    // Exclude read-only (already-voted) motions from the payload. After multiple vote rounds,
+    // choices state includes motions from previous rounds that are now locked. Submitting
+    // those causes 422 "Voting has closed for motion: X" when voting_closed_at is set.
+    // Also exclude the "selected" sentinel used for multi-choice motions — those motions
+    // are submitted via multiChoiceVotes, not votes.
+    const votes = Object.entries(choices)
+      .filter(([, choice]) => choice !== null && choice !== "selected")
+      .filter(([motion_id]) => {
+        const motion = motions?.find((m) => m.id === motion_id);
+        return !motion || !isMotionReadOnly(motion);
+      })
+      .map(([motion_id, choice]) => ({ motion_id, choice: choice as VoteChoice }));
+    const multiChoiceVotes = Object.entries(multiChoiceSelections)
+      .filter(([motion_id]) => {
+        const motion = motions?.find((m) => m.id === motion_id);
+        return !motion || !isMotionReadOnly(motion);
+      })
+      .map(([motion_id, choices]) => ({ motion_id, option_choices: optionChoiceMapToRequest(choices) }));
+    submitMutation.mutate({ lotsToSubmit, votes, multiChoiceVotes });
   };
 
   const handleCancel = () => {
@@ -477,113 +574,24 @@ export function VotingPage() {
   // Sidebar is only rendered for multi-lot voters (single-lot voters see motions full-width)
   const showSidebar = isMultiLot && allLots.length > 0;
 
-  // Lot list content — shared between desktop sidebar and mobile drawer
+  // Lot list content — shared between desktop sidebar and mobile drawer (US-CQM-03)
   const lotListContent = showSidebar ? (
-    <div className="lot-selection">
-      <h2 className="lot-selection__title">Your Lots</h2>
-      <p className="lot-selection__subtitle">
-        {allSubmitted
-          ? "All lots have been submitted."
-          : `You are voting for ${votingCount} lot${votingCount !== 1 ? "s" : ""}.`}
-      </p>
-
-      <div className="lot-shortcut-buttons">
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={handleSelectAll}
-          aria-label="Select all lots"
-        >
-          Select All
-        </button>
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={handleDeselectAll}
-          aria-label="Deselect all lots"
-        >
-          Deselect All
-        </button>
-        {hasProxyLot && (
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={handleSelectProxy}
-            aria-label="Select proxy lots only"
-          >
-            Select Proxy Lots
-          </button>
-        )}
-        {hasProxyLot && (
-          <button
-            type="button"
-            className="btn btn--secondary"
-            onClick={handleSelectOwned}
-            aria-label="Select owned lots only"
-          >
-            Select Owned Lots
-          </button>
-        )}
-      </div>
-
-      <ul className="lot-selection__list" role="list">
-        {allLots.map((lot) => (
-          <li
-            key={lot.lot_owner_id}
-            className={`lot-selection__item${isLotSubmitted(lot) ? " lot-selection__item--submitted" : ""}`}
-            aria-disabled={isLotSubmitted(lot) ? "true" : undefined}
-          >
-            <label
-              htmlFor={`lot-checkbox-${lot.lot_owner_id}`}
-              className="lot-selection__label"
-            >
-              <input
-                type="checkbox"
-                id={`lot-checkbox-${lot.lot_owner_id}`}
-                className="lot-selection__checkbox"
-                checked={selectedIds.has(lot.lot_owner_id)}
-                disabled={isLotSubmitted(lot)}
-                onChange={() => handleToggle(lot.lot_owner_id)}
-              />
-
-              <span className="lot-selection__lot-number">Lot {lot.lot_number}</span>
-            </label>
-
-            {lot.is_proxy && (
-              <span className="lot-selection__badge lot-selection__badge--proxy">
-                via Proxy
-              </span>
-            )}
-
-            {lot.financial_position === "in_arrear" && (
-              <span className="lot-selection__badge lot-selection__badge--arrear">
-                In Arrear
-              </span>
-            )}
-
-            {isLotSubmitted(lot) && (
-              <span className="lot-selection__badge lot-selection__badge--submitted">
-                Already submitted
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
-
-      {showNoSelectionError && (
-        <p role="alert">Please select at least one lot</p>
-      )}
-
-      {allSubmitted && (
-        <button
-          type="button"
-          className="btn btn--primary"
-          onClick={handleViewSubmission}
-        >
-          View Submission
-        </button>
-      )}
-    </div>
+    <LotSelectionSection
+      allLots={allLots}
+      selectedIds={selectedIds}
+      allSubmitted={allSubmitted}
+      anySubmitted={anySubmitted}
+      votingCount={votingCount}
+      hasProxyLot={hasProxyLot}
+      showNoSelectionError={showNoSelectionError}
+      isLotSubmitted={isLotSubmitted}
+      onToggle={handleToggle}
+      onSelectAll={handleSelectAll}
+      onDeselectAll={handleDeselectAll}
+      onSelectProxy={handleSelectProxy}
+      onSelectOwned={handleSelectOwned}
+      onViewSubmission={handleViewSubmission}
+    />
   ) : null;
 
   // Desktop sidebar (hidden on mobile via CSS)
@@ -620,10 +628,28 @@ export function VotingPage() {
     </>
   ) : null;
 
+  // Error state: meeting not found after all queries complete (RR3-27)
+  if (meetingNotFound) {
+    return (
+      <main className="voter-content">
+        <button type="button" className="btn btn--ghost back-btn" onClick={() => navigate(`/vote/${meetingId}/auth`)}>
+          ← Back
+        </button>
+        <p
+          className="state-message state-message--error"
+          role="alert"
+          data-testid="meeting-not-found-error"
+        >
+          Meeting not found — please check the link and try again.
+        </p>
+      </main>
+    );
+  }
+
   return (
     <main className="voter-content">
-      <button type="button" className="btn btn--ghost back-btn" onClick={() => navigate(`/vote/${meetingId}/auth`)}>
-        ← Back
+      <button type="button" className="btn btn--ghost back-btn" onClick={handleSignOut}>
+        Sign out
       </button>
       {isClosed && <ClosedBanner />}
       {isWarning && !isClosed && (
@@ -635,7 +661,7 @@ export function VotingPage() {
 
       {currentMeeting && (
         <div className="agm-header">
-          <p className="agm-header__building">{buildingName}</p>
+          <p className="agm-header__building">{currentMeeting.building_name}</p>
           <h1 className="agm-header__title">{currentMeeting.title}</h1>
           <div className="agm-header__meta">
             <span>
@@ -719,43 +745,46 @@ export function VotingPage() {
                         : "Some of your selected lots are in arrear. Your votes on General Motions will not count for in-arrear lots — they will be recorded as not eligible. Votes for all other lots will be recorded normally."}
                     </div>
                   )}
-                  {motions.map((motion) => (
-                    <MotionCard
-                      key={motion.id}
-                      motion={motion}
-                      position={motion.display_order}
-                      choice={choices[motion.id] ?? null}
-                      onChoiceChange={handleChoiceChange}
-                      disabled={isClosed}
-                      highlight={
-                        highlightUnanswered &&
-                        !isMotionReadOnly(motion) &&
-                        (motion.is_multi_choice
-                          ? !(motion.id in multiChoiceSelections)
-                          : !choices[motion.id])
-                      }
-                      readOnly={isMotionReadOnly(motion)}
-                      multiChoiceSelectedIds={multiChoiceSelections[motion.id] ?? []}
-                      onMultiChoiceChange={handleMultiChoiceChange}
-                    />
-                  ))}
-                  {unvotedMotions.length === 0 && !isClosed && !showSidebar && (
-                    <div className="submit-section">
-                      <p className="state-message" data-testid="all-voted-message">
-                        You have voted on all motions.
-                      </p>
-                      <button type="button" className="btn btn--primary" onClick={handleViewSubmission}>
-                        View Submission
-                      </button>
-                    </div>
-                  )}
-                  {unvotedMotions.length > 0 && !isClosed && (
-                    <div className="submit-section">
-                      <button type="button" className="btn btn--primary" onClick={handleSubmitClick}>
-                        Submit ballot
-                      </button>
-                    </div>
-                  )}
+                  {motions.map((motion) => {
+                    const motionClosed = isMotionIndividuallyClosed(motion);
+                    return (
+                      <div key={motion.id}>
+                        {/* Fix 10: motion-closed indicator now lives inside MotionCard via votingClosed prop */}
+                        <MotionCard
+                          motion={motion}
+                          position={motion.display_order}
+                          choice={choices[motion.id] ?? null}
+                          onChoiceChange={handleChoiceChange}
+                          disabled={isClosed || motionClosed}
+                          highlight={
+                            highlightUnanswered &&
+                            !isMotionReadOnly(motion) &&
+                            !motionClosed &&
+                            (motion.is_multi_choice
+                              ? !(motion.id in multiChoiceSelections)
+                              : !choices[motion.id])
+                          }
+                          readOnly={isMotionReadOnly(motion)}
+                          votingClosed={motionClosed}
+                          multiChoiceOptionChoices={multiChoiceSelections[motion.id] ?? {}}
+                          onMultiChoiceChange={handleMultiChoiceChange}
+                        />
+                      </div>
+                    );
+                  })}
+                  {/* RR3-39: aria-live region announces vote status updates to screen readers */}
+                  <div aria-live="polite" aria-atomic="true" className="sr-only" data-testid="vote-status-announcer">
+                    {submitMutation.isSuccess ? "Your vote has been saved." : ""}
+                  </div>
+                  {/* US-CQM-03: SubmitSection encapsulates submit/view submission rendering */}
+                  <SubmitSection
+                    unvotedCount={unvotedMotions.length}
+                    isClosed={isClosed}
+                    showSidebar={showSidebar}
+                    isPending={submitMutation.isPending}
+                    onSubmitClick={handleSubmitClick}
+                    onViewSubmission={handleViewSubmission}
+                  />
                 </>
               )}
             </>

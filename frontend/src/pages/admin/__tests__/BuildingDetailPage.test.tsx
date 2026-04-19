@@ -16,13 +16,13 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderPage(buildingId = "b1") {
+function renderPage(buildingId = "b1", search = "") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[`/admin/buildings/${buildingId}`]}>
+      <MemoryRouter initialEntries={[`/admin/buildings/${buildingId}${search}`]}>
         <Routes>
           <Route path="/admin/buildings/:buildingId" element={<BuildingDetailPage />} />
         </Routes>
@@ -46,7 +46,8 @@ describe("BuildingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("1A")).toBeInTheDocument();
     });
-    expect(screen.getByText("owner1@example.com")).toBeInTheDocument();
+    // Email column now shows "Name <email>" when owner name is present
+    expect(screen.getByText("Alice Smith <owner1@example.com>")).toBeInTheDocument();
     expect(screen.getByText("2B")).toBeInTheDocument();
   });
 
@@ -695,6 +696,190 @@ describe("BuildingDetailPage", () => {
     });
   });
 
+  // --- RR3-07: ArchiveConfirmModal focus trap + Escape ---
+
+  it("ArchiveConfirmModal focuses first element (Cancel button) when opened", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Archive Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Archive Building" }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
+  it("ArchiveConfirmModal closes on Escape key", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Archive Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Archive Building" }));
+    expect(screen.getByRole("dialog", { name: "Archive Building" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Archive Building" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("ArchiveConfirmModal wraps Tab from last button back to first", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Archive Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Archive Building" }));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    const archiveBtn = screen.getByRole("button", { name: "Archive" });
+    archiveBtn.focus();
+    await user.tab();
+    expect(cancelBtn).toHaveFocus();
+  });
+
+  it("ArchiveConfirmModal wraps Shift+Tab from first button to last", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Archive Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Archive Building" }));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    const archiveBtn = screen.getByRole("button", { name: "Archive" });
+    cancelBtn.focus();
+    await user.tab({ shift: true });
+    expect(archiveBtn).toHaveFocus();
+  });
+
+  // --- RR3-07: BuildingEditModal focus trap + Escape ---
+
+  it("BuildingEditModal focuses first focusable element when opened", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    // First focusable element is the Name input
+    expect(screen.getByLabelText("Name")).toHaveFocus();
+  });
+
+  it("BuildingEditModal closes on Escape key when not saving", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    expect(screen.getByRole("dialog", { name: "Edit Building" })).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Edit Building" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("BuildingEditModal wraps Tab from last button back to first focusable", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const nameInput = screen.getByLabelText("Name");
+    const saveBtn = screen.getByRole("button", { name: "Save Changes" });
+    saveBtn.focus();
+    await user.tab();
+    expect(nameInput).toHaveFocus();
+  });
+
+  it("BuildingEditModal wraps Shift+Tab from first focusable to last", async () => {
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const nameInput = screen.getByLabelText("Name");
+    const saveBtn = screen.getByRole("button", { name: "Save Changes" });
+    nameInput.focus();
+    await user.tab({ shift: true });
+    expect(saveBtn).toHaveFocus();
+  });
+
+  // --- RR6: DeleteBuildingConfirmModal focus trap + Escape ---
+
+  it("DeleteBuildingConfirmModal focuses first element (Cancel button) when opened", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          manager_email: "alpha@example.com",
+          is_archived: true,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Delete Building" }));
+    expect(screen.getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
+  it("DeleteBuildingConfirmModal wraps Tab from last button back to first", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          manager_email: "alpha@example.com",
+          is_archived: true,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Delete Building" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete Building" });
+    const cancelBtn = within(dialog).getByRole("button", { name: "Cancel" });
+    const deleteBtn = within(dialog).getByRole("button", { name: "Delete Building" });
+    deleteBtn.focus();
+    await user.tab();
+    expect(cancelBtn).toHaveFocus();
+  });
+
+  it("DeleteBuildingConfirmModal wraps Shift+Tab from first button to last", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          manager_email: "alpha@example.com",
+          is_archived: true,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Delete Building" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete Building" });
+    const cancelBtn = within(dialog).getByRole("button", { name: "Cancel" });
+    const deleteBtn = within(dialog).getByRole("button", { name: "Delete Building" });
+    cancelBtn.focus();
+    await user.tab({ shift: true });
+    expect(deleteBtn).toHaveFocus();
+  });
+
   it("Delete Building button uses btn--danger class", async () => {
     server.use(
       http.get("http://localhost:8000/api/admin/buildings/:buildingId", () => {
@@ -712,5 +897,96 @@ describe("BuildingDetailPage", () => {
       expect(screen.getByRole("button", { name: "Delete Building" })).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Delete Building" })).toHaveClass("btn--danger");
+  });
+
+  // --- Pagination ---
+
+  it("does not show pagination when total count is 2 (≤ PAGE_SIZE=20)", async () => {
+    // Default MSW: ADMIN_LOT_OWNERS has 2 items for b1, count = 2
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByText("1A")).toBeInTheDocument();
+    });
+    // Pagination nav only renders when totalPages > 1; with 2 items it stays hidden
+    expect(screen.queryByRole("navigation", { name: "Pagination" })).not.toBeInTheDocument();
+  });
+
+  it("shows pagination nav when count exceeds PAGE_SIZE", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    renderPage("b1");
+    await waitFor(() => {
+      const navs = screen.getAllByRole("navigation", { name: "Pagination" });
+      expect(navs.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("passes lotPage=2 URL param when navigating to page 2", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getAllByRole("navigation", { name: "Pagination" }).length).toBeGreaterThan(0);
+    });
+    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
+    // After clicking page 2, the Pagination component should show page 2 as active
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 2" })[0]).toHaveClass("pagination__btn--active");
+    });
+  });
+
+  it("prefetches next page when there are more items than PAGE_SIZE", async () => {
+    let prefetchCalled = false;
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      ),
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners", ({ request }) => {
+        const url = new URL(request.url);
+        const offset = url.searchParams.get("offset");
+        if (offset === "20") prefetchCalled = true;
+        return HttpResponse.json([]);
+      })
+    );
+    renderPage("b1");
+    await waitFor(() => {
+      expect(prefetchCalled).toBe(true);
+    });
+  });
+
+  it("reads lotPage from URL search param", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    renderPage("b1", "?lotPage=2");
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 2" })[0]).toHaveClass("pagination__btn--active");
+    });
+  });
+
+  it("navigates back to page 1 removing lotPage param", async () => {
+    server.use(
+      http.get("http://localhost:8000/api/admin/buildings/:buildingId/lot-owners/count", () =>
+        HttpResponse.json({ count: 25 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage("b1", "?lotPage=2");
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 1" })[0]).toBeInTheDocument();
+    });
+    await user.click(screen.getAllByRole("button", { name: "Go to page 1" })[0]);
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Go to page 1" })[0]).toHaveClass("pagination__btn--active");
+    });
   });
 });

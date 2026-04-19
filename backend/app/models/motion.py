@@ -1,8 +1,9 @@
 import enum
 import uuid
+from datetime import datetime
 
 import sqlalchemy as sa
-from sqlalchemy import Boolean, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import Boolean, CheckConstraint, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -21,6 +22,7 @@ class Motion(Base):
             "display_order",
             name="uq_motions_general_meeting_display_order",
         ),
+        CheckConstraint("display_order > 0", name="ck_motions_display_order_positive"),
         # Partial unique index: motion_number uniqueness per meeting, NULLs excluded.
         # Multiple motions may have motion_number = NULL; only non-null values are unique.
         # Standard UniqueConstraint cannot express a WHERE clause, so Index is used instead.
@@ -64,6 +66,9 @@ class Motion(Base):
         server_default=sa.text("false"),  # nosemgrep: raw-sql-requires-comment -- server_default for boolean column; SQLAlchemy requires text() to emit a literal SQL expression as a column default
     )
     option_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    voting_closed_at: Mapped[datetime | None] = mapped_column(
+        sa.TIMESTAMP(timezone=True), nullable=True, default=None
+    )
 
     # Relationships
     general_meeting: Mapped["GeneralMeeting"] = relationship(  # noqa: F821

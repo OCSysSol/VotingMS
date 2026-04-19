@@ -9,7 +9,7 @@ Provides:
 from __future__ import annotations
 
 import asyncio
-import os
+import hashlib
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -18,11 +18,13 @@ import aiosmtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from jinja2 import Environment, FileSystemLoader, select_autoescape
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import or_, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
+from app.database import AsyncSessionLocal
 from app.logging_config import get_logger
+from app.services.smtp_config_service import get_smtp_config, get_decrypted_password
 from app.models import (
     GeneralMeeting,
     GeneralMeetingLotWeight,
@@ -37,6 +39,15 @@ from app.models.building import Building
 from app.services.admin_service import get_general_meeting_detail
 
 logger = get_logger(__name__)
+
+
+class SmtpNotConfiguredError(Exception):
+    """Raised when the DB SMTP configuration is missing or incomplete.
+
+    This is a non-retryable failure: trigger_with_retry sets status=failed
+    immediately when this exception is raised.
+    """
+
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _MAX_ATTEMPTS = 30
@@ -54,6 +65,20 @@ async def _send_with_limit(coro: object) -> None:  # type: ignore[type-arg]
         await coro  # type: ignore[misc]
 
 
+async def _try_acquire_email_lock(db: AsyncSession, agm_id: uuid.UUID) -> bool:
+    """
+    Attempt to acquire a PostgreSQL advisory transaction lock keyed on agm_id.
+
+    Uses pg_try_advisory_xact_lock so the lock is held until the end of the
+    current transaction and is automatically released on commit/rollback.
+    Returns True if the lock was acquired (this caller owns it), False if
+    another session already holds the lock for the same agm_id.
+    """
+    lock_id = int(hashlib.sha256(str(agm_id).encode()).hexdigest()[:8], 16) % 2147483647
+    result = await db.execute(text(f"SELECT pg_try_advisory_xact_lock({lock_id})"))
+    return bool(result.scalar())
+
+
 def _get_jinja_env() -> Environment:
     return Environment(
         loader=FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -66,25 +91,28 @@ def _backoff_seconds(attempt: int) -> int:
     return min(2**attempt, _BACKOFF_CAP_SECONDS)
 
 
-def _make_session_factory() -> async_sessionmaker:
-    """Create a new async session factory using the configured database URL."""
-    engine = create_async_engine(settings.database_url, echo=False, future=True)
-    return async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
-
-
-async def send_otp_email(to_email: str, meeting_title: str, code: str) -> None:
+async def send_otp_email(to_email: str, meeting_title: str, code: str, db: AsyncSession) -> None:
     """
     Send an OTP verification email to the given address.
+    Reads SMTP settings from the DB via smtp_config_service.
+    Raises SmtpNotConfiguredError if SMTP is not configured.
     Respects settings.email_override: if set, all emails go to the override address
     and the original recipient is preserved in X-Original-To header.
     """
+    smtp_config = await get_smtp_config(db)
+    if not smtp_config.smtp_host or not smtp_config.smtp_username or not smtp_config.smtp_from_email or smtp_config.smtp_password_enc is None:
+        raise SmtpNotConfiguredError(
+            "SMTP not configured — configure mail server in admin settings"
+        )
+    smtp_password = get_decrypted_password(smtp_config)
+
     env = _get_jinja_env()
     template = env.get_template("otp_email.html")
     html_body = template.render(meeting_title=meeting_title, code=code)
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = f"Your AGM Voting Code — {meeting_title}"
-    msg["From"] = settings.smtp_from_email
+    msg["From"] = smtp_config.smtp_from_email
     to_addr = settings.email_override if settings.email_override else to_email
     msg["To"] = to_addr
     if settings.email_override:
@@ -93,10 +121,10 @@ async def send_otp_email(to_email: str, meeting_title: str, code: str) -> None:
 
     await aiosmtplib.send(
         msg,
-        hostname=settings.smtp_host,
-        port=settings.smtp_port,
-        username=settings.smtp_username,
-        password=settings.smtp_password,
+        hostname=smtp_config.smtp_host,
+        port=smtp_config.smtp_port,
+        username=smtp_config.smtp_username,
+        password=smtp_password,
         start_tls=True,
     )
 
@@ -104,12 +132,17 @@ async def send_otp_email(to_email: str, meeting_title: str, code: str) -> None:
 
 
 class EmailService:
-    async def send_report(self, agm_id: uuid.UUID, db: AsyncSession) -> None:
+    async def send_report(self, agm_id: uuid.UUID, db: AsyncSession, base_url: str = "") -> None:
         """
         Attempt to send the results report email for the given AGM.
 
         Fetches AGM data, renders HTML template, sends via Resend SDK,
         and updates the EmailDelivery record on success or failure.
+
+        base_url: the scheme+host of the originating request (e.g.
+        "https://vms-demo.ocss.tech"). Used to build the "View Full Results"
+        link so the link works in the deployed environment rather than
+        defaulting to settings.allowed_origin (which is localhost in dev).
         """
         log = logger.bind(agm_id=str(agm_id))
 
@@ -140,6 +173,7 @@ class EmailService:
         manager_email: str = building.manager_email
 
         # Render template
+        meeting_url = f"{base_url.rstrip('/')}/admin/general-meetings/{agm_id}"
         env = _get_jinja_env()
         template = env.get_template("report_email.html")
         html_body = template.render(
@@ -149,106 +183,151 @@ class EmailService:
             voting_closes_at=voting_closes_at,
             total_eligible_voters=detail["total_eligible_voters"],
             total_submitted=detail["total_submitted"],
-            motions=detail["motions"],
+            meeting_url=meeting_url,
         )
+
+        # Load SMTP config from DB
+        smtp_config = await get_smtp_config(db)
+        if not smtp_config.smtp_host or not smtp_config.smtp_username or not smtp_config.smtp_from_email or smtp_config.smtp_password_enc is None:
+            raise SmtpNotConfiguredError(
+                "SMTP not configured — configure mail server in admin settings"
+            )
+        smtp_password = get_decrypted_password(smtp_config)
 
         # Send via SMTP (STARTTLS)
         msg = MIMEMultipart("alternative")
         msg["Subject"] = f"General Meeting Results Report: {agm_title}"
-        msg["From"] = settings.smtp_from_email
+        msg["From"] = smtp_config.smtp_from_email
         to_addr = settings.email_override if settings.email_override else manager_email
         msg["To"] = to_addr
         if settings.email_override:
             msg["X-Original-To"] = manager_email
         msg.attach(MIMEText(html_body, "html"))
 
+        log.info("email_send_started", agm_id=str(agm_id), to=to_addr)
         await aiosmtplib.send(
             msg,
-            hostname=settings.smtp_host,
-            port=settings.smtp_port,
-            username=settings.smtp_username,
-            password=settings.smtp_password,
+            hostname=smtp_config.smtp_host,
+            port=smtp_config.smtp_port,
+            username=smtp_config.smtp_username,
+            password=smtp_password,
             start_tls=True,
         )
 
-        log.info("email_sent", to=to_addr, subject=f"General Meeting Results Report: {agm_title}")
+        log.info("email_send_completed", agm_id=str(agm_id), to=to_addr, subject=f"General Meeting Results Report: {agm_title}")
 
-    async def trigger_with_retry(self, agm_id: uuid.UUID) -> None:
+    async def trigger_with_retry(
+        self,
+        agm_id: uuid.UUID,
+        base_url: str = "",
+        session_factory: async_sessionmaker | None = None,
+    ) -> None:
         """
         Background task: attempt delivery with exponential backoff.
         Max 30 attempts. Delays: 2^attempt seconds, capped at 3600s.
 
         Each attempt uses a fresh DB session so it survives server restarts
         (state is always read from and written to the DB).
+
+        A PostgreSQL advisory lock keyed on agm_id is held for the entire
+        lifetime of this task. If another concurrent call (e.g. from a second
+        concurrent Lambda cold-start or an HTTP retry) already holds the lock
+        for this agm_id, this invocation exits immediately — preventing
+        duplicate email sends.
+
+        base_url: passed through to send_report to construct the "View Full
+        Results" link. See send_report for details.
+
+        session_factory: the async session factory to use. Defaults to the
+        shared AsyncSessionLocal from app.database so the shared connection
+        pool is reused — callers must NOT pass a factory that creates a new
+        engine, as each new engine creates its own connection pool that is
+        never disposed.
         """
-        session_factory = _make_session_factory()
+        if session_factory is None:
+            session_factory = AsyncSessionLocal
         attempt_number = 0
 
-        while True:
-            attempt_number += 1
-
-            async with session_factory() as db:
-                # Fetch current delivery record
-                result = await db.execute(
-                    select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm_id)
+        # Acquire a per-agm advisory lock that persists for the life of this task.
+        # The lock session is kept open (and its transaction active) until we return
+        # so the lock is held continuously even across the per-attempt sleep delays.
+        # SQLAlchemy AsyncSession autobegins a transaction on the first execute, so
+        # no explicit begin() call is needed — the transaction (and the xact lock)
+        # remain active until the session context exits.
+        async with session_factory() as lock_db:
+            if not await _try_acquire_email_lock(lock_db, agm_id):
+                logger.info(
+                    "email_send_skipped_lock_held",
+                    agm_id=str(agm_id),
                 )
-                delivery = result.scalar_one_or_none()
+                return
 
-                if delivery is None:
-                    logger.warning(
-                        "email_delivery_record_not_found",
-                        agm_id=str(agm_id),
-                        attempt_number=attempt_number,
+            while True:
+                attempt_number += 1
+
+                async with session_factory() as db:
+                    # Fetch current delivery record
+                    result = await db.execute(
+                        select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm_id)
                     )
-                    return
+                    delivery = result.scalar_one_or_none()
 
-                # Skip if already delivered
-                if delivery.status == EmailDeliveryStatus.delivered:
-                    logger.info(
-                        "email_already_delivered",
-                        agm_id=str(agm_id),
-                        attempt_number=attempt_number,
-                    )
-                    return
+                    if delivery is None:
+                        logger.warning(
+                            "email_delivery_record_not_found",
+                            agm_id=str(agm_id),
+                            attempt_number=attempt_number,
+                        )
+                        return
 
-                # Skip if max attempts reached
-                if delivery.total_attempts >= _MAX_ATTEMPTS:
-                    logger.warning(
-                        "email_max_attempts_reached",
-                        agm_id=str(agm_id),
-                        attempt_number=attempt_number,
-                        total_attempts=delivery.total_attempts,
-                    )
-                    return
+                    # Skip if already delivered (covers Lambda restart after send)
+                    if delivery.status == EmailDeliveryStatus.delivered:
+                        logger.info(
+                            "email_already_delivered",
+                            agm_id=str(agm_id),
+                            attempt_number=attempt_number,
+                        )
+                        return
 
-                current_attempt = delivery.total_attempts + 1
+                    # Skip if max attempts reached
+                    if delivery.total_attempts >= _MAX_ATTEMPTS:
+                        logger.warning(
+                            "email_max_attempts_reached",
+                            agm_id=str(agm_id),
+                            attempt_number=attempt_number,
+                            total_attempts=delivery.total_attempts,
+                        )
+                        return
 
-                try:
-                    await self.send_report(agm_id, db)
+                    current_attempt = delivery.total_attempts + 1
 
-                    # Success
-                    delivery.status = EmailDeliveryStatus.delivered
-                    delivery.total_attempts = current_attempt
-                    delivery.last_error = None
-                    delivery.next_retry_at = None
-                    await db.commit()
+                    try:
+                        await self.send_report(agm_id, db, base_url)
 
-                    logger.info(
-                        "email_delivery_attempt",
-                        agm_id=str(agm_id),
-                        attempt_number=current_attempt,
-                        status="delivered",
-                        error=None,
-                        next_retry_at=None,
-                    )
-                    return
+                        # Success
+                        delivery.status = EmailDeliveryStatus.delivered
+                        delivery.total_attempts = current_attempt
+                        delivery.last_error = None
+                        delivery.next_retry_at = None
+                        await db.commit()
 
-                except Exception as exc:
-                    error_str = str(exc)
-                    delivery.total_attempts = current_attempt
-                    delivery.last_error = error_str
+                        logger.info(
+                            "email_delivery_attempt",
+                            agm_id=str(agm_id),
+                            attempt_number=current_attempt,
+                            status="delivered",
+                            error=None,
+                            next_retry_at=None,
+                        )
+                        return
 
-                    if current_attempt >= _MAX_ATTEMPTS:
+                    except (SmtpNotConfiguredError, aiosmtplib.SMTPAuthenticationError) as exc:
+                        # Non-retryable: SMTP not configured or credentials rejected.
+                        # SMTPAuthenticationError (535) means wrong credentials — retrying
+                        # will never succeed and wastes Lambda time on every cold start.
+                        error_str = str(exc)
+                        delivery.total_attempts = current_attempt
+                        delivery.last_error = error_str
                         delivery.status = EmailDeliveryStatus.failed
                         delivery.next_retry_at = None
                         await db.commit()
@@ -261,46 +340,114 @@ class EmailService:
                             error=error_str,
                             next_retry_at=None,
                         )
-                        return
-                    else:
-                        delay = _backoff_seconds(current_attempt)
-                        next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
-                        delivery.next_retry_at = next_retry_at
-                        # Keep status as pending while retrying
-                        delivery.status = EmailDeliveryStatus.pending
-                        await db.commit()
-
-                        logger.warning(
-                            "email_delivery_attempt",
+                        logger.error(
+                            "email_delivery_failed",
                             agm_id=str(agm_id),
-                            attempt_number=current_attempt,
-                            status="pending",
-                            error=error_str,
-                            next_retry_at=next_retry_at.isoformat(),
+                            total_attempts=current_attempt,
+                            last_error=error_str,
                         )
+                        return
 
-            # Wait before next attempt
-            delay = _backoff_seconds(attempt_number)
-            await asyncio.sleep(delay)
+                    except Exception as exc:
+                        error_str = str(exc)
+                        delivery.total_attempts = current_attempt
+                        delivery.last_error = error_str
+
+                        if current_attempt >= _MAX_ATTEMPTS:
+                            delivery.status = EmailDeliveryStatus.failed
+                            delivery.next_retry_at = None
+                            await db.commit()
+
+                            logger.error(
+                                "email_delivery_attempt",
+                                agm_id=str(agm_id),
+                                attempt_number=current_attempt,
+                                status="failed",
+                                error=error_str,
+                                next_retry_at=None,
+                            )
+                            # Emit the structured alert event (US-OPS-05) with all
+                            # fields needed for external alerting systems.
+                            logger.error(
+                                "email_delivery_failed",
+                                agm_id=str(agm_id),
+                                total_attempts=current_attempt,
+                                last_error=error_str,
+                            )
+                            return
+                        else:
+                            delay = _backoff_seconds(current_attempt)
+                            next_retry_at = datetime.now(UTC) + timedelta(seconds=delay)
+                            delivery.next_retry_at = next_retry_at
+                            # Keep status as pending while retrying
+                            delivery.status = EmailDeliveryStatus.pending
+                            await db.commit()
+
+                            logger.warning(
+                                "email_delivery_attempt",
+                                agm_id=str(agm_id),
+                                attempt_number=current_attempt,
+                                status="pending",
+                                error=error_str,
+                                next_retry_at=next_retry_at.isoformat(),
+                            )
+
+                # Wait before next attempt
+                delay = _backoff_seconds(attempt_number)
+                await asyncio.sleep(delay)
 
     async def requeue_pending_on_startup(self, db: AsyncSession) -> None:
         """
         Called on server startup. Finds all EmailDelivery records with
-        status='pending' and total_attempts < 30, and re-launches
-        trigger_with_retry as asyncio background tasks.
+        status='pending', total_attempts < 30, and next_retry_at <= now (or not set),
+        and re-launches trigger_with_retry tasks.
+
+        The next_retry_at guard is critical: without it, every cold start would
+        immediately retry all pending emails regardless of their scheduled retry time,
+        resetting the exponential backoff and blocking startup (via asyncio.gather)
+        for the duration of the retry loops — preventing the Lambda from handling
+        any HTTP requests until all retries complete (RR3-19).
+
+        Tasks are collected and awaited via asyncio.gather so they are not
+        silently dropped if the Lambda exits before they complete (RR3-19).
         """
+        now = datetime.now(UTC)
         result = await db.execute(
             select(EmailDelivery).where(
                 EmailDelivery.status == EmailDeliveryStatus.pending,
                 EmailDelivery.total_attempts < _MAX_ATTEMPTS,
+                or_(
+                    EmailDelivery.next_retry_at.is_(None),
+                    EmailDelivery.next_retry_at <= now,
+                ),
             )
         )
         pending_deliveries = list(result.scalars().all())
 
+        if pending_deliveries:
+            # WARNING-level summary so the scale is immediately visible in function logs.
+            # A burst of 35 individual requeueing_pending_email lines is easy to miss;
+            # a single startup_email_requeue count=35 line is not.
+            logger.warning(
+                "startup_email_requeue",
+                count=len(pending_deliveries),
+                meeting_ids=[str(d.general_meeting_id) for d in pending_deliveries],
+            )
+
+        tasks = []
         for delivery in pending_deliveries:
             logger.info(
                 "requeueing_pending_email",
                 general_meeting_id=str(delivery.general_meeting_id),
                 total_attempts=delivery.total_attempts,
             )
-            asyncio.create_task(_send_with_limit(self.trigger_with_retry(delivery.general_meeting_id)))
+            tasks.append(_send_with_limit(self.trigger_with_retry(delivery.general_meeting_id)))
+
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for exc in results:
+                if isinstance(exc, BaseException):
+                    logger.error(
+                        "startup_email_requeue_task_error",
+                        error=str(exc),
+                    )

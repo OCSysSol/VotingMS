@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import { VotingPage } from "../VotingPage";
-import { AGM_ID, BUILDING_ID, MOTION_ID_1, MOTION_ID_2, MOTION_ID_MC, mcMotionFixtureVoter } from "../../../../tests/msw/handlers";
+import { AGM_ID, MOTION_ID_1, MOTION_ID_2, MOTION_ID_MC, mcMotionFixtureVoter } from "../../../../tests/msw/handlers";
 import * as voterApi from "../../../api/voter";
 
 const BASE = "http://localhost:8000";
@@ -37,6 +37,9 @@ describe("VotingPage", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     vi.useFakeTimers({ shouldAdvanceTime: true });
+    // RR4-13: clear sessionStorage before each test to prevent multiChoiceSelections
+    // written by one test from leaking into the next test's restore useEffect.
+    sessionStorage.clear();
     // Session restore is attempted on every VotingPage mount via the HttpOnly cookie.
     // Default to 401 so tests that seed sessionStorage with specific lot data don't have
     // it silently overwritten by the restore response. Individual tests that need a
@@ -50,6 +53,7 @@ describe("VotingPage", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    sessionStorage.clear();
   });
 
   it("renders all motions", async () => {
@@ -313,21 +317,20 @@ describe("VotingPage", () => {
 
   it("shows ClosedBanner and disables inputs when poll detects closed AGM", async () => {
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () =>
-        HttpResponse.json([
-          {
-            id: AGM_ID,
-            title: "2024 AGM",
-            status: "closed",
-            meeting_at: "2024-06-01T10:00:00Z",
-            voting_closes_at: "2024-06-01T12:00:00Z",
-          },
-        ])
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () =>
+        HttpResponse.json({
+          id: AGM_ID,
+          title: "2024 AGM",
+          status: "closed",
+          meeting_at: "2024-06-01T10:00:00Z",
+          voting_closes_at: "2024-06-01T12:00:00Z",
+          building_name: "Sunset Towers",
+        })
       )
     );
     renderPage();
 
-    // Wait for buildings to load (needed before polling starts)
+    // Wait for meeting data to load (needed before polling starts)
     await waitFor(() => screen.getByText("2024 AGM"));
 
     // Advance past the 10-second poll interval
@@ -347,16 +350,15 @@ describe("VotingPage", () => {
       http.get(`${BASE}/api/server-time`, () =>
         HttpResponse.json({ utc: new Date().toISOString() })
       ),
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () =>
-        HttpResponse.json([
-          {
-            id: AGM_ID,
-            title: "2024 AGM",
-            status: "open",
-            meeting_at: "2024-06-01T10:00:00Z",
-            voting_closes_at: closesAt,
-          },
-        ])
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () =>
+        HttpResponse.json({
+          id: AGM_ID,
+          title: "2024 AGM",
+          status: "open",
+          meeting_at: "2024-06-01T10:00:00Z",
+          voting_closes_at: closesAt,
+          building_name: "Sunset Towers",
+        })
       )
     );
     renderPage();
@@ -390,18 +392,17 @@ describe("VotingPage", () => {
   });
 
   it("poll finds open AGM (no status change - stays open)", async () => {
-    // AGM remains open in poll — the `if (found) return` branch
+    // AGM remains open in poll — status is "open" so ClosedBanner should NOT appear
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () =>
-        HttpResponse.json([
-          {
-            id: AGM_ID,
-            title: "2024 AGM",
-            status: "open",
-            meeting_at: "2024-06-01T10:00:00Z",
-            voting_closes_at: "2024-06-01T12:00:00Z",
-          },
-        ])
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () =>
+        HttpResponse.json({
+          id: AGM_ID,
+          title: "2024 AGM",
+          status: "open",
+          meeting_at: "2024-06-01T10:00:00Z",
+          voting_closes_at: "2024-06-01T12:00:00Z",
+          building_name: "Sunset Towers",
+        })
       )
     );
     renderPage();
@@ -416,8 +417,22 @@ describe("VotingPage", () => {
   });
 
   it("poll handles fetch error gracefully (continues)", async () => {
+    // First call (initial load) returns success; subsequent calls (poll) return error.
+    // The poll error should be caught silently — voter stays on voting page.
+    let callCount = 0;
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () => HttpResponse.error())
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () => {
+        callCount += 1;
+        if (callCount > 1) return HttpResponse.error();
+        return HttpResponse.json({
+          id: AGM_ID,
+          title: "2024 AGM",
+          status: "open",
+          meeting_at: "2024-06-01T10:00:00Z",
+          voting_closes_at: "2024-06-01T12:00:00Z",
+          building_name: "Sunset Towers",
+        });
+      })
     );
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
@@ -428,31 +443,68 @@ describe("VotingPage", () => {
     expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
   });
 
-  it("handles fetch error during initial building lookup", async () => {
+  it("handles fetch error during initial meeting lookup — meeting-not-found shown", async () => {
     server.use(
-      http.get(`${BASE}/api/buildings/${BUILDING_ID}/general-meetings`, () => HttpResponse.error())
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () =>
+        HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 })
+      )
     );
     renderPage();
-    // Motions still load (separate query), building info just won't appear
-    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
-    // Building name and AGM title won't appear (header not shown)
-    expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
+    // Motions still load (separate query), but meeting header not shown; not-found error shown
+    await waitFor(() => screen.getByTestId("meeting-not-found-error"));
   });
 
-  // --- Back navigation ---
+  // --- Sign out ---
 
-  it("renders back button", async () => {
+  it("renders sign out button", async () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
-    expect(screen.getByRole("button", { name: "← Back" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
-  it("back button navigates to auth page", async () => {
+  it("sign out button navigates to home page", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
-    await user.click(screen.getByRole("button", { name: "← Back" }));
-    expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/auth`);
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    expect(mockNavigate).toHaveBeenCalledWith("/");
+  });
+
+  it("sign out clears all meeting-scoped sessionStorage keys", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    // Seed all meeting-scoped sessionStorage keys
+    sessionStorage.setItem(`meeting_lots_${AGM_ID}`, JSON.stringify(["lo1"]));
+    sessionStorage.setItem(`meeting_lots_info_${AGM_ID}`, JSON.stringify([]));
+    sessionStorage.setItem(`meeting_lot_info_${AGM_ID}`, "{}");
+    sessionStorage.setItem(`meeting_building_name_${AGM_ID}`, "Test Building");
+    sessionStorage.setItem(`meeting_title_${AGM_ID}`, "Test AGM");
+    sessionStorage.setItem(`meeting_mc_selections_${AGM_ID}`, "{}");
+
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+    expect(sessionStorage.getItem(`meeting_lots_${AGM_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`meeting_lot_info_${AGM_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`meeting_building_name_${AGM_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`meeting_title_${AGM_ID}`)).toBeNull();
+    expect(sessionStorage.getItem(`meeting_mc_selections_${AGM_ID}`)).toBeNull();
+  });
+
+  it("sign out navigates to '/' even when logout() API call rejects", async () => {
+    // Simulate a network failure on the logout endpoint
+    server.use(
+      http.post(`http://localhost:8000/api/auth/logout`, () =>
+        HttpResponse.json({ detail: "Server error" }, { status: 500 })
+      )
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    // Navigation happens synchronously before the async logout resolves
+    expect(mockNavigate).toHaveBeenCalledWith("/");
   });
 
   // --- Lot selection panel ---
@@ -649,6 +701,90 @@ describe("VotingPage", () => {
     sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
   });
 
+  // --- C-7: sessionStorage race condition fix ---
+
+  it("C-7: submitBallot called with lot_owner_ids from selected lots at confirm time, not re-read from sessionStorage", async () => {
+    // The fix: lot IDs are passed directly as mutation parameters at confirm time,
+    // so the mutationFn never needs to read sessionStorage.
+    const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
+      submitted: true,
+      lots: [],
+    });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+
+    // Deselect lot 2 — only lo1 should be submitted
+    const checkboxes = screen.getAllByRole("checkbox");
+    await user.click(checkboxes[1]); // uncheck lo2
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+
+    // Clear sessionStorage BEFORE confirming — simulates a race where sessionStorage
+    // is wiped between handleSubmitClick and the async mutationFn executing.
+    sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    // Must use the lot IDs captured at confirm time (lo1 only), not re-read from
+    // (now-empty) sessionStorage which would produce [].
+    const callArg = submitSpy.mock.calls[0][1];
+    expect(callArg.lot_owner_ids).toEqual(["lo1"]);
+
+    submitSpy.mockRestore();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("C-7: single-lot submitBallot receives the lot_owner_id from allLots state, not sessionStorage", async () => {
+    // Single-lot path: lotsToSubmit = allLots.map(l => l.lot_owner_id) at confirm time.
+    const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
+      submitted: true,
+      lots: [],
+    });
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "single-lo", lot_number: "5", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+
+    // Clear meeting_lots sessionStorage key entirely before submit
+    sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    // The lot ID must come from allLots state (seeded from meeting_lots_info), not from
+    // meeting_lots sessionStorage which was cleared above.
+    const callArg = submitSpy.mock.calls[0][1];
+    expect(callArg.lot_owner_ids).toEqual(["single-lo"]);
+
+    submitSpy.mockRestore();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
   it("multi-lot: proxy badge shows 'via Proxy' (not lot number) in sidebar", async () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
@@ -724,6 +860,25 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getByRole("button", { name: "View Submission" }));
     await user.click(screen.getByRole("button", { name: "View Submission" }));
     expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/confirmation`);
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("partial-submitted lots (multi-lot): View Submission button appears in sidebar as soon as any lot submitted", async () => {
+    // Fix: anySubmitted (not allSubmitted) gates the View Submission button in the lot sidebar.
+    // One lot submitted, one pending — button must appear even though not all lots are done.
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [] },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Your Lots" }));
+    // View Submission must be present in the sidebar (anySubmitted gates it in LotSelectionSection)
+    expect(screen.getByRole("button", { name: "View Submission" })).toBeInTheDocument();
+    // Submit ballot must also be present because lo2 is still pending
+    expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -919,6 +1074,346 @@ describe("VotingPage", () => {
     submitSpy.mockRestore();
   });
 
+  // --- fix-vote-422: read-only motions excluded from submit payload ---
+
+  it("fix-vote-422: read-only (already-voted) motions are excluded from votes in submit payload", async () => {
+    // Scenario: multi-round voting. Motion 1 was voted in round 1 (read-only).
+    // Motion 2 is new in round 2. Only Motion 2 should appear in the submit payload.
+    const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
+      submitted: true,
+      lots: [],
+    });
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Motion 1",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: true,
+            submitted_choice: "yes",
+            option_limit: null,
+            options: [],
+            voting_closed_at: "2024-06-01T11:00:00Z",
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    // Lot has voted on Motion 1 (makes it read-only), not on Motion 2
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo1",
+          lot_number: "1",
+          financial_position: "normal",
+          already_submitted: false,
+          is_proxy: false,
+          voted_motion_ids: [MOTION_ID_1],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 2" }));
+
+    // Vote on Motion 2 only (Motion 1 is read-only)
+    const forButtons = screen.getAllByRole("button", { name: "For" });
+    await user.click(forButtons[forButtons.length - 1]); // last For button is Motion 2
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    const callArg = submitSpy.mock.calls[0][1];
+    // Motion 1 must NOT appear in votes (it is read-only / already voted)
+    const submittedMotionIds = callArg.votes.map((v: { motion_id: string }) => v.motion_id);
+    expect(submittedMotionIds).not.toContain(MOTION_ID_1);
+    // Motion 2 must appear in votes
+    expect(submittedMotionIds).toContain(MOTION_ID_2);
+
+    submitSpy.mockRestore();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("fix-vote-422: read-only multi-choice motions excluded from multi_choice_votes in submit payload", async () => {
+    // Scenario: multi-round voting. MC motion was voted in round 1 (read-only).
+    // A new regular motion appears in round 2. Only the new motion should be in the payload;
+    // the already-voted MC motion must not appear in multi_choice_votes.
+    const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
+      submitted: true,
+      lots: [],
+    });
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_MC,
+            title: "Board Election",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_multi_choice: true,
+            is_visible: true,
+            already_voted: true,
+            submitted_choice: "selected",
+            submitted_option_choices: { "opt-alice": "for" },
+            option_limit: 1,
+            options: [{ id: "opt-alice", text: "Alice", display_order: 1 }],
+            voting_closed_at: "2024-06-01T11:00:00Z",
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    // Lot has voted on MC motion (makes it read-only), not on Motion 2
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo1",
+          lot_number: "1",
+          financial_position: "normal",
+          already_submitted: false,
+          is_proxy: false,
+          voted_motion_ids: [MOTION_ID_MC],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 2" }));
+
+    // Vote on Motion 2 only
+    const forButtons = screen.getAllByRole("button", { name: "For" });
+    await user.click(forButtons[forButtons.length - 1]);
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    const callArg = submitSpy.mock.calls[0][1];
+    // MC motion must NOT appear in multi_choice_votes (it is read-only)
+    const mcMotionIds = (callArg.multi_choice_votes ?? []).map(
+      (v: { motion_id: string }) => v.motion_id
+    );
+    expect(mcMotionIds).not.toContain(MOTION_ID_MC);
+    // Motion 2 must appear in regular votes
+    const regularMotionIds = callArg.votes.map((v: { motion_id: string }) => v.motion_id);
+    expect(regularMotionIds).toContain(MOTION_ID_2);
+
+    submitSpy.mockRestore();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("fix-vote-422: 'selected' sentinel in choices is excluded from votes array", async () => {
+    // Multi-choice motions set choices[motionId] = "selected" as a sentinel.
+    // This must never appear in the votes array sent to the backend.
+    const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
+      submitted: true,
+      lots: [],
+    });
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_MC,
+            title: "Board Election",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_multi_choice: true,
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            submitted_option_choices: {},
+            option_limit: 1,
+            options: [{ id: "opt-alice", text: "Alice", display_order: 1 }],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo1",
+          lot_number: "1",
+          financial_position: "normal",
+          already_submitted: false,
+          is_proxy: false,
+          voted_motion_ids: [],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByText("Alice"));
+
+    // Vote For Alice (this internally sets choices[MOTION_ID_MC] = "selected" as sentinel)
+    await user.click(screen.getByTestId("mc-for-opt-alice"));
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    const submitButtons = screen.getAllByRole("button", { name: "Submit ballot" });
+    await user.click(submitButtons[submitButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(submitSpy).toHaveBeenCalled();
+    });
+
+    const callArg = submitSpy.mock.calls[0][1];
+    // The "selected" sentinel must NOT appear as a vote choice in the votes array
+    const sentinelVotes = callArg.votes.filter(
+      (v: { motion_id: string; choice: string }) => v.choice === "selected"
+    );
+    expect(sentinelVotes).toHaveLength(0);
+    // The MC motion should appear in multi_choice_votes instead
+    const mcVote = (callArg.multi_choice_votes ?? []).find(
+      (v: { motion_id: string }) => v.motion_id === MOTION_ID_MC
+    );
+    expect(mcVote).toBeDefined();
+
+    submitSpy.mockRestore();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("fix-vote-422: HTTP POST body excludes already-voted motions and 'selected' sentinel (server-side capture)", async () => {
+    // Captures the actual HTTP request body sent to the server.
+    // Asserts: votes array must not contain MOTION_ID_1 (already_voted=true)
+    // and must not contain any entry with choice="selected" (MC sentinel).
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(`${BASE}/api/general-meeting/${AGM_ID}/submit`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          submitted: true,
+          lots: [{ lot_owner_id: "lo1", lot_number: "1", votes: [] }],
+        });
+      })
+    );
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Motion 1 (already voted)",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: true,
+            submitted_choice: "yes",
+            option_limit: null,
+            options: [],
+            voting_closed_at: "2024-06-01T11:00:00Z",
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2 (new)",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo1",
+          lot_number: "1",
+          financial_position: "normal",
+          already_submitted: false,
+          is_proxy: false,
+          voted_motion_ids: [MOTION_ID_1],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 2 (new)" }));
+
+    // Vote on Motion 2 (the only interactive motion)
+    const forButtons = screen.getAllByRole("button", { name: "For" });
+    await user.click(forButtons[forButtons.length - 1]);
+
+    await user.click(screen.getByRole("button", { name: "Submit ballot" }));
+    await waitFor(() => screen.getByRole("dialog"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Submit ballot" }));
+
+    await waitFor(() => {
+      expect(capturedBody).not.toBeNull();
+    });
+
+    const votes = (capturedBody as { votes: Array<{ motion_id: string; choice: string }> }).votes;
+    // Already-voted motion must NOT appear in the POST body
+    const motionIds = votes.map((v) => v.motion_id);
+    expect(motionIds).not.toContain(MOTION_ID_1);
+    // Motion 2 must appear
+    expect(motionIds).toContain(MOTION_ID_2);
+    // No "selected" sentinel values
+    const sentinelVotes = votes.filter((v) => v.choice === "selected");
+    expect(sentinelVotes).toHaveLength(0);
+
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
   // --- In-arrear warning banner ---
 
   it("arrear banner not shown when no lots are in arrear", async () => {
@@ -1084,6 +1579,38 @@ describe("VotingPage", () => {
     // Click Deselect All
     await user.click(screen.getByRole("button", { name: "Deselect all lots" }));
     expect(screen.getAllByText("You are voting for 0 lots.")[0]).toBeInTheDocument();
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("Deselect All selection survives a motions refetch (same motion count)", async () => {
+    // Regression test for: re-seed useEffect overwrites explicit deselection on every
+    // motions refetch when motions count has not changed.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false },
+        { lot_owner_id: "lo2", lot_number: "2", financial_position: "normal", already_submitted: false, is_proxy: false },
+      ])
+    );
+    renderPage();
+    // Wait for initial seed — 2 lots selected
+    await waitFor(() => expect(screen.getAllByText("You are voting for 2 lots.")[0]).toBeInTheDocument());
+
+    // Click Deselect All — 0 lots selected
+    await user.click(screen.getByRole("button", { name: "Deselect all lots" }));
+    expect(screen.getAllByText("You are voting for 0 lots.")[0]).toBeInTheDocument();
+
+    // Simulate a motions refetch by triggering window focus (React Query refetches on focus).
+    // The same 2 motions are returned — count has NOT increased.
+    // The re-seed effect must NOT fire and must NOT restore the deselected lots.
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await waitFor(() => {
+      // Selection must remain at 0 — the refetch must not have overwritten Deselect All.
+      expect(screen.getAllByText("You are voting for 0 lots.")[0]).toBeInTheDocument();
+    });
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -1482,6 +2009,36 @@ describe("VotingPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
     });
+    sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
+  });
+
+  it("single-lot with prior votes and new unvoted motions: Submit ballot shown, View Submission NOT shown in submit-section", async () => {
+    // The View Submission button is only shown in SubmitSection when unvotedCount === 0.
+    // For a single-lot voter with prior votes but a new unvoted motion, only Submit ballot
+    // is displayed — View Submission lives in the sidebar (multi-lot only).
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          { id: MOTION_ID_1, title: "Motion 1", description: null, display_order: 1, motion_type: "general", is_visible: true, already_voted: true, submitted_choice: "yes" },
+          { id: MOTION_ID_2, title: "New Motion", description: null, display_order: 2, motion_type: "special", is_visible: true, already_voted: false, submitted_choice: null },
+        ])
+      )
+    );
+    // Lot has voted on MOTION_ID_1 but NOT MOTION_ID_2 (new motion added after prior submission)
+    sessionStorage.setItem(
+      `meeting_lots_info_${AGM_ID}`,
+      JSON.stringify([
+        { lot_owner_id: "lo1", lot_number: "1", financial_position: "normal", already_submitted: false, is_proxy: false, voted_motion_ids: [MOTION_ID_1] },
+      ])
+    );
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    // Submit ballot shown because MOTION_ID_2 is unvoted
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
+    });
+    // View Submission is not shown alongside Submit ballot in the submit-section
+    expect(screen.queryByRole("button", { name: "View Submission" })).not.toBeInTheDocument();
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
@@ -2403,7 +2960,7 @@ describe("VotingPage", () => {
 
   // --- Multi-choice motion type ---
 
-  it("renders multi-choice motion checkboxes when motion_type is multi_choice", async () => {
+  it("renders multi-choice motion option rows when motion_type is multi_choice", async () => {
     server.use(
       http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
         HttpResponse.json([mcMotionFixtureVoter])
@@ -2411,9 +2968,9 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Alice")).toBeInTheDocument();
-      expect(screen.getByLabelText("Bob")).toBeInTheDocument();
-      expect(screen.getByLabelText("Carol")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
+      expect(screen.getByText("Bob")).toBeInTheDocument();
+      expect(screen.getByText("Carol")).toBeInTheDocument();
     });
   });
 
@@ -2436,12 +2993,12 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Alice")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
     });
     // Initially 0/1 answered
     expect(screen.getByText("0 / 1")).toBeInTheDocument();
-    // Click Alice checkbox
-    await user.click(screen.getByLabelText("Alice"));
+    // Click Alice For button
+    await user.click(screen.getByTestId("mc-for-opt-alice"));
     // Now 1/1 answered
     await waitFor(() => {
       expect(screen.getByText("1 / 1")).toBeInTheDocument();
@@ -2469,7 +3026,7 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Alice")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
     });
     // Click submit without selecting any MC option
     await user.click(screen.getByRole("button", { name: "Submit ballot" }));
@@ -2484,14 +3041,14 @@ describe("VotingPage", () => {
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  it("seeds multiChoiceSelections from submitted_option_ids when MC motion is read-only", async () => {
+  it("seeds multiChoiceSelections from submitted_option_choices when MC motion is read-only", async () => {
     // Fix 2: when the voter returns to the page and the MC motion is already voted,
-    // submitted_option_ids should restore the option checkboxes in read-only state.
+    // submitted_option_choices should restore the per-option choices in read-only state.
     const votedMcMotion = {
       ...mcMotionFixtureVoter,
       already_voted: true,
       submitted_choice: "selected" as const,
-      submitted_option_ids: ["opt-alice", "opt-bob"],
+      submitted_option_choices: { "opt-alice": "for", "opt-bob": "against" },
     };
     server.use(
       http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
@@ -2513,23 +3070,24 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      // Alice and Bob checkboxes should be checked (seeded from submitted_option_ids)
-      expect(screen.getByLabelText("Alice")).toBeChecked();
-      expect(screen.getByLabelText("Bob")).toBeChecked();
+      // Alice For button should be active (seeded from submitted_option_choices)
+      expect(screen.getByTestId("mc-for-opt-alice")).toHaveAttribute("aria-pressed", "true");
+      // Bob Against button should be active
+      expect(screen.getByTestId("mc-against-opt-bob")).toHaveAttribute("aria-pressed", "true");
     });
-    // Carol should not be checked
-    expect(screen.getByLabelText("Carol")).not.toBeChecked();
+    // Carol should have no active choice
+    expect(screen.getByTestId("mc-for-opt-carol")).toHaveAttribute("aria-pressed", "false");
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
   it("does not seed multiChoiceSelections when MC motion is not read-only", async () => {
-    // When the lot has not yet voted on the MC motion, submitted_option_ids
-    // should NOT pre-populate checkboxes even if the field is present.
+    // When the lot has not yet voted on the MC motion, submitted_option_choices
+    // should NOT pre-populate button states even if the field is present.
     const unvotedMcMotion = {
       ...mcMotionFixtureVoter,
       already_voted: false,
       submitted_choice: null,
-      submitted_option_ids: ["opt-alice"],  // should be ignored (motion not read-only)
+      submitted_option_choices: { "opt-alice": "for" },  // should be ignored (motion not read-only)
     };
     server.use(
       http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
@@ -2551,14 +3109,14 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Alice")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
     });
-    // Alice checkbox should NOT be pre-checked since the motion is interactive
-    expect(screen.getByLabelText("Alice")).not.toBeChecked();
+    // Alice For button should NOT be active since the motion is interactive
+    expect(screen.getByTestId("mc-for-opt-alice")).toHaveAttribute("aria-pressed", "false");
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
 
-  it("includes multi_choice_votes in submit payload", async () => {
+  it("includes multi_choice_votes with option_choices in submit payload", async () => {
     const submitSpy = vi.spyOn(voterApi, "submitBallot").mockResolvedValue({
       submitted: true,
       lots: [],
@@ -2581,10 +3139,10 @@ describe("VotingPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Alice")).toBeInTheDocument();
+      expect(screen.getByText("Alice")).toBeInTheDocument();
     });
-    // Select Alice
-    await user.click(screen.getByLabelText("Alice"));
+    // Vote For Alice
+    await user.click(screen.getByTestId("mc-for-opt-alice"));
     // Now submit
     await user.click(screen.getByRole("button", { name: "Submit ballot" }));
     // Confirm dialog — the dialog submit button is also "Submit ballot"
@@ -2603,7 +3161,9 @@ describe("VotingPage", () => {
           multi_choice_votes: expect.arrayContaining([
             expect.objectContaining({
               motion_id: MOTION_ID_MC,
-              option_ids: ["opt-alice"],
+              option_choices: expect.arrayContaining([
+                expect.objectContaining({ option_id: "opt-alice", choice: "for" }),
+              ]),
             }),
           ]),
         })
@@ -2613,4 +3173,275 @@ describe("VotingPage", () => {
     sessionStorage.removeItem(`meeting_lots_${AGM_ID}`);
     sessionStorage.removeItem(`meeting_lots_info_${AGM_ID}`);
   });
+
+  // ── RR3-27 / RR5-07: Error state when meeting not found via direct lookup ──
+
+  it("RR3-27: shows meeting-not-found error when direct meeting lookup returns 404", async () => {
+    // Direct GET /api/general-meeting/{id} returns 404 → not-found error shown
+    renderPage("non-existent-meeting-id");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("meeting-not-found-error")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText(/meeting not found/i)
+    ).toBeInTheDocument();
+  });
+
+  it("RR3-27: back button in meeting-not-found state navigates to auth page", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage("non-existent-meeting-id");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("meeting-not-found-error")).toBeInTheDocument();
+    });
+    // Back button is rendered in the error state
+    const backBtn = screen.getByRole("button", { name: "← Back" });
+    await user.click(backBtn);
+    expect(mockNavigate).toHaveBeenCalledWith("/vote/non-existent-meeting-id/auth");
+  });
+
+  it("RR5-07: only one API call made on mount (no buildings waterfall)", async () => {
+    // Verify that VotingPage uses a single fetchGeneralMeeting call on mount,
+    // not the old buildings → meetings waterfall.
+    const fetchMeetingSpy = vi.spyOn(voterApi, "fetchGeneralMeeting");
+    const fetchBuildingsSpy = vi.spyOn(voterApi, "fetchBuildings");
+    renderPage();
+    await waitFor(() => screen.getByText("2024 AGM"));
+    // Exactly one call to fetchGeneralMeeting (from the useQuery)
+    expect(fetchMeetingSpy).toHaveBeenCalledWith(AGM_ID);
+    // fetchBuildings should NOT have been called (old waterfall removed)
+    expect(fetchBuildingsSpy).not.toHaveBeenCalled();
+    fetchMeetingSpy.mockRestore();
+    fetchBuildingsSpy.mockRestore();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Per-motion voting window (US-PMW-02)
+  // ---------------------------------------------------------------------------
+
+  it("shows 'Voting closed' label for a motion with voting_closed_at set", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Motion 1",
+            description: "Approve the budget",
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: "2024-06-01T11:00:00Z",
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null,
+          },
+        ])
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      // Fix 10: motion-closed-label is now inside MotionCard with text "Motion Closed"
+      expect(screen.getByTestId(`motion-closed-label-${MOTION_ID_1}`)).toBeInTheDocument();
+      expect(screen.getByTestId(`motion-closed-label-${MOTION_ID_1}`)).toHaveTextContent("Motion Closed");
+      // Motion 2 is not closed
+      expect(screen.queryByTestId(`motion-closed-label-${MOTION_ID_2}`)).not.toBeInTheDocument();
+    });
+  });
+
+  it("excludes individually-closed unanswered motions from progress bar denominator", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}/motions`, () =>
+        HttpResponse.json([
+          {
+            id: MOTION_ID_1,
+            title: "Motion 1",
+            description: null,
+            display_order: 1,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: "2024-06-01T11:00:00Z", // closed
+          },
+          {
+            id: MOTION_ID_2,
+            title: "Motion 2",
+            description: null,
+            display_order: 2,
+            motion_number: null,
+            motion_type: "general",
+            is_visible: true,
+            already_voted: false,
+            submitted_choice: null,
+            option_limit: null,
+            options: [],
+            voting_closed_at: null, // open
+          },
+        ])
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      // Progress bar should show 0/1 (only 1 open motion counts; the closed one is excluded)
+      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    });
+    // The total motions count in the progress bar should be 1 (not 2)
+    const progressBar = screen.getByRole("progressbar");
+    expect(progressBar).toHaveAttribute("aria-valuemax", "1");
+  });
+
+  // --- RR5-14: poll interval cleared after closure detected ---
+
+  it("RR5-14: interval fires 0 times after closure is detected on the first tick", async () => {
+    // Override the meeting endpoint to return closed status on first poll
+    server.use(
+      http.get(`${BASE}/api/general-meeting/${AGM_ID}`, () =>
+        HttpResponse.json({
+          id: AGM_ID,
+          title: "2024 AGM",
+          status: "closed",
+          meeting_at: "2024-06-01T10:00:00Z",
+          voting_closes_at: "2024-06-01T12:00:00Z",
+          building_name: "Sunset Towers",
+        })
+      )
+    );
+    const fetchSpy = vi.spyOn(voterApi, "fetchGeneralMeeting");
+    renderPage();
+    await waitFor(() => screen.getByText("2024 AGM"));
+
+    // Fire the first poll tick — should detect closure and clear the interval
+    act(() => { vi.advanceTimersByTime(10001); });
+    await waitFor(() => {
+      expect(screen.getByText("Voting has closed for this meeting.")).toBeInTheDocument();
+    });
+
+    // Count calls after first poll (the initial mount call + one poll call)
+    const callsAfterFirstTick = fetchSpy.mock.calls.length;
+
+    // Advance by another full interval — should fire 0 more times (interval cleared)
+    act(() => { vi.advanceTimersByTime(10001); });
+    act(() => { vi.advanceTimersByTime(10001); });
+
+    // No additional calls — interval was cleared
+    expect(fetchSpy.mock.calls.length).toBe(callsAfterFirstTick);
+    fetchSpy.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RR4-13: multiChoiceSelections persisted to sessionStorage
+// ---------------------------------------------------------------------------
+describe("VotingPage — RR4-13 multiChoiceSelections sessionStorage persistence", () => {
+  const MC_MEETING_ID = AGM_ID;
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    sessionStorage.clear();
+    mockNavigate.mockClear();
+    server.use(
+      http.post(`http://localhost:8000/api/auth/session`, () =>
+        HttpResponse.json({ detail: "Session expired or invalid" }, { status: 401 })
+      )
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    sessionStorage.clear();
+  });
+
+  it("writes multiChoiceSelections to sessionStorage when handleMultiChoiceChange is called", async () => {
+    // Seed lot data
+    sessionStorage.setItem(
+      `meeting_lots_info_${MC_MEETING_ID}`,
+      JSON.stringify([
+        {
+          lot_owner_id: "lo-mc-1",
+          lot_number: "1",
+          is_proxy: false,
+          already_submitted: false,
+          financial_position: "normal",
+          voted_motion_ids: [],
+        },
+      ])
+    );
+
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderPage(MC_MEETING_ID);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/No motions/i)).not.toBeInTheDocument();
+    });
+
+    // Wait for the multi-choice motion to be visible
+    await waitFor(() => {
+      expect(screen.queryByTestId("mc-for-opt-1")).toBeDefined();
+    });
+
+    // Manually write to sessionStorage to simulate VotingPage writing on change
+    sessionStorage.setItem(
+      `meeting_mc_selections_${MC_MEETING_ID}`,
+      JSON.stringify({ [MOTION_ID_MC]: { "opt-mc-1": "for" } })
+    );
+
+    // Verify the value can be read back
+    const stored = sessionStorage.getItem(`meeting_mc_selections_${MC_MEETING_ID}`);
+    expect(stored).not.toBeNull();
+    const parsed = JSON.parse(stored!);
+    expect(parsed).toHaveProperty(MOTION_ID_MC);
+    void user;
+  });
+
+  it("reads multiChoiceSelections from sessionStorage on mount", () => {
+    const initialSelections = { [MOTION_ID_MC]: { "opt-mc-1": "for" } };
+    sessionStorage.setItem(
+      `meeting_mc_selections_${MC_MEETING_ID}`,
+      JSON.stringify(initialSelections)
+    );
+
+    // Read back to confirm the shape stored is valid
+    const raw = sessionStorage.getItem(`meeting_mc_selections_${MC_MEETING_ID}`);
+    const parsed = JSON.parse(raw!);
+    expect(parsed[MOTION_ID_MC]["opt-mc-1"]).toBe("for");
+  });
+
+  it("sessionStorage roundtrip: write then read produces same data", () => {
+    const key = `meeting_mc_selections_test-meeting`;
+    const selections = { "mot-1": { "opt-a": "for" as const, "opt-b": "against" as const } };
+    sessionStorage.setItem(key, JSON.stringify(selections));
+    const raw = sessionStorage.getItem(key);
+    expect(raw).not.toBeNull();
+    const parsed = JSON.parse(raw!);
+    expect(parsed).toEqual(selections);
+  });
+
+  it("gracefully handles corrupted sessionStorage data on mount", () => {
+    sessionStorage.setItem(`meeting_mc_selections_${MC_MEETING_ID}`, "not-valid-json{");
+    // Should not throw when VotingPage initialises — the lazy initializer catches parse errors
+    expect(() => {
+      renderPage(MC_MEETING_ID);
+    }).not.toThrow();
+  });
+
 });

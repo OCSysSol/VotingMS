@@ -6,13 +6,16 @@ Voting endpoints (all require valid session):
   POST /api/general-meeting/{general_meeting_id}/submit
   GET  /api/general-meeting/{general_meeting_id}/my-ballot
 """
+import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.rate_limiter import ballot_submit_limiter
 
 from app.database import get_db
 from app.models.general_meeting import GeneralMeeting
@@ -32,7 +35,11 @@ from app.schemas.voting import (
     MyBallotResponse,
     SubmitResponse,
 )
-from app.services.auth_service import get_session
+from app.services.auth_service import (
+    _load_direct_lot_owner_ids,
+    _load_proxy_lot_owner_ids,
+    get_session,
+)
 from app.services.voting_service import (
     get_drafts,
     get_my_ballot,
@@ -68,35 +75,16 @@ async def list_motions(
     """
     session = await get_session(general_meeting_id=general_meeting_id, db=db, agm_session=agm_session, authorization=authorization)
 
-    # Verify General Meeting exists
-    meeting_result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
-    meeting = meeting_result.scalar_one_or_none()
-    if meeting is None:  # pragma: no cover
-        raise HTTPException(status_code=404, detail="General Meeting not found")  # pragma: no cover
-
     voter_email = session.voter_email
+    building_id = session.building_id
 
-    # Find all lot_owner_ids for this voter (direct ownership + proxy)
-    email_lots_result = await db.execute(
-        select(LotOwnerEmail.lot_owner_id)
-        .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
-        .where(
-            LotOwnerEmail.email == voter_email,
-            LotOwner.building_id == meeting.building_id,
-        )
+    # Fire direct-owner and proxy-lot lookups concurrently.
+    # session.building_id is used directly — the session FK guarantees the meeting
+    # exists and provides building_id, so the meeting existence check is not needed.
+    direct_lot_owner_ids, proxy_lot_owner_ids = await asyncio.gather(
+        _load_direct_lot_owner_ids(voter_email, building_id),
+        _load_proxy_lot_owner_ids(voter_email, building_id),
     )
-    direct_lot_owner_ids = {row[0] for row in email_lots_result.all()}
-
-    proxy_lots_result = await db.execute(
-        select(LotProxy.lot_owner_id)
-        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
-        .where(
-            LotProxy.proxy_email == voter_email,
-            LotOwner.building_id == meeting.building_id,
-        )
-    )
-    proxy_lot_owner_ids = {row[0] for row in proxy_lots_result.all()}
-
     all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
 
     # Get submitted vote motion IDs, choices, and option IDs for this voter's lots
@@ -110,16 +98,25 @@ async def list_motions(
     # Build a dict preferring a non-not_eligible choice when multiple lots vote on the same motion.
     # For multi-choice motions, use VoteChoice.selected as the submitted_choice sentinel
     # (indicates "you voted" without implying a specific binary choice).
+    # submitted_option_choices_by_motion maps motion_id -> {option_id_str -> choice_str}
     voted_choice_by_motion: dict[uuid.UUID, VoteChoice] = {}
-    submitted_option_ids_by_motion: dict[uuid.UUID, list[uuid.UUID]] = {}
+    submitted_option_choices_by_motion: dict[uuid.UUID, dict[str, str]] = {}
     for motion_id, choice, motion_option_id in voted_result.all():
         existing = voted_choice_by_motion.get(motion_id)
         if existing is None or existing == VoteChoice.not_eligible:
             voted_choice_by_motion[motion_id] = choice
-        if choice == VoteChoice.selected and motion_option_id is not None:
-            submitted_option_ids_by_motion.setdefault(motion_id, [])
-            if motion_option_id not in submitted_option_ids_by_motion[motion_id]:
-                submitted_option_ids_by_motion[motion_id].append(motion_option_id)
+        if motion_option_id is not None and choice in (VoteChoice.selected, VoteChoice.against, VoteChoice.abstained):
+            submitted_option_choices_by_motion.setdefault(motion_id, {})
+            opt_id_str = str(motion_option_id)
+            if opt_id_str not in submitted_option_choices_by_motion[motion_id]:
+                # Map stored VoteChoice back to display string for the frontend
+                if choice == VoteChoice.selected:
+                    choice_str = "for"
+                elif choice == VoteChoice.against:
+                    choice_str = "against"
+                else:
+                    choice_str = "abstained"
+                submitted_option_choices_by_motion[motion_id][opt_id_str] = choice_str
     voted_motion_ids = set(voted_choice_by_motion.keys())
 
     # Fetch motions that are visible OR already voted on by this voter
@@ -160,8 +157,9 @@ async def list_motions(
             is_visible=m.is_visible,
             already_voted=m.id in voted_motion_ids,
             submitted_choice=voted_choice_by_motion.get(m.id),
-            submitted_option_ids=submitted_option_ids_by_motion.get(m.id, []),
+            submitted_option_choices=submitted_option_choices_by_motion.get(m.id, {}),
             option_limit=m.option_limit,
+            voting_closed_at=m.voting_closed_at,
             options=[
                 {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
                 for opt in options_by_motion.get(m.id, [])
@@ -293,6 +291,7 @@ async def get_drafts_endpoint(
 async def submit_ballot_endpoint(
     general_meeting_id: uuid.UUID,
     body: SubmitBallotRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agm_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
@@ -300,13 +299,16 @@ async def submit_ballot_endpoint(
     """Formally submit the ballot for the specified lots. Requires valid session."""
     session = await get_session(general_meeting_id=general_meeting_id, db=db, agm_session=agm_session, authorization=authorization)
 
+    # Rate limit: 10 requests per minute per voter_email (RR3-33)
+    ballot_submit_limiter.check(session.voter_email)
+
     result = await submit_ballot(
         db=db,
         general_meeting_id=general_meeting_id,
         voter_email=session.voter_email,
         lot_owner_ids=body.lot_owner_ids,
         inline_votes={item.motion_id: item.choice for item in body.votes},
-        multi_choice_votes={item.motion_id: item.option_ids for item in body.multi_choice_votes},
+        multi_choice_votes={item.motion_id: item.option_choices for item in body.multi_choice_votes},
     )
     await db.commit()
     return result

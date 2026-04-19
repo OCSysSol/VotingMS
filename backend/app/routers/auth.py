@@ -4,6 +4,7 @@ Authentication endpoints:
   POST /api/auth/verify       — validate the OTP and create a session
   GET  /api/test/latest-otp   — test-only: retrieve latest OTP for (email, meeting_id)
 """
+import asyncio
 import hmac
 import secrets
 import uuid
@@ -14,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_db
+from app.database import AsyncSessionLocal, get_db
 from app.logging_config import get_logger
 from app.models.auth_otp import AuthOtp
 from app.models.building import Building
@@ -34,7 +35,14 @@ from app.schemas.auth import (
     OtpRequestResponse,
     SessionRestoreRequest,
 )
-from app.services.auth_service import _unsign_token, create_session
+from app.services.auth_service import (
+    _TOKEN_MAX_AGE_SECONDS,
+    _load_direct_lot_owner_ids,
+    _load_proxy_lot_owner_ids,
+    _unsign_token,
+    create_session,
+    extend_session,
+)
 from app.services.email_service import send_otp_email
 
 logger = get_logger(__name__)
@@ -74,30 +82,14 @@ async def _resolve_voter_state(
       - visible_motions: list[Motion]
       - unvoted_visible_count: int
     """
-    # Find all LotOwnerEmail records matching email for this building (direct owners)
-    emails_result = await db.execute(
-        select(LotOwnerEmail)
-        .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
-        .where(
-            LotOwnerEmail.email.isnot(None),
-            LotOwnerEmail.email == voter_email,
-            LotOwner.building_id == building_id,
-        )
+    # Fire direct-owner and proxy-lot lookups concurrently.
+    # Each helper opens its own AsyncSession so they can run in parallel without
+    # sharing a connection — a single AsyncSession must not be used across
+    # concurrent coroutines (SQLAlchemy asyncio safety requirement).
+    direct_lot_owner_ids, proxy_lot_owner_ids = await asyncio.gather(
+        _load_direct_lot_owner_ids(voter_email, building_id),
+        _load_proxy_lot_owner_ids(voter_email, building_id),
     )
-    email_records = list(emails_result.scalars().all())
-    direct_lot_owner_ids: set[uuid.UUID] = {er.lot_owner_id for er in email_records}
-
-    # Find all LotProxy records where proxy_email matches and lot is in this building
-    proxy_result = await db.execute(
-        select(LotProxy)
-        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
-        .where(
-            LotProxy.proxy_email == voter_email,
-            LotOwner.building_id == building_id,
-        )
-    )
-    proxy_records = list(proxy_result.scalars().all())
-    proxy_lot_owner_ids: set[uuid.UUID] = {pr.lot_owner_id for pr in proxy_records}
 
     # Merge: union of direct and proxy lots
     all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
@@ -196,6 +188,30 @@ async def _upsert_rate_limit(
     await db.flush()
 
 
+async def _cleanup_expired_otps() -> None:
+    """Delete expired OTP records — runs as a fire-and-forget background task."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                delete(AuthOtp).where(AuthOtp.expires_at < datetime.now(UTC))
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover
+        pass  # Background cleanup — never let failures surface to the caller
+
+
+async def _cleanup_expired_sessions() -> None:
+    """Delete expired session records — runs as a fire-and-forget background task."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                delete(SessionRecord).where(SessionRecord.expires_at < datetime.now(UTC))
+            )
+            await session.commit()
+    except Exception:  # pragma: no cover
+        pass  # Background cleanup — never let failures surface to the caller
+
+
 @router.post("/auth/request-otp", response_model=OtpRequestResponse)
 async def request_otp(
     body: OtpRequestBody,
@@ -205,6 +221,9 @@ async def request_otp(
     Send a one-time verification code to the voter's email.
     Always returns 200 {"sent": true} to prevent email enumeration.
     """
+    # Fire-and-forget cleanup of expired OTPs — doesn't block the request.
+    asyncio.create_task(_cleanup_expired_otps())
+
     # Normalise email to lowercase for case-insensitive matching
     body = body.model_copy(update={"email": body.email.strip().lower()})
 
@@ -237,6 +256,11 @@ async def request_otp(
             # indefinitely by making a request just before each window expires.
             elapsed = (now_for_rate - rl_record.first_attempt_at.replace(tzinfo=UTC)).total_seconds()
             if elapsed < _OTP_RATE_LIMIT_WINDOW_SECONDS:
+                logger.warning(
+                    "otp_rate_limit_triggered",
+                    email=body.email,
+                    agm_id=str(body.general_meeting_id),
+                )
                 raise HTTPException(
                     status_code=429,
                     detail="Please wait before requesting another code",
@@ -287,18 +311,25 @@ async def request_otp(
         db.add(otp)
         await db.commit()
 
-        # 6. Upsert DB rate-limit record (reset window on each successful OTP issue)
+        # 6. Upsert DB rate-limit record (reset window on each successful OTP issue).
+        # Committed separately so the rate-limit row persists even if a later step
+        # rolls back — the session was already committed for the OTP above, so this
+        # commit is for the rate-limit upsert only (CRIT-2).
         now_rl = datetime.now(UTC)
         if not settings.testing_mode:
             await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
+            await db.commit()
 
-        # 7. Send the OTP email (skipped when skip_email=True, e.g. in E2E test helpers)
-        if not body.skip_email:
+        # 7. Send the OTP email (skipped when skip_email=True in testing_mode only).
+        # skip_email is silently ignored in non-testing environments (RR5-03).
+        skip_email_effective = body.skip_email and settings.testing_mode
+        if not skip_email_effective:
             try:
                 await send_otp_email(
                     to_email=body.email,
                     meeting_title=meeting.title,
                     code=code,
+                    db=db,
                 )
             except Exception as exc:
                 # Log the SMTP failure but still return 200 — the OTP is already stored
@@ -312,16 +343,34 @@ async def request_otp(
         if not settings.testing_mode:
             now_rl = datetime.now(UTC)
             await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
+            await db.commit()
 
     return OtpRequestResponse(sent=True)
 
 
 @router.post("/auth/logout")
-async def logout(response: Response) -> dict:
+async def logout(
+    response: Response,
+    agm_session: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
     """
-    Clear the voter session cookie.  The frontend calls this instead of
-    localStorage.removeItem() to end a session.
+    Clear the voter session cookie and delete the server-side SessionRecord row.
+
+    The frontend calls this to end a session. Logout is idempotent — an expired,
+    invalid, or absent cookie still results in a 200 with the cookie cleared.
     """
+    if agm_session:
+        try:
+            raw_token = _unsign_token(agm_session)
+            await db.execute(
+                delete(SessionRecord).where(
+                    SessionRecord.session_token == raw_token
+                )
+            )
+            await db.commit()
+        except HTTPException:
+            pass  # Expired/invalid signature — no DB row to delete; still clear cookie
     response.delete_cookie(key="agm_session", path="/api")
     return {"ok": True}
 
@@ -368,11 +417,22 @@ async def verify_auth(
     otp = otp_result.scalar_one_or_none()
 
     if otp is None:
+        # Perform a timing-safe comparison against a dummy value so that
+        # "no OTP row found" and "OTP found but code wrong" take the same
+        # wall-clock time — eliminating a timing oracle that could reveal
+        # whether a submitted OTP code exists in the DB (RR3-16).
+        hmac.compare_digest(request.code, request.code)
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired verification code",
         )
     if not hmac.compare_digest(otp.code, request.code):
+        logger.warning(
+            "otp_verify_failed",
+            email=request.email,
+            agm_id=str(request.general_meeting_id),
+            reason="code_mismatch",
+        )
         raise HTTPException(
             status_code=401,
             detail="Invalid or expired verification code",
@@ -421,11 +481,22 @@ async def verify_auth(
         value=token,
         httponly=True,
         secure=not settings.testing_mode,
-        samesite="strict",
-        max_age=86400,
+        # SameSite=Lax (not Strict): the voter's first request after clicking the OTP email
+        # link is a top-level cross-site navigation; Strict would drop the cookie on that
+        # request, forcing a second round-trip.  Lax is safe here because no state-changing
+        # GET endpoints exist and all POST endpoints require a valid session token — so
+        # CSRF via cross-site form submission cannot succeed (security deviation: SD-001).
+        samesite="lax",
+        max_age=_TOKEN_MAX_AGE_SECONDS,  # matches SESSION_DURATION (RR3-36)
         path="/api",
     )
 
+    logger.info(
+        "auth_login_success",
+        email=request.email,
+        agm_id=str(request.general_meeting_id),
+        lot_count=len(lots),
+    )
     return AuthVerifyResponse(
         lots=lots,
         voter_email=request.email,
@@ -435,7 +506,8 @@ async def verify_auth(
         building_name=building.name,
         meeting_title=meeting.title,
         unvoted_visible_count=unvoted_visible_count,
-        session_token=token,
+        # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat. (RR5-02)
+        session_token="",
     )
 
 
@@ -456,6 +528,9 @@ async def restore_session(
 
     Returns 401 if the token is invalid, expired, or the AGM is closed.
     """
+    # Fire-and-forget cleanup of expired sessions — doesn't block the request.
+    asyncio.create_task(_cleanup_expired_sessions())
+
     # Resolve the token: cookie takes priority over request body
     token_to_use = agm_session or request.session_token
 
@@ -512,13 +587,10 @@ async def restore_session(
     )
     building = building_result.scalar_one()
 
-    # 6. Re-issue a new session token and set the cookie
-    new_token = await create_session(
-        db=db,
-        voter_email=voter_email,
-        building_id=building_id,
-        general_meeting_id=request.general_meeting_id,
-    )
+    # 6. Extend the existing session (update expires_at) instead of inserting a new row.
+    #    This avoids session row proliferation — each voter has at most one active
+    #    SessionRecord at any time.  The raw token is reused; only expires_at is updated.
+    new_token = await extend_session(db=db, session_record=session_record)
     await db.commit()
 
     response.set_cookie(
@@ -526,8 +598,13 @@ async def restore_session(
         value=new_token,
         httponly=True,
         secure=not settings.testing_mode,
-        samesite="strict",
-        max_age=86400,
+        # SameSite=Lax (not Strict): the voter's first request after clicking the OTP email
+        # link is a top-level cross-site navigation; Strict would drop the cookie on that
+        # request, forcing a second round-trip.  Lax is safe here because no state-changing
+        # GET endpoints exist and all POST endpoints require a valid session token — so
+        # CSRF via cross-site form submission cannot succeed (security deviation: SD-001).
+        samesite="lax",
+        max_age=_TOKEN_MAX_AGE_SECONDS,  # matches SESSION_DURATION (RR3-36)
         path="/api",
     )
 
@@ -538,7 +615,8 @@ async def restore_session(
         building_name=building.name,
         meeting_title=meeting.title,
         unvoted_visible_count=unvoted_visible_count,
-        session_token=new_token,
+        # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat. (RR5-02)
+        session_token="",
     )
 
 

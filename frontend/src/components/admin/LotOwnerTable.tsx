@@ -15,6 +15,7 @@ interface LotOwnerTableProps {
 }
 
 function FinancialPositionBadge({ position }: { position: string }) {
+  // US-ACC-04: status conveyed by text label AND colour (never colour alone)
   if (position === "in_arrear") {
     return (
       <span
@@ -22,17 +23,18 @@ function FinancialPositionBadge({ position }: { position: string }) {
           display: "inline-block",
           padding: "2px 8px",
           borderRadius: "12px",
-          background: "#f59e0b",
-          color: "#0C1B2E",
+          background: "var(--amber-bg)",
+          color: "var(--amber)",
           fontSize: "0.75rem",
           fontWeight: 600,
+          border: "1px solid var(--amber)",
         }}
       >
         In Arrear
       </span>
     );
   }
-  return <span style={{ color: "var(--text-muted, #888)", fontSize: "0.875rem" }}>Normal</span>;
+  return <span style={{ color: "var(--text-muted)", fontSize: "0.875rem" }}>Normal</span>;
 }
 
 function compareFinancialPosition(a: string, b: string): number {
@@ -161,7 +163,16 @@ export default function LotOwnerTable({ lotOwners, onEdit, isLoading }: LotOwner
                 <td style={{ fontFamily: "'Overpass Mono', monospace", fontSize: "0.875rem" }}>
                   {lo.lot_number}
                 </td>
-                <td>{(lo.emails ?? []).join(", ")}</td>
+                <td>
+                  {(lo.owner_emails ?? []).map((e) => {
+                    const emailName = `${e.given_name ?? ""} ${e.surname ?? ""}`.trim();
+                    return (
+                      <div key={e.id} style={{ fontSize: "0.875rem" }}>
+                        {emailName ? `${emailName} <${e.email ?? "—"}>` : (e.email ?? "—")}
+                      </div>
+                    );
+                  })}
+                </td>
                 <td style={{ fontFamily: "'Overpass Mono', monospace", fontSize: "0.875rem" }}>
                   {lo.unit_entitlement}
                 </td>
@@ -169,7 +180,11 @@ export default function LotOwnerTable({ lotOwners, onEdit, isLoading }: LotOwner
                   <FinancialPositionBadge position={lo.financial_position} />
                 </td>
                 <td style={{ fontSize: "0.875rem", color: lo.proxy_email ? "inherit" : "var(--text-muted, #888)" }}>
-                  {lo.proxy_email ?? "None"}
+                  {lo.proxy_email
+                    ? (lo.proxy_given_name || lo.proxy_surname)
+                        ? `${lo.proxy_given_name ?? ""} ${lo.proxy_surname ?? ""}`.trim() + ` (${lo.proxy_email})`
+                        : lo.proxy_email
+                    : "None"}
                 </td>
                 <td>
                   <button className="btn btn--secondary" style={{ padding: "5px 14px", fontSize: "0.8rem" }} onClick={() => onEdit(lo)}>

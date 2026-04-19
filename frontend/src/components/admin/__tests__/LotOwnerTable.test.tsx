@@ -9,19 +9,29 @@ const lotOwners: LotOwner[] = [
     id: "lo1",
     building_id: "b1",
     lot_number: "1A",
+    given_name: "Alice",
+    surname: "Smith",
+    owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" }],
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
     financial_position: "normal",
     proxy_email: null,
+    proxy_given_name: null,
+    proxy_surname: null,
   },
   {
     id: "lo2",
     building_id: "b1",
     lot_number: "2B",
+    given_name: null,
+    surname: null,
+    owner_emails: [{ id: "em2", email: "owner2@example.com", given_name: null, surname: null }],
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
     financial_position: "in_arrear",
     proxy_email: "proxy@example.com",
+    proxy_given_name: null,
+    proxy_surname: null,
   },
 ];
 
@@ -29,7 +39,8 @@ describe("LotOwnerTable", () => {
   it("renders lot owners", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("1A")).toBeInTheDocument();
-    expect(screen.getByText("owner1@example.com")).toBeInTheDocument();
+    // Email column now shows "Name <email>" when name is present
+    expect(screen.getByText("Alice Smith <owner1@example.com>")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByText("2B")).toBeInTheDocument();
   });
@@ -70,6 +81,29 @@ describe("LotOwnerTable", () => {
     expect(screen.getByText("Actions")).toBeInTheDocument();
   });
 
+  it("does not render a Name column header", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    expect(screen.queryByRole("button", { name: /Name/ })).not.toBeInTheDocument();
+  });
+
+  it("renders exactly 6 column headers (Lot Number, Email, Unit Entitlement, Financial Position, Proxy, Actions)", () => {
+    render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
+    const ths = document.querySelectorAll("thead th");
+    expect(ths).toHaveLength(6);
+  });
+
+  it("loading row colSpan is 6", () => {
+    const { container } = render(<LotOwnerTable lotOwners={[]} onEdit={() => {}} isLoading={true} />);
+    const td = container.querySelector("tbody td");
+    expect(td).toHaveAttribute("colSpan", "6");
+  });
+
+  it("empty state row colSpan is 6", () => {
+    const { container } = render(<LotOwnerTable lotOwners={[]} onEdit={() => {}} />);
+    const td = container.querySelector("tbody td");
+    expect(td).toHaveAttribute("colSpan", "6");
+  });
+
   it("shows In Arrear badge for in_arrear lot owner", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("In Arrear")).toBeInTheDocument();
@@ -80,7 +114,7 @@ describe("LotOwnerTable", () => {
     expect(screen.getByText("Normal")).toBeInTheDocument();
   });
 
-  it("shows proxy email when proxy is nominated", () => {
+  it("shows proxy email when proxy is nominated (no name)", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("proxy@example.com")).toBeInTheDocument();
   });
@@ -88,6 +122,32 @@ describe("LotOwnerTable", () => {
   it("shows None when no proxy is nominated", () => {
     render(<LotOwnerTable lotOwners={lotOwners} onEdit={() => {}} />);
     expect(screen.getByText("None")).toBeInTheDocument();
+  });
+
+  it("shows 'Name (email)' format when proxy has name and email", () => {
+    const loWithNamedProxy: LotOwner[] = [
+      {
+        ...lotOwners[0],
+        proxy_email: "proxy@example.com",
+        proxy_given_name: "Jane",
+        proxy_surname: "Doe",
+      },
+    ];
+    render(<LotOwnerTable lotOwners={loWithNamedProxy} onEdit={() => {}} />);
+    expect(screen.getByText("Jane Doe (proxy@example.com)")).toBeInTheDocument();
+  });
+
+  it("shows just email when proxy has email but no name", () => {
+    const loWithUnnamedProxy: LotOwner[] = [
+      {
+        ...lotOwners[0],
+        proxy_email: "proxy@example.com",
+        proxy_given_name: null,
+        proxy_surname: null,
+      },
+    ];
+    render(<LotOwnerTable lotOwners={loWithUnnamedProxy} onEdit={() => {}} />);
+    expect(screen.getByText("proxy@example.com")).toBeInTheDocument();
   });
 
   // --- Sort: default state ---
@@ -213,8 +273,16 @@ describe("LotOwnerTable", () => {
     const user = userEvent.setup();
     // Provide reversed order to confirm sorting actually works
     const emailSortLots: LotOwner[] = [
-      { ...lotOwners[1], emails: ["zz@example.com"] }, // 'zz' would sort after 'aa'
-      { ...lotOwners[0], emails: ["aa@example.com"] },
+      {
+        ...lotOwners[1],
+        emails: ["zz@example.com"],
+        owner_emails: [{ id: "em-zz", email: "zz@example.com", given_name: null, surname: null }],
+      }, // 'zz' would sort after 'aa'
+      {
+        ...lotOwners[0],
+        emails: ["aa@example.com"],
+        owner_emails: [{ id: "em-aa", email: "aa@example.com", given_name: null, surname: null }],
+      },
     ];
     render(<LotOwnerTable lotOwners={emailSortLots} onEdit={() => {}} />);
     const btn = screen.getByRole("button", { name: /Email/ });
@@ -229,8 +297,16 @@ describe("LotOwnerTable", () => {
   it("clicking Email twice sorts by email descending", async () => {
     const user = userEvent.setup();
     const emailSortLots: LotOwner[] = [
-      { ...lotOwners[0], emails: ["aa@example.com"] },
-      { ...lotOwners[1], emails: ["zz@example.com"] },
+      {
+        ...lotOwners[0],
+        emails: ["aa@example.com"],
+        owner_emails: [{ id: "em-aa", email: "aa@example.com", given_name: null, surname: null }],
+      },
+      {
+        ...lotOwners[1],
+        emails: ["zz@example.com"],
+        owner_emails: [{ id: "em-zz", email: "zz@example.com", given_name: null, surname: null }],
+      },
     ];
     render(<LotOwnerTable lotOwners={emailSortLots} onEdit={() => {}} />);
     const btn = screen.getByRole("button", { name: /Email/ });
@@ -249,10 +325,15 @@ describe("LotOwnerTable", () => {
       id: "lo3",
       building_id: "b1",
       lot_number: "3C",
+      given_name: null,
+      surname: null,
+      owner_emails: [],
       emails: [],
       unit_entitlement: 50,
       financial_position: "normal",
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     };
     render(<LotOwnerTable lotOwners={[lotOwners[0], noEmailLot]} onEdit={() => {}} />);
     const btn = screen.getByRole("button", { name: /Email/ });
@@ -297,8 +378,8 @@ describe("LotOwnerTable", () => {
   it("proxy sort breaks ties by proxy email value", async () => {
     const user = userEvent.setup();
     const twoProxyLots: LotOwner[] = [
-      { ...lotOwners[0], proxy_email: "zebra@proxy.com" },
-      { ...lotOwners[1], proxy_email: "apple@proxy.com" },
+      { ...lotOwners[0], proxy_email: "zebra@proxy.com", proxy_given_name: null, proxy_surname: null },
+      { ...lotOwners[1], proxy_email: "apple@proxy.com", proxy_given_name: null, proxy_surname: null },
     ];
     render(<LotOwnerTable lotOwners={twoProxyLots} onEdit={() => {}} />);
     const btn = screen.getByRole("button", { name: /Proxy/ });
@@ -317,10 +398,15 @@ describe("LotOwnerTable", () => {
       id: `lo${i + 1}`,
       building_id: "b1",
       lot_number: `${String(i + 1).padStart(3, "0")}`,
+      given_name: null,
+      surname: null,
+      owner_emails: [] as LotOwner["owner_emails"],
       emails: [],
       unit_entitlement: i + 1,
       financial_position: "normal" as const,
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     }));
     render(<LotOwnerTable lotOwners={manyLotOwners} onEdit={() => {}} />);
     // Navigate to page 2
@@ -341,14 +427,19 @@ describe("LotOwnerTable", () => {
   });
 
   it("shows pagination controls at both top and bottom when there are more than 25 lot owners", () => {
-    const manyLotOwners: typeof lotOwners = Array.from({ length: 26 }, (_, i) => ({
+    const manyLotOwners: LotOwner[] = Array.from({ length: 26 }, (_, i) => ({
       id: `lo${i + 1}`,
       building_id: "b1",
       lot_number: `${i + 1}`,
+      given_name: null,
+      surname: null,
+      owner_emails: [{ id: `em${i + 1}`, email: `owner${i + 1}@example.com`, given_name: null, surname: null }],
       emails: [`owner${i + 1}@example.com`],
       unit_entitlement: 100,
       financial_position: "normal" as const,
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     }));
     render(<LotOwnerTable lotOwners={manyLotOwners} onEdit={() => {}} />);
     const prevButtons = screen.getAllByRole("button", { name: "Previous page" });
@@ -359,14 +450,19 @@ describe("LotOwnerTable", () => {
 
   it("navigating to page 2 via top Next button shows lot owner 26", async () => {
     const user = userEvent.setup();
-    const manyLotOwners: typeof lotOwners = Array.from({ length: 26 }, (_, i) => ({
+    const manyLotOwners: LotOwner[] = Array.from({ length: 26 }, (_, i) => ({
       id: `lo${i + 1}`,
       building_id: "b1",
       lot_number: `lot-${i + 1}`,
+      given_name: null,
+      surname: null,
+      owner_emails: [{ id: `em${i + 1}`, email: `owner${i + 1}@example.com`, given_name: null, surname: null }],
       emails: [`owner${i + 1}@example.com`],
       unit_entitlement: 100,
       financial_position: "normal" as const,
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     }));
     const { container } = render(<LotOwnerTable lotOwners={manyLotOwners} onEdit={() => {}} />);
     // Page 1 shows 25 rows
@@ -385,9 +481,9 @@ describe("LotOwnerTable", () => {
   it("sorts lot numbers naturally so '10' comes after '9', not before '2'", async () => {
     const user = userEvent.setup();
     const numericLots: LotOwner[] = [
-      { id: "a", building_id: "b1", lot_number: "10", emails: [], unit_entitlement: 1, financial_position: "normal", proxy_email: null },
-      { id: "b", building_id: "b1", lot_number: "9", emails: [], unit_entitlement: 2, financial_position: "normal", proxy_email: null },
-      { id: "c", building_id: "b1", lot_number: "2", emails: [], unit_entitlement: 3, financial_position: "normal", proxy_email: null },
+      { id: "a", building_id: "b1", lot_number: "10", given_name: null, surname: null, owner_emails: [], emails: [], unit_entitlement: 1, financial_position: "normal", proxy_email: null, proxy_given_name: null, proxy_surname: null },
+      { id: "b", building_id: "b1", lot_number: "9", given_name: null, surname: null, owner_emails: [], emails: [], unit_entitlement: 2, financial_position: "normal", proxy_email: null, proxy_given_name: null, proxy_surname: null },
+      { id: "c", building_id: "b1", lot_number: "2", given_name: null, surname: null, owner_emails: [], emails: [], unit_entitlement: 3, financial_position: "normal", proxy_email: null, proxy_given_name: null, proxy_surname: null },
     ];
     render(<LotOwnerTable lotOwners={numericLots} onEdit={() => {}} />);
     // Default sort is lot_number asc — numeric order: 2, 9, 10

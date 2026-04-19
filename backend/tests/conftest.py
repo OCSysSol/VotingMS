@@ -18,6 +18,11 @@ import os
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime, timedelta
 
+# US-IAS-05: Enable testing mode so the CSRF middleware is skipped in tests.
+# This must be set BEFORE any app module is imported so the Settings singleton
+# picks up the env var.  The CSRF middleware skips its check when testing_mode=True.
+os.environ.setdefault("TESTING_MODE", "true")
+
 import asyncpg
 import openpyxl
 import pytest
@@ -159,6 +164,105 @@ async def db_session(db_conn: AsyncConnection) -> AsyncGenerator[AsyncSession, N
         yield session
 
 
+@pytest.fixture(autouse=True)
+def reset_rate_limiters():
+    """Reset all in-memory rate limiters before each test (RR3-33, RR4-31).
+
+    The rate limiters are module-level singletons. Without a reset, tests that
+    call the same endpoint multiple times could accidentally trigger 429 responses
+    and fail, or interfere with each other when running in parallel.
+    """
+    from app.rate_limiter import (
+        admin_close_limiter,
+        admin_import_limiter,
+        ballot_submit_limiter,
+        public_limiter,
+    )
+    from app.routers.admin import _smtp_test_rate_limiter
+    ballot_submit_limiter._timestamps.clear()
+    public_limiter._timestamps.clear()
+    admin_import_limiter._timestamps.clear()
+    admin_close_limiter._timestamps.clear()
+    _smtp_test_rate_limiter.reset("smtp_test")
+    yield
+    ballot_submit_limiter._timestamps.clear()
+    public_limiter._timestamps.clear()
+    admin_import_limiter._timestamps.clear()
+    admin_close_limiter._timestamps.clear()
+    _smtp_test_rate_limiter.reset("smtp_test")
+
+
+@pytest.fixture(autouse=True)
+def reset_config_cache():
+    """Reset the module-level tenant config cache before and after each test.
+
+    The cache is a module-level singleton.  Without a reset, a cached value from
+    one test leaks into the next test and causes stale-data assertion failures.
+    """
+    from app.services import config_service
+    config_service._config_cache.config = None
+    config_service._config_cache.cached_at = None
+    yield
+    config_service._config_cache.config = None
+    config_service._config_cache.cached_at = None
+
+
+@pytest.fixture(autouse=True)
+def patch_parallel_lot_lookup(db_session: AsyncSession):
+    """Patch the parallel lot-lookup helpers in auth_service to use the test session.
+
+    _load_direct_lot_owner_ids and _load_proxy_lot_owner_ids use AsyncSessionLocal()
+    to open separate sessions for concurrent execution.  In tests the test data is
+    only flushed (not committed) inside db_session's transaction, so a separate
+    connection would see no data.  Patching both helpers to run their queries on
+    db_session ensures they see the same test data as the rest of the test suite.
+    """
+    import uuid
+    from unittest.mock import patch
+    from sqlalchemy import select
+    from app.models.lot_owner import LotOwner
+    from app.models.lot_owner_email import LotOwnerEmail
+    from app.models.lot_proxy import LotProxy
+
+    async def _direct_ids_via_test_session(voter_email: str, building_id: uuid.UUID) -> set[uuid.UUID]:
+        r = await db_session.execute(
+            select(LotOwnerEmail.lot_owner_id)
+            .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
+            .where(
+                LotOwnerEmail.email.isnot(None),
+                LotOwnerEmail.email == voter_email,
+                LotOwner.building_id == building_id,
+            )
+        )
+        return {row[0] for row in r.all()}
+
+    async def _proxy_ids_via_test_session(voter_email: str, building_id: uuid.UUID) -> set[uuid.UUID]:
+        r = await db_session.execute(
+            select(LotProxy.lot_owner_id)
+            .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
+            .where(
+                LotProxy.proxy_email == voter_email,
+                LotOwner.building_id == building_id,
+            )
+        )
+        return {row[0] for row in r.all()}
+
+    with patch(
+        "app.routers.auth._load_direct_lot_owner_ids",
+        side_effect=_direct_ids_via_test_session,
+    ), patch(
+        "app.routers.auth._load_proxy_lot_owner_ids",
+        side_effect=_proxy_ids_via_test_session,
+    ), patch(
+        "app.routers.voting._load_direct_lot_owner_ids",
+        side_effect=_direct_ids_via_test_session,
+    ), patch(
+        "app.routers.voting._load_proxy_lot_owner_ids",
+        side_effect=_proxy_ids_via_test_session,
+    ):
+        yield
+
+
 @pytest.fixture
 def app(db_session: AsyncSession):
     """
@@ -228,9 +332,15 @@ def closing_dt() -> datetime:
 
 @pytest_asyncio.fixture
 async def client(app):
-    """HTTP client that shares the test db_session with the app (via conftest app fixture)."""
+    """HTTP client that shares the test db_session with the app (via conftest app fixture).
+
+    Includes X-Requested-With header by default so all tests pass the CSRF check
+    (US-IAS-05 CSRFMiddleware requires this header on state-changing requests).
+    """
     async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        headers={"X-Requested-With": "XMLHttpRequest"},
     ) as ac:
         yield ac
 

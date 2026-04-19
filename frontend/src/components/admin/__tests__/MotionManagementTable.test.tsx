@@ -49,6 +49,7 @@ function makeMotion(
     is_visible: true,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
     tally: {
       yes: { voter_count: 0, entitlement_sum: 0 },
       no: { voter_count: 0, entitlement_sum: 0 },
@@ -465,11 +466,43 @@ describe("MotionManagementTable", () => {
     expect(screen.queryByText("Failed to delete motion")).not.toBeInTheDocument();
   });
 
-  // --- Multi-choice motion type badge ---
+  // --- Multi-choice motion type badge (RR3-48) ---
 
-  it("shows Multi-Choice badge with option count for multi_choice motion", () => {
-    const MC_MOTION = makeMotion("mc1", "Board Election", 4, {
-      motion_type: "multi_choice",
+  it("shows General type badge for a general multi-choice motion", () => {
+    const MC_GENERAL = makeMotion("mc1", "Board Election", 4, {
+      motion_type: "general",
+      is_multi_choice: true,
+      option_limit: 2,
+      options: [
+        { id: "opt-1", text: "Alice", display_order: 1 },
+        { id: "opt-2", text: "Bob", display_order: 2 },
+      ],
+    });
+    renderTable({ motions: [MC_GENERAL] });
+    const typeBadge = screen.getByLabelText("Motion type: General");
+    expect(typeBadge).toHaveClass("motion-type-badge--general");
+    expect(typeBadge).toHaveTextContent("General");
+  });
+
+  it("shows Special type badge for a special multi-choice motion", () => {
+    const MC_SPECIAL = makeMotion("mc2", "Special Election", 5, {
+      motion_type: "special",
+      is_multi_choice: true,
+      option_limit: 1,
+      options: [
+        { id: "opt-1", text: "Alice", display_order: 1 },
+      ],
+    });
+    renderTable({ motions: [MC_SPECIAL] });
+    const typeBadge = screen.getByLabelText("Motion type: Special");
+    expect(typeBadge).toHaveClass("motion-type-badge--special");
+    expect(typeBadge).toHaveTextContent("Special");
+  });
+
+  it("shows secondary multi-choice indicator with option count", () => {
+    const MC_MOTION = makeMotion("mc3", "Board Election", 6, {
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: 2,
       options: [
         { id: "opt-1", text: "Alice", display_order: 1 },
@@ -478,20 +511,94 @@ describe("MotionManagementTable", () => {
       ],
     });
     renderTable({ motions: [MC_MOTION] });
-    const badge = screen.getByLabelText("Motion type: Multi-Choice");
-    expect(badge).toHaveClass("motion-type-badge--multi_choice");
-    expect(badge).toHaveTextContent("Multi-Choice (3 options)");
+    const indicator = screen.getByLabelText("Multi-choice motion");
+    expect(indicator).toHaveClass("motion-type-badge--multi_choice");
+    expect(indicator).toHaveTextContent("Multi-Choice (3)");
   });
 
-  it("shows Multi-Choice badge without count when options is empty", () => {
-    const MC_MOTION_NO_OPTS = makeMotion("mc2", "Election", 5, {
-      motion_type: "multi_choice",
+  it("shows secondary multi-choice indicator without count when options is empty", () => {
+    const MC_NO_OPTS = makeMotion("mc4", "Election", 7, {
+      motion_type: "general",
+      is_multi_choice: true,
       option_limit: 1,
       options: [],
     });
-    renderTable({ motions: [MC_MOTION_NO_OPTS] });
-    const badge = screen.getByLabelText("Motion type: Multi-Choice");
-    expect(badge).toHaveTextContent("Multi-Choice");
-    expect(badge).not.toHaveTextContent("options");
+    renderTable({ motions: [MC_NO_OPTS] });
+    const indicator = screen.getByLabelText("Multi-choice motion");
+    expect(indicator).toHaveClass("motion-type-badge--multi_choice");
+    expect(indicator).toHaveTextContent("Multi-Choice");
+    expect(indicator).not.toHaveTextContent("(");
+  });
+
+  it("does not show multi-choice indicator for standard single-choice motions", () => {
+    renderTable({ motions: [MOTION_A] });
+    expect(screen.queryByLabelText(/Voting mechanism/)).not.toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Close Motion button (US-PMW-01)
+  // ---------------------------------------------------------------------------
+
+  it("shows Close Motion button when onCloseMotion prop is provided and motion is not closed", () => {
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [MOTION_A], onCloseMotion });
+    expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    expect(screen.getByTestId("close-motion-btn-m1")).toHaveTextContent("Close Motion");
+  });
+
+  it("shows Closed badge instead of button when motion has voting_closed_at set", () => {
+    const closedMotion = makeMotion("m-closed", "Closed Motion", 1, {
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    });
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [closedMotion], onCloseMotion });
+    expect(screen.getByTestId("motion-voting-closed-badge-m-closed")).toBeInTheDocument();
+    expect(screen.queryByTestId("close-motion-btn-m-closed")).not.toBeInTheDocument();
+  });
+
+  it("does not show Close Motion button when onCloseMotion prop is not provided", () => {
+    renderTable({ motions: [MOTION_A] });
+    expect(screen.queryByTestId("close-motion-btn-m1")).not.toBeInTheDocument();
+  });
+
+  it("calls onCloseMotion with motion id when Close Motion button is clicked", async () => {
+    const user = userEvent.setup();
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [MOTION_A], onCloseMotion });
+    await user.click(screen.getByTestId("close-motion-btn-m1"));
+    expect(onCloseMotion).toHaveBeenCalledWith("m1");
+  });
+
+  it("disables Close Motion button when motion is hidden", () => {
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [HIDDEN_A], onCloseMotion });
+    expect(screen.getByTestId("close-motion-btn-m-h1")).toBeDisabled();
+  });
+
+  it("shows Closing… when pendingCloseMotionId matches the motion", () => {
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [MOTION_A], onCloseMotion, pendingCloseMotionId: "m1" });
+    expect(screen.getByTestId("close-motion-btn-m1")).toHaveTextContent("Closing…");
+    expect(screen.getByTestId("close-motion-btn-m1")).toBeDisabled();
+  });
+
+  it("shows closeMotionErrors for a motion", () => {
+    const onCloseMotion = vi.fn();
+    renderTable({
+      motions: [MOTION_A],
+      onCloseMotion,
+      closeMotionErrors: { m1: "Cannot close a hidden motion" },
+    });
+    expect(screen.getByTestId("close-motion-error-m1")).toHaveTextContent("Cannot close a hidden motion");
+  });
+
+  it("disables visibility toggle when motion has voting_closed_at set", () => {
+    const closedMotion = makeMotion("m-vclosed", "Voting Closed Motion", 1, {
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    });
+    const onCloseMotion = vi.fn();
+    renderTable({ motions: [closedMotion], onCloseMotion });
+    const checkbox = screen.getByRole("checkbox");
+    expect(checkbox).toBeDisabled();
   });
 });

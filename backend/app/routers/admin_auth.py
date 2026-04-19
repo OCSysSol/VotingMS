@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 import bcrypt as _bcrypt_lib
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -26,6 +26,22 @@ router = APIRouter(tags=["admin-auth"])
 # ---------------------------------------------------------------------------
 _LOGIN_MAX_FAILURES = 5
 _LOGIN_WINDOW_SECONDS = 900  # 15 minutes
+
+
+def get_client_ip(request: Request) -> str:
+    """Return the real client IP address, honouring X-Forwarded-For from Vercel proxy.
+
+    Vercel sets X-Forwarded-For to the originating client IP before forwarding the
+    request to the Lambda.  Reading request.client.host would return the Vercel proxy
+    IP instead of the real client, causing all rate-limit records to share a single
+    IP and making rate-limiting ineffective (RR3-15).
+
+    Falls back to request.client.host when X-Forwarded-For is absent (e.g. local dev).
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 def _verify_admin_password(plain: str, stored: str) -> bool:
@@ -59,21 +75,25 @@ async def admin_login(
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    ip = request.client.host if request.client else "unknown"  # pragma: no cover — client is always set in tests and production
+    ip = get_client_ip(request)
 
-    # --- Rate-limit check ---
+    # --- Rate-limit check (atomic: SELECT FOR UPDATE + write in same transaction) ---
+    # SELECT FOR UPDATE locks the row so concurrent login requests for the same IP
+    # cannot both pass the rate-limit check before either records a failure (RR3-13).
     now = datetime.now(UTC)
     window_start = now - timedelta(seconds=_LOGIN_WINDOW_SECONDS)
 
     attempt_result = await db.execute(
-        select(AdminLoginAttempt).where(AdminLoginAttempt.ip_address == ip)
+        select(AdminLoginAttempt)
+        .where(AdminLoginAttempt.ip_address == ip)
+        .with_for_update()
     )
     attempt_record = attempt_result.scalar_one_or_none()
 
     if attempt_record is not None:
         # Expire the record if the window has passed
         if attempt_record.first_attempt_at.replace(tzinfo=UTC) < window_start:
-            await db.delete(attempt_record)
+            await db.execute(sql_delete(AdminLoginAttempt).where(AdminLoginAttempt.id == attempt_record.id))
             await db.flush()
             attempt_record = None
 
@@ -93,12 +113,17 @@ async def admin_login(
     try:
         valid_username = hmac.compare_digest(data.username, settings.admin_username)
         valid_password = _verify_admin_password(data.password, settings.admin_password)
-    except ValueError as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+    except ValueError:
+        # ADMIN_PASSWORD is not a bcrypt hash — raised by _verify_admin_password.
+        # Return a generic 500 so the raw error message is never sent to the client
+        # (LOW-7). The startup validator in config.py catches this in non-development
+        # environments; this handler is the last-resort safety net for dev deployments.
+        raise HTTPException(status_code=500, detail="Server configuration error")
     valid = valid_username and valid_password
 
     if not valid:
-        # Record the failed attempt
+        # Record the failed attempt — in the same transaction as the SELECT FOR UPDATE
+        # above, so the check and the record creation are atomic (RR3-13).
         if attempt_record is None:
             db.add(
                 AdminLoginAttempt(
@@ -117,11 +142,12 @@ async def admin_login(
 
     # --- Successful login: reset failure counter ---
     if attempt_record is not None:
-        await db.delete(attempt_record)
+        await db.execute(sql_delete(AdminLoginAttempt).where(AdminLoginAttempt.id == attempt_record.id))
         await db.flush()
     await db.commit()
 
     request.session["admin"] = True
+    request.session["admin_username"] = data.username
     return {"ok": True}
 
 
@@ -143,13 +169,21 @@ class HashPasswordRequest(BaseModel):
 
 
 @router.post("/auth/hash-password")
-async def hash_password(data: HashPasswordRequest) -> dict:
-    """Dev-only helper: returns the bcrypt hash for a given plaintext password.
+async def hash_password(
+    data: HashPasswordRequest,
+    _admin: None = Depends(require_admin),
+) -> dict:
+    """Dev helper: returns the bcrypt hash for a given plaintext password.
 
-    Only available when ENVIRONMENT != "production" so this endpoint is never
-    reachable in a live deployment.
+    Only available in the development environment (MED-6). On demo, preview,
+    and production deployments the endpoint returns 404 so it cannot be used
+    even by an authenticated admin — preventing accidental exposure of the
+    hashing utility on shared environments.
+
+    On local development the require_admin dependency is still enforced
+    (admin session cookie required).
     """
-    if settings.environment == "production":
+    if settings.environment != "development":
         raise HTTPException(status_code=404, detail="Not found")
     hashed = _bcrypt_lib.hashpw(data.password.encode(), _bcrypt_lib.gensalt()).decode()
     return {"hash": hashed}

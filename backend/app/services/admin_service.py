@@ -5,18 +5,20 @@ from __future__ import annotations
 
 import csv
 import io
-import logging
 import uuid
+import zipfile
 from datetime import UTC, datetime, timezone
 
 import bleach
 import openpyxl
+from openpyxl.utils.exceptions import InvalidFileException
 
 from fastapi import HTTPException
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, literal, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.logging_config import get_logger
 from app.models import (
     GeneralMeeting,
     GeneralMeetingLotWeight,
@@ -38,6 +40,7 @@ from app.models import (
     get_effective_status,
 )
 from app.schemas.admin import (
+    AdminVoteEntryRequest,
     BuildingUpdate,
     GeneralMeetingCreate,
     LotOwnerCreate,
@@ -46,7 +49,7 @@ from app.schemas.admin import (
     MotionUpdateRequest,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def _sanitise_description(desc: str | None) -> str | None:
@@ -59,6 +62,23 @@ def _sanitise_description(desc: str | None) -> str | None:
 def _sanitise_option_text(text: str) -> str:
     """Strip all HTML tags from a motion option text."""
     return bleach.clean(text, tags=[], strip=True).strip()
+
+
+def _parse_name(raw: str) -> tuple[str | None, str | None]:
+    """Split a full name into (given_name, surname).
+
+    Last space-delimited token → surname.
+    Everything before → given_name.
+    Single token (e.g. company name) → (None, token).
+    Blank / whitespace-only → (None, None).
+    """
+    value = raw.strip()
+    if not value:
+        return None, None
+    parts = value.split()
+    if len(parts) == 1:
+        return None, parts[0]
+    return " ".join(parts[:-1]), parts[-1]
 
 
 # ---------------------------------------------------------------------------
@@ -105,30 +125,40 @@ async def import_buildings_from_csv(
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
+    # Bulk-load all matching buildings in a single query (N+1 fix).
+    all_names_lower = [row["building_name"].strip().lower() for row in rows]
+    bulk_result = await db.execute(
+        select(Building).where(func.lower(Building.name).in_(all_names_lower))
+    )
+    buildings_by_lower_name: dict[str, Building] = {
+        b.name.lower(): b for b in bulk_result.scalars().all()
+    }
+
     created = 0
     updated = 0
 
-    for row in rows:
-        building_name = row["building_name"].strip()
-        manager_email = row["manager_email"].strip()
+    try:
+        for row in rows:
+            building_name = row["building_name"].strip()
+            manager_email = row["manager_email"].strip()
 
-        # Case-insensitive lookup
-        result = await db.execute(
-            select(Building).where(
-                func.lower(Building.name) == func.lower(building_name)
-            )
-        )
-        existing = result.scalar_one_or_none()
+            existing = buildings_by_lower_name.get(building_name.lower())
 
-        if existing is None:
-            new_building = Building(name=building_name, manager_email=manager_email)
-            db.add(new_building)
-            created += 1
-        else:
-            existing.manager_email = manager_email
-            updated += 1
+            if existing is None:
+                new_building = Building(name=building_name, manager_email=manager_email)
+                db.add(new_building)
+                created += 1
+            else:
+                existing.manager_email = manager_email
+                updated += 1
 
-    await db.commit()
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent import conflict — please retry",
+        ) from exc
     return {"created": created, "updated": updated}
 
 
@@ -141,9 +171,10 @@ async def import_buildings_from_excel(
     Returns {"created": int, "updated": int}.
     Raises HTTPException 422 on validation errors.
     """
+    # RR4-26: Narrow exception catch to file-format errors only; re-raise unexpected ones.
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
-    except Exception as exc:
+    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
 
     ws = wb.worksheets[0]
@@ -206,29 +237,40 @@ async def import_buildings_from_excel(
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
+    # Bulk-load all matching buildings in a single query (N+1 fix).
+    all_names_lower = [r["building_name"].lower() for r in parsed]
+    bulk_result = await db.execute(
+        select(Building).where(func.lower(Building.name).in_(all_names_lower))
+    )
+    buildings_by_lower_name: dict[str, Building] = {
+        b.name.lower(): b for b in bulk_result.scalars().all()
+    }
+
     created = 0
     updated = 0
 
-    for row_data in parsed:
-        building_name = row_data["building_name"]
-        manager_email = row_data["manager_email"]
+    try:
+        for row_data in parsed:
+            building_name = row_data["building_name"]
+            manager_email = row_data["manager_email"]
 
-        result = await db.execute(
-            select(Building).where(
-                func.lower(Building.name) == func.lower(building_name)
-            )
-        )
-        existing = result.scalar_one_or_none()
+            existing = buildings_by_lower_name.get(building_name.lower())
 
-        if existing is None:
-            new_building = Building(name=building_name, manager_email=manager_email)
-            db.add(new_building)
-            created += 1
-        else:
-            existing.manager_email = manager_email
-            updated += 1
+            if existing is None:
+                new_building = Building(name=building_name, manager_email=manager_email)
+                db.add(new_building)
+                created += 1
+            else:
+                existing.manager_email = manager_email
+                updated += 1
 
-    await db.commit()
+        await db.commit()
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Concurrent import conflict — please retry",
+        ) from exc
     return {"created": created, "updated": updated}
 
 
@@ -319,32 +361,39 @@ async def archive_building(building_id: uuid.UUID, db: AsyncSession) -> Building
     )
     owners = list(owners_result.scalars().all())
 
-    for owner in owners:
-        # Get all emails for this lot owner
-        emails_result = await db.execute(
-            select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == owner.id)
+    # Batch-load emails for all owners to avoid O(N) queries (RR3-12).
+    owner_ids = [o.id for o in owners]
+    all_emails_result = await db.execute(
+        select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
+            LotOwnerEmail.lot_owner_id.in_(owner_ids)
         )
-        owner_emails = [r[0] for r in emails_result.all() if r[0]]
+    )
+    emails_by_owner_id: dict[uuid.UUID, list[str]] = {}
+    all_emails_flat: list[str] = []
+    for row in all_emails_result.all():
+        if row[1]:
+            emails_by_owner_id.setdefault(row[0], []).append(row[1])
+            all_emails_flat.append(row[1])
 
-        # Check if any of these emails appear in another non-archived building
-        found_in_other = False
-        for email in owner_emails:
-            other_result = await db.execute(
-                select(LotOwner)
-                .join(Building, LotOwner.building_id == Building.id)
-                .join(LotOwnerEmail, LotOwnerEmail.lot_owner_id == LotOwner.id)
-                .where(
-                    LotOwnerEmail.email == email,
-                    LotOwner.building_id != building_id,
-                    Building.is_archived == False,  # noqa: E712
-                )
-                .limit(1)
+    # Batch-check which emails appear in another non-archived building — one query
+    # instead of one query per (owner, email) pair (RR3-12).
+    emails_in_other_buildings: set[str] = set()
+    if all_emails_flat:
+        other_result = await db.execute(
+            select(LotOwnerEmail.email)
+            .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
+            .join(Building, LotOwner.building_id == Building.id)
+            .where(
+                LotOwnerEmail.email.in_(all_emails_flat),
+                LotOwner.building_id != building_id,
+                Building.is_archived == False,  # noqa: E712
             )
-            other = other_result.scalars().first()
-            if other is not None:
-                found_in_other = True
-                break
+        )
+        emails_in_other_buildings = {row[0] for row in other_result.all()}
 
+    for owner in owners:
+        owner_emails = emails_by_owner_id.get(owner.id, [])
+        found_in_other = any(email in emails_in_other_buildings for email in owner_emails)
         if not found_in_other:
             owner.is_archived = True
 
@@ -397,16 +446,51 @@ async def get_building_or_404(building_id: uuid.UUID, db: AsyncSession) -> Build
     return building
 
 
-async def _get_proxy_email(lot_owner_id: uuid.UUID, db: AsyncSession) -> str | None:
-    """Return the proxy_email for a lot owner, or None if no proxy is set."""
+async def _get_proxy_info(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict | None:
+    """Return {proxy_email, given_name, surname} for the lot owner's proxy, or None."""
     proxy_result = await db.execute(
-        select(LotProxy.proxy_email).where(LotProxy.lot_owner_id == lot_owner_id)
+        select(LotProxy.proxy_email, LotProxy.given_name, LotProxy.surname)
+        .where(LotProxy.lot_owner_id == lot_owner_id)
     )
     row = proxy_result.first()
-    return row[0] if row is not None else None
+    if row is None:
+        return None
+    return {"proxy_email": row[0], "given_name": row[1], "surname": row[2]}
 
 
-async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int = 100, offset: int = 0) -> list[dict]:
+async def count_lot_owners(building_id: uuid.UUID, db: AsyncSession) -> int:
+    result = await db.execute(
+        select(func.count()).select_from(LotOwner).where(
+            LotOwner.building_id == building_id,
+        )
+    )
+    return result.scalar_one()
+
+
+def _format_financial_position(fp: object) -> str:
+    """Return the string value of a FinancialPosition enum or pass-through a string."""
+    return fp.value if hasattr(fp, "value") else fp  # type: ignore[attr-defined]
+
+
+def _owner_email_to_dict(row: LotOwnerEmail) -> dict:
+    """Serialise a LotOwnerEmail ORM row to the owner_emails dict shape."""
+    return {
+        "id": row.id,
+        "email": row.email,
+        "given_name": row.given_name,
+        "surname": row.surname,
+    }
+
+
+async def _load_owner_emails_for_one(lot_owner_id: uuid.UUID, db: AsyncSession) -> list[dict]:
+    """Return owner_emails list for a single lot owner."""
+    result = await db.execute(
+        select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
+    )
+    return [_owner_email_to_dict(row) for row in result.scalars().all()]
+
+
+async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int = 20, offset: int = 0) -> list[dict]:
     await get_building_or_404(building_id, db)
     result = await db.execute(
         select(LotOwner).where(LotOwner.building_id == building_id).offset(offset).limit(limit)
@@ -420,39 +504,42 @@ async def list_lot_owners(building_id: uuid.UUID, db: AsyncSession, limit: int =
     owner_ids = [o.id for o in owners]
 
     emails_result = await db.execute(
-        select(LotOwnerEmail.lot_owner_id, LotOwnerEmail.email).where(
-            LotOwnerEmail.lot_owner_id.in_(owner_ids)
-        )
+        select(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id.in_(owner_ids))
     )
-    emails_by_owner: dict[uuid.UUID, list[str]] = {}
-    for row in emails_result.all():
-        if row[1] is not None:
-            emails_by_owner.setdefault(row[0], []).append(row[1])
+    owner_emails_by_owner: dict[uuid.UUID, list[dict]] = {}
+    for row in emails_result.scalars().all():
+        owner_emails_by_owner.setdefault(row.lot_owner_id, []).append(_owner_email_to_dict(row))
 
     proxies_result = await db.execute(
-        select(LotProxy.lot_owner_id, LotProxy.proxy_email).where(
+        select(LotProxy.lot_owner_id, LotProxy.proxy_email, LotProxy.given_name, LotProxy.surname).where(
             LotProxy.lot_owner_id.in_(owner_ids)
         )
     )
-    proxy_by_owner: dict[uuid.UUID, str | None] = {
-        row[0]: row[1] for row in proxies_result.all()
+    proxy_by_owner: dict[uuid.UUID, dict] = {
+        row[0]: {"proxy_email": row[1], "given_name": row[2], "surname": row[3]}
+        for row in proxies_result.all()
     }
 
     out = []
     for owner in owners:
+        proxy_info = proxy_by_owner.get(owner.id, {})
         out.append({
             "id": owner.id,
             "lot_number": owner.lot_number,
-            "emails": emails_by_owner.get(owner.id, []),
+            "given_name": owner.given_name,
+            "surname": owner.surname,
+            "owner_emails": owner_emails_by_owner.get(owner.id, []),
             "unit_entitlement": owner.unit_entitlement,
-            "financial_position": owner.financial_position.value if hasattr(owner.financial_position, "value") else owner.financial_position,
-            "proxy_email": proxy_by_owner.get(owner.id),
+            "financial_position": _format_financial_position(owner.financial_position),
+            "proxy_email": proxy_info.get("proxy_email"),
+            "proxy_given_name": proxy_info.get("given_name"),
+            "proxy_surname": proxy_info.get("surname"),
         })
     return out
 
 
 async def get_lot_owner(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict:
-    """Return a single lot owner by ID, including proxy_email."""
+    """Return a single lot owner by ID, including proxy info."""
     result = await db.execute(
         select(LotOwner).where(LotOwner.id == lot_owner_id)
     )
@@ -460,19 +547,20 @@ async def get_lot_owner(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict:
     if lot_owner is None:
         raise HTTPException(status_code=404, detail="Lot owner not found")
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
-    proxy_email = await _get_proxy_email(lot_owner_id, db)
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
-        "proxy_email": proxy_email,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
     }
 
 
@@ -534,9 +622,19 @@ async def import_lot_owners_from_csv(
 
     rows = list(reader)
 
+    # Determine name mode from available columns
+    if "given_name" in normalised_fieldnames and "surname" in normalised_fieldnames:
+        name_mode = "separate"
+    elif "name" in normalised_fieldnames:
+        name_mode = "name"
+    else:
+        name_mode = "none"
+
     errors: list[str] = []
     # Parse rows: group by lot_number
-    lot_data: dict[str, dict] = {}  # lot_number -> {unit_entitlement, financial_position, emails: set}
+    lot_data: dict[str, dict] = {}  # lot_number -> {unit_entitlement, financial_position, email_entries: list}
+    # Track row numbers seen per lot_number to detect duplicates (RR3-31)
+    lot_number_rows: dict[str, list[int]] = {}
 
     for i, row in enumerate(rows, start=2):
         lot_number = row.get("lot_number", "").strip()
@@ -555,9 +653,9 @@ async def import_lot_owners_from_csv(
         else:
             try:
                 unit_entitlement = int(unit_entitlement_raw)
-                if unit_entitlement < 0:
+                if unit_entitlement <= 0:
                     row_errors.append(
-                        f"Row {i}: unit_entitlement must be >= 0, got {unit_entitlement}"
+                        f"Row {i}: unit_entitlement must be > 0, got {unit_entitlement}"
                     )
             except ValueError:
                 row_errors.append(
@@ -573,20 +671,47 @@ async def import_lot_owners_from_csv(
         if row_errors:
             errors.extend(row_errors)
         else:
+            if lot_number:
+                lot_number_rows.setdefault(lot_number, []).append(i)
+
+            # Resolve per-row name fields
+            if name_mode == "separate":
+                row_given_name = row.get("given_name", "").strip() or None
+                row_surname = row.get("surname", "").strip() or None
+            elif name_mode == "name":
+                row_given_name, row_surname = _parse_name(row.get("name", ""))
+            else:
+                row_given_name, row_surname = None, None
+
             if lot_number not in lot_data:
                 lot_data[lot_number] = {
                     "unit_entitlement": unit_entitlement,
                     "financial_position": financial_position,
-                    "emails": set(),
+                    "email_entries": [],
+                    "given_name": row_given_name,
+                    "surname": row_surname,
                 }
-            else:
-                # If lot already seen, the unit_entitlement and financial_position should be consistent
-                # Use values from first occurrence
-                pass
             for addr in email.split(";"):
                 addr = addr.strip().lower()
                 if addr:
-                    lot_data[lot_number]["emails"].add(addr)
+                    # Deduplicate by email: last-row name wins
+                    existing_entry = next(
+                        (e for e in lot_data[lot_number]["email_entries"] if e["email"] == addr),
+                        None,
+                    )
+                    if existing_entry is not None:
+                        existing_entry["given_name"] = row_given_name
+                        existing_entry["surname"] = row_surname
+                    else:
+                        lot_data[lot_number]["email_entries"].append(
+                            {"email": addr, "given_name": row_given_name, "surname": row_surname}
+                        )
+
+    # Check for duplicate lot numbers and report them with row details (RR3-31)
+    for lot_num, row_nums in lot_number_rows.items():
+        if len(row_nums) > 1:
+            rows_str = " and ".join(str(r) for r in row_nums)
+            errors.append(f"Lot {lot_num} appears on rows {rows_str}")
 
     if errors:
         raise HTTPException(status_code=422, detail=errors)
@@ -606,9 +731,10 @@ async def import_lot_owners_from_excel(
     """
     await get_building_or_404(building_id, db)
 
+    # RR4-26: Narrow exception catch to file-format errors only; re-raise unexpected ones.
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
-    except Exception as exc:
+    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
 
     ws = wb.worksheets[0]
@@ -639,12 +765,25 @@ async def import_lot_owners_from_excel(
     fp_idx = headers.index("financial position") if "financial position" in headers else (
         headers.index("financial_position") if "financial_position" in headers else None
     )
+    given_name_idx = headers.index("given_name") if "given_name" in headers else None
+    surname_idx = headers.index("surname") if "surname" in headers else None
+    name_idx = headers.index("name") if "name" in headers else None
+
+    # Determine name mode from available columns
+    if given_name_idx is not None and surname_idx is not None:
+        name_mode = "separate"
+    elif name_idx is not None:
+        name_mode = "name"
+    else:
+        name_mode = "none"
 
     data_rows = list(rows_iter)
     wb.close()
 
     errors: list[str] = []
-    lot_data: dict[str, dict] = {}  # lot_number -> {unit_entitlement, financial_position, emails: set}
+    lot_data: dict[str, dict] = {}  # lot_number -> {unit_entitlement, financial_position, email_entries: list}
+    # Track row numbers seen per lot_number to detect duplicates (RR3-31)
+    lot_number_rows: dict[str, list[int]] = {}
 
     row_num = 0
     for raw_row in data_rows:
@@ -674,9 +813,9 @@ async def import_lot_owners_from_excel(
         else:
             try:
                 unit_entitlement = int(unit_entitlement_raw)
-                if unit_entitlement < 0:
+                if unit_entitlement <= 0:
                     row_errors.append(
-                        f"Row {row_num}: unit_entitlement must be >= 0, got {unit_entitlement}"
+                        f"Row {row_num}: unit_entitlement must be > 0, got {unit_entitlement}"
                     )
             except ValueError:
                 row_errors.append(
@@ -692,16 +831,47 @@ async def import_lot_owners_from_excel(
         if row_errors:
             errors.extend(row_errors)
         else:
+            if lot_number:
+                lot_number_rows.setdefault(lot_number, []).append(row_num)
+
+            # Resolve per-row name fields
+            if name_mode == "separate":
+                row_given_name = _cell(given_name_idx).strip() or None
+                row_surname = _cell(surname_idx).strip() or None
+            elif name_mode == "name":
+                row_given_name, row_surname = _parse_name(_cell(name_idx))
+            else:
+                row_given_name, row_surname = None, None
+
             if lot_number not in lot_data:
                 lot_data[lot_number] = {
                     "unit_entitlement": unit_entitlement,
                     "financial_position": financial_position,
-                    "emails": set(),
+                    "email_entries": [],
+                    "given_name": row_given_name,
+                    "surname": row_surname,
                 }
             for addr in email.split(";"):
                 addr = addr.strip().lower()
                 if addr:
-                    lot_data[lot_number]["emails"].add(addr)
+                    # Deduplicate by email: last-row name wins
+                    existing_entry = next(
+                        (e for e in lot_data[lot_number]["email_entries"] if e["email"] == addr),
+                        None,
+                    )
+                    if existing_entry is not None:
+                        existing_entry["given_name"] = row_given_name
+                        existing_entry["surname"] = row_surname
+                    else:
+                        lot_data[lot_number]["email_entries"].append(
+                            {"email": addr, "given_name": row_given_name, "surname": row_surname}
+                        )
+
+    # Check for duplicate lot numbers and report them with row details (RR3-31)
+    for lot_num, row_nums in lot_number_rows.items():
+        if len(row_nums) > 1:
+            rows_str = " and ".join(str(r) for r in row_nums)
+            errors.append(f"Lot {lot_num} appears on rows {rows_str}")
 
     if errors:
         raise HTTPException(status_code=422, detail=errors)
@@ -716,7 +886,7 @@ async def _upsert_lot_owners(
 ) -> dict[str, int]:
     """
     Upsert lot owners from parsed lot_data.
-    lot_data: {lot_number -> {unit_entitlement, financial_position, emails: set}}
+    lot_data: {lot_number -> {unit_entitlement, financial_position, email_entries: list[dict]}}
     Returns {"imported": int, "emails": int}.
     """
     # Load existing lot owners keyed by lot_number to preserve IDs
@@ -727,41 +897,54 @@ async def _upsert_lot_owners(
         lo.lot_number: lo for lo in existing_result.scalars().all()
     }
 
-    new_lot_numbers: set[str] = set(lot_data.keys())
-
-    # Upsert: update existing, insert new
+    # Upsert: update existing, insert new — never delete absent lots.
+    # Deleting lots absent from the import would cascade-delete AGMLotWeight
+    # records and destroy historical vote tallies for existing AGMs.
     for lot_number, data in lot_data.items():
         if lot_number in existing:
             lo = existing[lot_number]
             lo.unit_entitlement = data["unit_entitlement"]
             lo.financial_position = data["financial_position"]
+            if data.get("given_name") is not None:
+                lo.given_name = data["given_name"]
+            if data.get("surname") is not None:
+                lo.surname = data["surname"]
             await db.flush()
-            # Replace emails: delete existing, insert new set
+            # Replace emails: delete existing, insert new entries
             await db.execute(
                 delete(LotOwnerEmail).where(LotOwnerEmail.lot_owner_id == lo.id)
             )
-            for email in data["emails"]:
-                db.add(LotOwnerEmail(lot_owner_id=lo.id, email=email))
+            for entry in data["email_entries"]:
+                if entry["email"]:
+                    db.add(LotOwnerEmail(
+                        lot_owner_id=lo.id,
+                        email=entry["email"],
+                        given_name=entry["given_name"],
+                        surname=entry["surname"],
+                    ))
         else:
             new_lo = LotOwner(
                 building_id=building_id,
                 lot_number=lot_number,
+                given_name=data.get("given_name"),
+                surname=data.get("surname"),
                 unit_entitlement=data["unit_entitlement"],
                 financial_position=data["financial_position"],
             )
             db.add(new_lo)
             await db.flush()
-            for email in data["emails"]:
-                db.add(LotOwnerEmail(lot_owner_id=new_lo.id, email=email))
-
-    # Delete lot owners that are no longer in the import
-    for lot_number, lo in existing.items():
-        if lot_number not in new_lot_numbers:
-            await db.delete(lo)
+            for entry in data["email_entries"]:
+                if entry["email"]:
+                    db.add(LotOwnerEmail(
+                        lot_owner_id=new_lo.id,
+                        email=entry["email"],
+                        given_name=entry["given_name"],
+                        surname=entry["surname"],
+                    ))
 
     await db.commit()
 
-    total_emails = sum(len(data["emails"]) for data in lot_data.values())
+    total_emails = sum(len(data["email_entries"]) for data in lot_data.values())
     return {"imported": len(lot_data), "emails": total_emails}
 
 
@@ -789,28 +972,33 @@ async def add_lot_owner(
     lot_owner = LotOwner(
         building_id=building_id,
         lot_number=data.lot_number,
+        given_name=data.given_name,
+        surname=data.surname,
         unit_entitlement=data.unit_entitlement,
         financial_position=FinancialPosition(data.financial_position),
     )
     db.add(lot_owner)
     await db.flush()
 
-    email_strs = []
     for email in data.emails:
         if email.strip():
             normalised = email.strip().lower()
             db.add(LotOwnerEmail(lot_owner_id=lot_owner.id, email=normalised))
-            email_strs.append(normalised)
 
     await db.commit()
 
+    owner_emails = await _load_owner_emails_for_one(lot_owner.id, db)
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": email_strs,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": None,
+        "proxy_given_name": None,
+        "proxy_surname": None,
     }
 
 
@@ -826,6 +1014,10 @@ async def update_lot_owner(
     if lot_owner is None:
         raise HTTPException(status_code=404, detail="Lot owner not found")
 
+    if data.given_name is not None:
+        lot_owner.given_name = data.given_name
+    if data.surname is not None:
+        lot_owner.surname = data.surname
     if data.unit_entitlement is not None:
         lot_owner.unit_entitlement = data.unit_entitlement
     if data.financial_position is not None:
@@ -833,20 +1025,19 @@ async def update_lot_owner(
 
     await db.commit()
 
-    # Load emails
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
-
-    proxy_email = await _get_proxy_email(lot_owner_id, db)
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
-        "proxy_email": proxy_email,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
     }
 
 
@@ -878,19 +1069,20 @@ async def add_email_to_lot_owner(
     db.add(LotOwnerEmail(lot_owner_id=lot_owner_id, email=email))
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
-    proxy_email = await _get_proxy_email(lot_owner_id, db)
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
-        "proxy_email": proxy_email,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
     }
 
 
@@ -920,19 +1112,20 @@ async def remove_email_from_lot_owner(
     await db.delete(email_obj)
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
-    proxy_email = await _get_proxy_email(lot_owner_id, db)
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
-        "proxy_email": proxy_email,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
     }
 
 
@@ -940,6 +1133,8 @@ async def set_lot_owner_proxy(
     lot_owner_id: uuid.UUID,
     proxy_email: str,
     db: AsyncSession,
+    given_name: str | None = None,
+    surname: str | None = None,
 ) -> dict:
     """Create or replace the proxy nomination for a lot owner."""
     result = await db.execute(
@@ -955,23 +1150,33 @@ async def set_lot_owner_proxy(
     existing_proxy = proxy_result.scalar_one_or_none()
     if existing_proxy is not None:
         existing_proxy.proxy_email = proxy_email
+        if given_name is not None:
+            existing_proxy.given_name = given_name
+        if surname is not None:
+            existing_proxy.surname = surname
     else:
-        db.add(LotProxy(lot_owner_id=lot_owner_id, proxy_email=proxy_email))
+        db.add(LotProxy(
+            lot_owner_id=lot_owner_id,
+            proxy_email=proxy_email,
+            given_name=given_name,
+            surname=surname,
+        ))
 
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": proxy_email,
+        "proxy_given_name": given_name,
+        "proxy_surname": surname,
     }
 
 
@@ -997,18 +1202,181 @@ async def remove_lot_owner_proxy(
     await db.delete(existing_proxy)
     await db.commit()
 
-    emails_result = await db.execute(
-        select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lot_owner_id)
-    )
-    emails = [r[0] for r in emails_result.all() if r[0] is not None]
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
 
     return {
         "id": lot_owner.id,
         "lot_number": lot_owner.lot_number,
-        "emails": emails,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
         "unit_entitlement": lot_owner.unit_entitlement,
-        "financial_position": lot_owner.financial_position.value if hasattr(lot_owner.financial_position, "value") else lot_owner.financial_position,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
         "proxy_email": None,
+        "proxy_given_name": None,
+        "proxy_surname": None,
+    }
+
+
+async def add_owner_email_to_lot_owner(
+    lot_owner_id: uuid.UUID,
+    email: str,
+    given_name: str | None,
+    surname: str | None,
+    db: AsyncSession,
+) -> dict:
+    """Add an email+name owner entry to a lot owner. Returns the updated lot owner dict."""
+    result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    normalised_email = email.strip().lower()
+
+    # Sanitise name fields before storage
+    clean_given_name = bleach.clean(given_name, tags=[], strip=True).strip() or None if given_name else None
+    clean_surname = bleach.clean(surname, tags=[], strip=True).strip() or None if surname else None
+
+    # Check if email already exists for this lot owner
+    existing = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+            LotOwnerEmail.email == normalised_email,
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail="Email already exists for this lot owner")
+
+    db.add(LotOwnerEmail(
+        lot_owner_id=lot_owner_id,
+        email=normalised_email,
+        given_name=clean_given_name,
+        surname=clean_surname,
+    ))
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
+    }
+
+
+async def update_owner_email(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    email: str | None,
+    given_name: str | None,
+    surname: str | None,
+    db: AsyncSession,
+) -> dict:
+    """Update email, given_name, and/or surname on a LotOwnerEmail row by ID.
+
+    Validates that the email_id belongs to lot_owner_id. Returns the updated lot owner dict.
+    """
+    # Fetch the lot owner first
+    lo_result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = lo_result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    # Fetch the email record, verifying it belongs to this lot owner
+    em_result = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.id == email_id,
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+        )
+    )
+    email_obj = em_result.scalar_one_or_none()
+    if email_obj is None:
+        raise HTTPException(status_code=404, detail="Owner email record not found")
+
+    if email is not None:
+        normalised_email = email.strip().lower()
+        # Check for duplicate email on this lot (excluding this record)
+        dup_result = await db.execute(
+            select(LotOwnerEmail).where(
+                LotOwnerEmail.lot_owner_id == lot_owner_id,
+                LotOwnerEmail.email == normalised_email,
+                LotOwnerEmail.id != email_id,
+            )
+        )
+        if dup_result.scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="Email already exists for this lot owner")
+        email_obj.email = normalised_email
+
+    if given_name is not None:
+        email_obj.given_name = bleach.clean(given_name, tags=[], strip=True).strip() or None
+    if surname is not None:
+        email_obj.surname = bleach.clean(surname, tags=[], strip=True).strip() or None
+
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
+    }
+
+
+async def remove_owner_email_by_id(
+    lot_owner_id: uuid.UUID,
+    email_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """Delete a LotOwnerEmail row by its UUID. Validates it belongs to lot_owner_id."""
+    lo_result = await db.execute(select(LotOwner).where(LotOwner.id == lot_owner_id))
+    lot_owner = lo_result.scalar_one_or_none()
+    if lot_owner is None:
+        raise HTTPException(status_code=404, detail="Lot owner not found")
+
+    em_result = await db.execute(
+        select(LotOwnerEmail).where(
+            LotOwnerEmail.id == email_id,
+            LotOwnerEmail.lot_owner_id == lot_owner_id,
+        )
+    )
+    email_obj = em_result.scalar_one_or_none()
+    if email_obj is None:
+        raise HTTPException(status_code=404, detail="Owner email record not found")
+
+    await db.delete(email_obj)
+    await db.commit()
+
+    owner_emails = await _load_owner_emails_for_one(lot_owner_id, db)
+    proxy_info = await _get_proxy_info(lot_owner_id, db)
+
+    return {
+        "id": lot_owner.id,
+        "lot_number": lot_owner.lot_number,
+        "given_name": lot_owner.given_name,
+        "surname": lot_owner.surname,
+        "owner_emails": owner_emails,
+        "unit_entitlement": lot_owner.unit_entitlement,
+        "financial_position": _format_financial_position(lot_owner.financial_position),
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
     }
 
 
@@ -1168,6 +1536,26 @@ _MEETINGS_SORT_COLUMNS = {
 }
 
 
+def _effective_status_case():
+    """SQL CASE expression mirroring get_effective_status() for use in WHERE clauses.
+
+    Precedence (mirrors get_effective_status):
+      1. stored status = 'closed'  → 'closed'
+      2. voting_closes_at < NOW()  → 'closed'
+      3. meeting_at > NOW()        → 'pending'
+      4. otherwise                 → 'open'
+
+    Returns a fresh expression on each call so func.now() is evaluated at
+    query-execution time, not import time.
+    """
+    return case(
+        (GeneralMeeting.status == GeneralMeetingStatus.closed.value, literal("closed")),
+        (GeneralMeeting.voting_closes_at < func.now(), literal("closed")),
+        (GeneralMeeting.meeting_at > func.now(), literal("pending")),
+        else_=literal("open"),
+    )
+
+
 def _meetings_order_clause(sort_by: str | None, sort_dir: str | None):
     key = sort_by or "created_at"
     col = _MEETINGS_SORT_COLUMNS.get(key, GeneralMeeting.created_at)
@@ -1197,15 +1585,14 @@ async def list_general_meetings(
         q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
     if building_id is not None:
         q = q.where(GeneralMeeting.building_id == building_id)
+    if status is not None:
+        q = q.where(_effective_status_case() == status)
     result = await db.execute(q.offset(offset).limit(limit))
     rows = result.all()
     items = []
     for general_meeting, building_name in rows:
         effective = get_effective_status(general_meeting)
         effective_str = effective.value if hasattr(effective, "value") else effective
-        # Post-filter by effective status when requested (computed field, not a DB column)
-        if status is not None and effective_str != status:
-            continue
         items.append(
             {
                 "id": general_meeting.id,
@@ -1227,30 +1614,23 @@ async def count_general_meetings(
     building_id: uuid.UUID | None = None,
     status: str | None = None,
 ) -> int:
-    """Return total count of general meetings matching the optional filters."""
-    # When a status filter is applied we must compute effective status in Python,
-    # so we fetch IDs and count them rather than using a SQL COUNT.
-    if status is not None:
-        q = (
-            select(GeneralMeeting)
-            .join(Building, GeneralMeeting.building_id == Building.id)
-        )
-        if name is not None:
-            q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
-        if building_id is not None:
-            q = q.where(GeneralMeeting.building_id == building_id)
-        result = await db.execute(q)
-        meetings = result.scalars().all()
-        return sum(
-            1
-            for m in meetings
-            if (get_effective_status(m).value if hasattr(get_effective_status(m), "value") else get_effective_status(m)) == status
-        )
+    """Return total count of general meetings matching the optional filters.
+
+    RR5-09: When a status filter is applied, use a SQL CASE expression to derive
+    effective status in the database rather than loading all rows into Python.
+    The CASE expression mirrors get_effective_status():
+      1. stored status = 'closed'  → 'closed'
+      2. voting_closes_at < NOW()  → 'closed'
+      3. meeting_at > NOW()        → 'pending'
+      4. otherwise                 → 'open'
+    """
     q = select(func.count()).select_from(GeneralMeeting)
     if name is not None:
         q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
     if building_id is not None:
         q = q.where(GeneralMeeting.building_id == building_id)
+    if status is not None:
+        q = q.where(_effective_status_case() == status)
     result = await db.execute(q)
     return result.scalar_one()
 
@@ -1293,41 +1673,105 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
     )
     weight_rows = weights_result.all()
 
-    # Build per-lot_owner_id entitlement and lot info
+    # Build per-lot_owner_id entitlement and lot info.
+    # Batch-load emails for all lot owners in a single IN query to avoid O(N) queries (RR3-12).
     lot_entitlement: dict[uuid.UUID, int] = {}
     lot_info: dict[uuid.UUID, dict] = {}  # lot_owner_id -> {lot_number, emails, entitlement}
 
     for w, lot_num in weight_rows:
         lot_entitlement[w.lot_owner_id] = w.unit_entitlement_snapshot
-        # Get emails for this lot owner
-        emails_result = await db.execute(
-            select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == w.lot_owner_id)
-        )
-        emails = [r[0] for r in emails_result.all() if r[0]]
+        # Placeholder; emails filled by batch query below
         lot_info[w.lot_owner_id] = {
             "lot_owner_id": w.lot_owner_id,
             "lot_number": lot_num,
-            "emails": emails,
+            "emails": [],
             "entitlement": w.unit_entitlement_snapshot,
         }
+
+    # Maps (lot_owner_id, email) -> display_name ("Given Surname" or None)
+    lot_owner_email_to_name: dict[tuple, str | None] = {}
+
+    if lot_entitlement:
+        # Batch-load emails (with names) for all lots in the snapshot — single query (RR3-12)
+        batch_emails_result = await db.execute(
+            select(
+                LotOwnerEmail.lot_owner_id,
+                LotOwnerEmail.email,
+                LotOwnerEmail.given_name,
+                LotOwnerEmail.surname,
+            ).where(
+                LotOwnerEmail.lot_owner_id.in_(list(lot_entitlement.keys()))
+            )
+        )
+        for row in batch_emails_result.all():
+            if row[1] and row[0] in lot_info:
+                lot_info[row[0]]["emails"].append(row[1])
+            if row[1]:
+                name_parts = [p for p in [row[2], row[3]] if p]
+                lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
+
+        # Populate proxy names from lot_proxies — proxy voter_email is the proxy's email,
+        # which is not present in lot_owner_emails so must be loaded separately.
+        proxy_rows = await db.execute(
+            select(
+                LotProxy.lot_owner_id,
+                LotProxy.proxy_email,
+                LotProxy.given_name,
+                LotProxy.surname,
+            ).where(LotProxy.lot_owner_id.in_(list(lot_entitlement.keys())))
+        )
+        for row in proxy_rows.all():
+            name_parts = [p for p in [row[2], row[3]] if p]
+            lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
+
+    # Track whether the weight snapshot exists; SQL aggregation entitlement sums are only
+    # accurate when the snapshot rows exist (they JOIN on GeneralMeetingLotWeight).
+    has_weight_snapshot = bool(lot_entitlement)
 
     # Fallback: if snapshot is empty
     if not lot_entitlement:
         current_result = await db.execute(
             select(LotOwner).where(LotOwner.building_id == general_meeting.building_id)
         )
-        for lo in current_result.scalars().all():
+        fallback_owners = list(current_result.scalars().all())
+        for lo in fallback_owners:
             lot_entitlement[lo.id] = lo.unit_entitlement
-            emails_result = await db.execute(
-                select(LotOwnerEmail.email).where(LotOwnerEmail.lot_owner_id == lo.id)
-            )
-            emails = [r[0] for r in emails_result.all() if r[0]]
             lot_info[lo.id] = {
                 "lot_owner_id": lo.id,
                 "lot_number": lo.lot_number,
-                "emails": emails,
+                "emails": [],
                 "entitlement": lo.unit_entitlement,
             }
+        if fallback_owners:
+            fallback_emails_result = await db.execute(
+                select(
+                    LotOwnerEmail.lot_owner_id,
+                    LotOwnerEmail.email,
+                    LotOwnerEmail.given_name,
+                    LotOwnerEmail.surname,
+                ).where(
+                    LotOwnerEmail.lot_owner_id.in_([lo.id for lo in fallback_owners])
+                )
+            )
+            for row in fallback_emails_result.all():
+                if row[1] and row[0] in lot_info:
+                    lot_info[row[0]]["emails"].append(row[1])
+                if row[1]:
+                    name_parts = [p for p in [row[2], row[3]] if p]
+                    lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
+
+            # Populate proxy names from lot_proxies for fallback path.
+            fallback_proxy_rows = await db.execute(
+                select(
+                    LotProxy.lot_owner_id,
+                    LotProxy.proxy_email,
+                    LotProxy.given_name,
+                    LotProxy.surname,
+                ).where(LotProxy.lot_owner_id.in_([lo.id for lo in fallback_owners]))
+            )
+            for row in fallback_proxy_rows.all():
+                name_parts = [p for p in [row[2], row[3]] if p]
+                lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
 
     eligible_lot_owner_ids: set[uuid.UUID] = set(lot_entitlement.keys())
     total_eligible_voters = len(eligible_lot_owner_ids)
@@ -1346,14 +1790,51 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
         s.lot_owner_id: s for s in submissions if s.is_absent
     }
 
-    # Load submitted votes (joined with lot owner info via voter_email)
-    votes_result = await db.execute(
-        select(Vote).where(
+    # SQL GROUP BY aggregation: compute tally counts and entitlement sums directly in the DB
+    # instead of loading every Vote row into Python (eliminates O(V×M) in-memory scan).
+    tally_agg_result = await db.execute(
+        select(
+            Vote.motion_id,
+            Vote.choice,
+            Vote.motion_option_id,
+            func.count().label("voter_count"),
+            func.coalesce(
+                func.sum(GeneralMeetingLotWeight.unit_entitlement_snapshot), 0
+            ).label("entitlement_sum"),
+        )
+        .join(
+            GeneralMeetingLotWeight,
+            (GeneralMeetingLotWeight.lot_owner_id == Vote.lot_owner_id)
+            & (GeneralMeetingLotWeight.general_meeting_id == Vote.general_meeting_id),
+            isouter=True,
+        )
+        .where(
+            Vote.general_meeting_id == general_meeting_id,
+            Vote.status == VoteStatus.submitted,
+        )
+        .group_by(Vote.motion_id, Vote.choice, Vote.motion_option_id)
+    )
+    # tally_map: (motion_id, choice_str_or_None, option_id_or_None) -> (voter_count, entitlement_sum)
+    tally_map: dict[tuple[uuid.UUID, str | None, uuid.UUID | None], tuple[int, int]] = {}
+    for row in tally_agg_result.all():
+        choice_str: str | None = row.choice.value if row.choice and hasattr(row.choice, "value") else row.choice
+        tally_map[(row.motion_id, choice_str, row.motion_option_id)] = (row.voter_count, int(row.entitlement_sum))
+
+    # Lightweight projection: load only the columns needed to build per-lot voter_lists
+    # and compute the set of lot_owner_ids per motion (for implicit-abstained calculation).
+    vote_proj_result = await db.execute(
+        select(
+            Vote.lot_owner_id,
+            Vote.motion_id,
+            Vote.choice,
+            Vote.motion_option_id,
+            Vote.voter_email,
+        ).where(
             Vote.general_meeting_id == general_meeting_id,
             Vote.status == VoteStatus.submitted,
         )
     )
-    submitted_votes = list(votes_result.scalars().all())
+    vote_projections = vote_proj_result.all()
 
     def _tally(lot_owner_ids: set[uuid.UUID]) -> dict:
         return {
@@ -1361,11 +1842,27 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             "entitlement_sum": sum(lot_entitlement.get(lid, 0) for lid in lot_owner_ids),
         }
 
-    # Build lot_owner_id -> voter_email and proxy_email from voted submissions
+    # Build lot_owner_id -> voter_email, proxy_email, ballot_hash, and submitted_by_admin from voted submissions
     lot_owner_to_email: dict[uuid.UUID, str] = {sub.lot_owner_id: sub.voter_email for sub in voted_submissions}
     lot_owner_to_proxy_email: dict[uuid.UUID, str | None] = {sub.lot_owner_id: sub.proxy_email for sub in voted_submissions}
+    # US-VIL-03: expose ballot_hash for admin audit
+    lot_owner_to_ballot_hash: dict[uuid.UUID, str | None] = {
+        sub.lot_owner_id: sub.ballot_hash for sub in voted_submissions
+    }
+    # US-AVE-03: expose submitted_by_admin flag
+    lot_owner_to_submitted_by_admin: dict[uuid.UUID, bool] = {
+        sub.lot_owner_id: sub.submitted_by_admin for sub in voted_submissions
+    }
+    # RR4-27: expose submitted_by_admin_username for audit trail
+    lot_owner_to_submitted_by_admin_username: dict[uuid.UUID, str | None] = {
+        sub.lot_owner_id: sub.submitted_by_admin_username for sub in voted_submissions
+    }
+    # Per-motion voter email: keyed on (lot_owner_id, motion_id) so that when a lot has
+    # multiple voters (co-owners, proxy re-entry) each motion shows the email of the person
+    # who actually submitted that specific Vote row, not the last BallotSubmission author.
+    vote_voter_email_map: dict[tuple[uuid.UUID, uuid.UUID], str] = {}
 
-    def _lots(lot_owner_ids: set[uuid.UUID], category: str) -> list[dict]:
+    def _lots(lot_owner_ids: set[uuid.UUID], category: str, motion_id: uuid.UUID | None = None) -> list[dict]:
         result_list: list[dict] = []
         for lid in lot_owner_ids:
             info = lot_info.get(lid)
@@ -1375,20 +1872,52 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     absent_sub = absent_submissions.get(lid)
                     voter_email = absent_sub.voter_email if absent_sub else ""
                     proxy_email_val = None  # absent rows don't expose proxy separately in the list
+                    ballot_hash_val = None  # absent lots have no ballot hash
+                    submitted_by_admin_val = False
+                    submitted_by_admin_username_val = None
                 else:
-                    # For voted categories, use the actual auth email from BallotSubmission
-                    voter_email = lot_owner_to_email.get(lid, "")
+                    # For voted categories, prefer the per-motion voter_email stamped on
+                    # the Vote row (correct even when co-owners submit different motions),
+                    # falling back to BallotSubmission.voter_email for absent/no-Vote cases.
+                    if motion_id is not None:
+                        voter_email = vote_voter_email_map.get((lid, motion_id), lot_owner_to_email.get(lid, ""))
+                    else:  # pragma: no cover
+                        voter_email = lot_owner_to_email.get(lid, "")
                     proxy_email_val = lot_owner_to_proxy_email.get(lid)
+                    ballot_hash_val = lot_owner_to_ballot_hash.get(lid)
+                    submitted_by_admin_val = lot_owner_to_submitted_by_admin.get(lid, False)
+                    submitted_by_admin_username_val = lot_owner_to_submitted_by_admin_username.get(lid)
+                voter_name = lot_owner_email_to_name.get((lid, voter_email))
                 result_list.append({
                     "voter_email": voter_email,
+                    "voter_name": voter_name,
                     "lot_number": info["lot_number"],
                     "entitlement": info["entitlement"],
                     "proxy_email": proxy_email_val,
+                    "ballot_hash": ballot_hash_val,
+                    "submitted_by_admin": submitted_by_admin_val,
+                    "submitted_by_admin_username": submitted_by_admin_username_val,
                 })
         return result_list
 
     is_closed = get_effective_status(general_meeting) == GeneralMeetingStatus.closed
     absent_ids_global: set[uuid.UUID] = set(absent_submissions.keys()) if is_closed else set()
+
+    # Build per-motion indexes from the lightweight vote projection (for voter_lists and
+    # implicit-abstained computation). Replaces the O(V×M) scan over full Vote objects.
+    # votes_by_motion: motion_id -> list of (lot_owner_id, choice_str, option_id) tuples
+    VoteRow = tuple[uuid.UUID, str | None, uuid.UUID | None]
+    votes_by_motion: dict[uuid.UUID, list[VoteRow]] = {}
+    for vp in vote_projections:
+        if vp.lot_owner_id in submitted_lot_owner_ids:
+            choice_str = vp.choice.value if vp.choice and hasattr(vp.choice, "value") else vp.choice
+            votes_by_motion.setdefault(vp.motion_id, []).append(
+                (vp.lot_owner_id, choice_str, vp.motion_option_id)
+            )
+        # Populate per-motion voter email map regardless of submission status so that
+        # any Vote row's own voter_email is captured for the voter_list display.
+        if vp.voter_email:
+            vote_voter_email_map[(vp.lot_owner_id, vp.motion_id)] = vp.voter_email
 
     motion_details = []
     for motion in motions:
@@ -1396,47 +1925,65 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
         motion_opts = motion_options_map.get(motion.id, [])
 
         if motion.is_multi_choice:
-            # Multi-choice: per-option tallying
-            # Collect votes for this motion
-            motion_vote_rows = [v for v in submitted_votes if v.motion_id == motion.id and v.lot_owner_id in submitted_lot_owner_ids]
+            # Multi-choice: per-option tallying using lightweight vote projection tuples
+            # (lot_owner_id, choice_str, motion_option_id)
+            motion_vote_rows = votes_by_motion.get(motion.id, [])
 
             # not_eligible lots
             not_eligible_ids: set[uuid.UUID] = {
-                v.lot_owner_id for v in motion_vote_rows
-                if (v.choice.value if hasattr(v.choice, "value") else v.choice) == "not_eligible"
-            }
-
-            # lots with at least one selected vote
-            selected_lot_ids: set[uuid.UUID] = {
-                v.lot_owner_id for v in motion_vote_rows
-                if (v.choice.value if hasattr(v.choice, "value") else v.choice) == "selected"
+                lot_id for lot_id, choice_s, _ in motion_vote_rows
+                if choice_s == "not_eligible"
             }
 
             # abstained = submitted but no selected and not not_eligible
             # Derived from this motion's own vote rows to avoid incorrectly including
             # lots that simply didn't have a vote row for this motion (e.g. not yet submitted).
             abstained_ids: set[uuid.UUID] = {
-                v.lot_owner_id for v in motion_vote_rows
-                if (v.choice.value if hasattr(v.choice, "value") else v.choice) == "abstained"
+                lot_id for lot_id, choice_s, _ in motion_vote_rows
+                if choice_s == "abstained"
             }
 
-            # Per-option tally
+            # Per-option tally — use SQL aggregation results via tally_map where available,
+            # fall back to in-memory projection count (same as before for voter_lists).
             option_tallies = []
-            option_voter_lists: dict[str, list] = {}
+            option_for_voter_lists: dict[str, list] = {}
+            option_against_voter_lists: dict[str, list] = {}
+            option_abstained_voter_lists: dict[str, list] = {}
             for opt in motion_opts:
-                opt_lot_ids = {
-                    v.lot_owner_id for v in motion_vote_rows
-                    if v.motion_option_id == opt.id
-                    and (v.choice.value if hasattr(v.choice, "value") else v.choice) == "selected"
+                opt_for_ids = {
+                    lot_id for lot_id, choice_s, opt_id in motion_vote_rows
+                    if opt_id == opt.id and choice_s == "selected"
                 }
+                opt_against_ids = {
+                    lot_id for lot_id, choice_s, opt_id in motion_vote_rows
+                    if opt_id == opt.id and choice_s == "against"
+                }
+                opt_abstained_ids = {
+                    lot_id for lot_id, choice_s, opt_id in motion_vote_rows
+                    if opt_id == opt.id and choice_s == "abstained"
+                }
+                # Use stored snapshot values when available (post-close), fall back to SQL aggregation
+                for_vc, for_es = (int(opt.for_voter_count), int(opt.for_entitlement_sum)) if opt.for_voter_count else tally_map.get((motion.id, "selected", opt.id), (0, 0))  # type: ignore[assignment]
+                against_vc, against_es = (int(opt.against_voter_count), int(opt.against_entitlement_sum)) if opt.against_voter_count else tally_map.get((motion.id, "against", opt.id), (0, 0))  # type: ignore[assignment]
+                abstained_vc, abstained_es = (int(opt.abstained_voter_count), int(opt.abstained_entitlement_sum)) if opt.abstained_voter_count else tally_map.get((motion.id, "abstained", opt.id), (0, 0))  # type: ignore[assignment]
                 option_tallies.append({
                     "option_id": opt.id,
                     "option_text": opt.text,
                     "display_order": opt.display_order,
-                    "voter_count": len(opt_lot_ids),
-                    "entitlement_sum": sum(lot_entitlement.get(lid, 0) for lid in opt_lot_ids),
+                    "for_voter_count": for_vc,
+                    "for_entitlement_sum": for_es,
+                    "against_voter_count": against_vc,
+                    "against_entitlement_sum": against_es,
+                    "abstained_voter_count": abstained_vc,
+                    "abstained_entitlement_sum": abstained_es,
+                    # Backward-compatible aliases
+                    "voter_count": for_vc,
+                    "entitlement_sum": for_es,
+                    "outcome": opt.outcome,
                 })
-                option_voter_lists[str(opt.id)] = _lots(opt_lot_ids, "selected")
+                option_for_voter_lists[str(opt.id)] = _lots(opt_for_ids, "selected", motion.id)
+                option_against_voter_lists[str(opt.id)] = _lots(opt_against_ids, "against", motion.id)
+                option_abstained_voter_lists[str(opt.id)] = _lots(opt_abstained_ids, "abstained", motion.id)
 
             motion_details.append({
                 "id": motion.id,
@@ -1448,6 +1995,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 "is_multi_choice": motion.is_multi_choice,
                 "is_visible": motion.is_visible,
                 "option_limit": motion.option_limit,
+                "voting_closed_at": motion.voting_closed_at,
                 "options": [
                     {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
                     for opt in motion_opts
@@ -1463,21 +2011,26 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 "voter_lists": {
                     "yes": [],
                     "no": [],
-                    "abstained": _lots(abstained_ids, "abstained"),
+                    "abstained": _lots(abstained_ids, "abstained", motion.id),
                     "absent": _lots(absent_ids_global, "absent"),
-                    "not_eligible": _lots(not_eligible_ids, "not_eligible"),
-                    "options": option_voter_lists,
+                    "not_eligible": _lots(not_eligible_ids, "not_eligible", motion.id),
+                    "options_for": option_for_voter_lists,
+                    "options_against": option_against_voter_lists,
+                    "options_abstained": option_abstained_voter_lists,
+                    # Backward-compatible alias
+                    "options": option_for_voter_lists,
                 },
             })
         else:
-            # General / Special: existing yes/no/abstained/not_eligible logic
-            motion_votes: dict[uuid.UUID, str] = {}
-            for vote in submitted_votes:
-                if vote.motion_id == motion.id:
-                    lot_id = vote.lot_owner_id
-                    if lot_id is not None and lot_id in submitted_lot_owner_ids:
-                        choice = vote.choice.value if vote.choice and hasattr(vote.choice, "value") else vote.choice
-                        motion_votes[lot_id] = choice or "abstained"
+            # General / Special: use SQL aggregation for tally numbers; use lightweight
+            # projection tuples (lot_owner_id, choice_str, option_id) for voter_lists.
+            motion_vote_rows_standard = votes_by_motion.get(motion.id, [])
+            # motion_votes_map: lot_owner_id -> choice_str (for voter_lists and implicit-abstained)
+            motion_votes_map: dict[uuid.UUID, str] = {
+                lot_id: (choice_s or "abstained")
+                for lot_id, choice_s, _ in motion_vote_rows_standard
+                if lot_id is not None
+            }
 
             yes_ids: set[uuid.UUID] = set()
             no_ids: set[uuid.UUID] = set()
@@ -1485,16 +2038,45 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             not_eligible_ids: set[uuid.UUID] = set()
 
             for lot_id in submitted_lot_owner_ids:
-                choice = motion_votes.get(lot_id, "abstained")
+                if lot_id not in motion_votes_map:
+                    continue  # no real Vote row for this lot+motion — omit entirely
+                choice = motion_votes_map[lot_id]
                 if choice == "yes":
                     yes_ids.add(lot_id)
-                elif choice == "no":
+                elif choice in ("no", "against"):
+                    # RR4-03: VoteChoice.against is semantically equivalent to "no" for
+                    # General/Special motions. Map it to the no bucket so tallies are correct.
                     no_ids.add(lot_id)
                 elif choice == "not_eligible":
                     not_eligible_ids.add(lot_id)
                 else:
                     abstained_ids.add(lot_id)
 
+            # Use SQL aggregation results for tally numbers (voter_count, entitlement_sum).
+            # The lot_owner_id sets (yes_ids, no_ids, etc.) are still needed for voter_lists.
+            # SQL entitlement sums are accurate only when the weight snapshot exists; fall back
+            # to in-memory _tally() when the snapshot is absent (defensive edge case).
+            if has_weight_snapshot:
+                # "against" maps to "no" bucket — combine both for the tally lookup
+                no_vc = (
+                    tally_map.get((motion.id, "no", None), (0, 0))[0]
+                    + tally_map.get((motion.id, "against", None), (0, 0))[0]
+                )
+                no_es = (
+                    tally_map.get((motion.id, "no", None), (0, 0))[1]
+                    + tally_map.get((motion.id, "against", None), (0, 0))[1]
+                )
+                yes_tally = {"voter_count": tally_map.get((motion.id, "yes", None), (0, 0))[0], "entitlement_sum": tally_map.get((motion.id, "yes", None), (0, 0))[1]}
+                no_tally = {"voter_count": no_vc, "entitlement_sum": no_es}
+                not_eligible_tally = {"voter_count": tally_map.get((motion.id, "not_eligible", None), (0, 0))[0], "entitlement_sum": tally_map.get((motion.id, "not_eligible", None), (0, 0))[1]}
+            else:
+                yes_tally = _tally(yes_ids)
+                no_tally = _tally(no_ids)
+                not_eligible_tally = _tally(not_eligible_ids)
+            # abstained_ids contains only real Vote rows with choice=abstained.
+            # Lots that submitted a ballot but have no Vote row for this motion are omitted
+            # entirely (they are not inferred as abstained).  _tally() is always used because
+            # SQL aggregation does not cover the abstained bucket (no separate tally_map entry).
             motion_details.append(
                 {
                     "id": motion.id,
@@ -1506,21 +2088,22 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     "is_multi_choice": motion.is_multi_choice,
                     "is_visible": motion.is_visible,
                     "option_limit": None,
+                    "voting_closed_at": motion.voting_closed_at,
                     "options": [],
                     "tally": {
-                        "yes": _tally(yes_ids),
-                        "no": _tally(no_ids),
+                        "yes": yes_tally,
+                        "no": no_tally,
                         "abstained": _tally(abstained_ids),
                         "absent": _tally(absent_ids_global),
-                        "not_eligible": _tally(not_eligible_ids),
+                        "not_eligible": not_eligible_tally,
                         "options": [],
                     },
                     "voter_lists": {
-                        "yes": _lots(yes_ids, "yes"),
-                        "no": _lots(no_ids, "no"),
-                        "abstained": _lots(abstained_ids, "abstained"),
+                        "yes": _lots(yes_ids, "yes", motion.id),
+                        "no": _lots(no_ids, "no", motion.id),
+                        "abstained": _lots(abstained_ids, "abstained", motion.id),
                         "absent": _lots(absent_ids_global, "absent"),
-                        "not_eligible": _lots(not_eligible_ids, "not_eligible"),
+                        "not_eligible": _lots(not_eligible_ids, "not_eligible", motion.id),
                         "options": {},
                     },
                 }
@@ -1537,6 +2120,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
     effective = get_effective_status(general_meeting)
     return {
         "id": general_meeting.id,
+        "building_id": general_meeting.building_id,
         "building_name": building_name,
         "title": general_meeting.title,
         "status": effective.value if hasattr(effective, "value") else effective,
@@ -1584,8 +2168,13 @@ async def toggle_motion_visibility(
     if effective == GeneralMeetingStatus.closed:
         raise HTTPException(status_code=409, detail="Cannot change visibility on a closed meeting")
 
-    # Block hiding motions that already have votes
+    # Block hiding motions that already have votes or are individually closed
     if not is_visible:
+        if motion.voting_closed_at is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Cannot hide a closed motion",
+            )
         vote_count_result = await db.execute(
             select(func.count()).select_from(Vote).where(
                 Vote.motion_id == motion_id,
@@ -1621,6 +2210,107 @@ async def toggle_motion_visibility(
         "is_multi_choice": motion.is_multi_choice,
         "is_visible": motion.is_visible,
         "option_limit": motion.option_limit,
+        "voting_closed_at": motion.voting_closed_at,
+        "options": [
+            {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
+            for opt in motion_options
+        ],
+        "tally": {
+            "yes": {"voter_count": 0, "entitlement_sum": 0},
+            "no": {"voter_count": 0, "entitlement_sum": 0},
+            "abstained": {"voter_count": 0, "entitlement_sum": 0},
+            "absent": {"voter_count": 0, "entitlement_sum": 0},
+            "not_eligible": {"voter_count": 0, "entitlement_sum": 0},
+            "options": [],
+        },
+        "voter_lists": {
+            "yes": [],
+            "no": [],
+            "abstained": [],
+            "absent": [],
+            "not_eligible": [],
+            "options": {},
+        },
+    }
+
+
+async def close_motion(
+    motion_id: uuid.UUID,
+    db: AsyncSession,
+) -> dict:
+    """Close voting for a single motion. Returns updated motion detail dict.
+
+    Raises 404 if motion not found.
+    Raises 409 if:
+      - motion is not visible (hidden)
+      - voting_closed_at IS NOT NULL (already closed)
+      - meeting effective_status != "open"
+    """
+    # RR4-21: Use SELECT FOR UPDATE so concurrent close-motion requests serialize
+    # and exactly one request writes voting_closed_at.  Without the lock, two
+    # concurrent requests could both read voting_closed_at=None and both proceed
+    # to write a timestamp, resulting in a non-deterministic last-write-wins outcome.
+    result = await db.execute(
+        select(Motion).where(Motion.id == motion_id).with_for_update()
+    )
+    motion = result.scalar_one_or_none()
+    if motion is None:
+        raise HTTPException(status_code=404, detail="Motion not found")
+
+    # Fetch meeting
+    meeting_result = await db.execute(
+        select(GeneralMeeting).where(GeneralMeeting.id == motion.general_meeting_id)
+    )
+    meeting = meeting_result.scalar_one_or_none()
+    if meeting is None:  # pragma: no cover
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+
+    if not motion.is_visible:
+        raise HTTPException(status_code=409, detail="Cannot close a hidden motion")
+
+    if motion.voting_closed_at is not None:
+        raise HTTPException(status_code=409, detail="Motion voting is already closed")
+
+    effective = get_effective_status(meeting)
+    if effective != GeneralMeetingStatus.open:
+        raise HTTPException(status_code=409, detail="Cannot close motion on a meeting that is not open")
+
+    # RR4-33: ensure voting_closed_at > meeting_at (defensive — meeting must already
+    # have started for effective_status to be "open", but validate explicitly).
+    close_time = datetime.now(UTC)
+    if meeting.meeting_at is not None:
+        starts_at = meeting.meeting_at
+        # Normalise to UTC; DB columns use timezone=True so tzinfo is always set.
+        starts_at = starts_at.astimezone(UTC)
+        if close_time <= starts_at:
+            raise HTTPException(
+                status_code=422,
+                detail="Voting close time must be after meeting start time",
+            )
+
+    motion.voting_closed_at = close_time
+    await db.flush()
+    await db.commit()
+
+    # Load options for this motion
+    opts_result = await db.execute(
+        select(MotionOption)
+        .where(MotionOption.motion_id == motion.id)
+        .order_by(MotionOption.display_order)
+    )
+    motion_options = list(opts_result.scalars().all())
+
+    return {
+        "id": motion.id,
+        "title": motion.title,
+        "description": motion.description,
+        "display_order": motion.display_order,
+        "motion_number": motion.motion_number,
+        "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
+        "is_multi_choice": motion.is_multi_choice,
+        "is_visible": motion.is_visible,
+        "option_limit": motion.option_limit,
+        "voting_closed_at": motion.voting_closed_at,
         "options": [
             {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
             for opt in motion_options
@@ -1883,6 +2573,55 @@ async def delete_motion(
     await db.commit()
 
 
+async def delete_motion_option(
+    motion_id: uuid.UUID,
+    option_id: uuid.UUID,
+    db: AsyncSession,
+) -> None:
+    """Delete a single option from a multi-choice motion.
+
+    Raises 404 if the motion or option does not exist.
+    Raises 409 if any submitted Vote references this option (RESTRICT FK semantics).
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    # Verify option exists and belongs to the motion
+    opt_result = await db.execute(
+        select(MotionOption).where(
+            MotionOption.id == option_id,
+            MotionOption.motion_id == motion_id,
+        )
+    )
+    option = opt_result.scalar_one_or_none()
+    if option is None:
+        raise HTTPException(status_code=404, detail="Motion option not found")
+
+    # Check whether any submitted votes reference this option
+    vote_count_result = await db.execute(
+        select(func.count()).select_from(Vote).where(
+            Vote.motion_option_id == option_id,
+            Vote.status == VoteStatus.submitted,
+        )
+    )
+    vote_count = vote_count_result.scalar_one()
+    if vote_count > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete an option that has submitted votes",
+        )
+
+    await db.delete(option)
+    try:
+        await db.flush()
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete an option that has submitted votes",
+        )
+
+
 async def start_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession) -> GeneralMeeting:
     """Manually start a pending General Meeting, setting status=open and meeting_at=now."""
     result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
@@ -1906,6 +2645,8 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
     if general_meeting.status == GeneralMeetingStatus.closed:
         raise HTTPException(status_code=409, detail="General Meeting is already closed")
 
+    logger.info("meeting_close_initiated", agm_id=str(general_meeting_id))
+
     # Close the General Meeting
     now = datetime.now(UTC)
     general_meeting.status = GeneralMeetingStatus.closed
@@ -1924,6 +2665,16 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
         and (meeting_at_aware is None or meeting_at_aware <= now)
     ):
         general_meeting.voting_closes_at = now
+
+    # Close all motions that have not yet been individually closed
+    open_motions_result = await db.execute(
+        select(Motion).where(
+            Motion.general_meeting_id == general_meeting_id,
+            Motion.voting_closed_at.is_(None),
+        )
+    )
+    for open_motion in open_motions_result.scalars().all():
+        open_motion.voting_closed_at = general_meeting.closed_at
 
     # Delete draft votes
     await db.execute(
@@ -1975,6 +2726,12 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
                 row[0]: row[1] for row in proxies_result.all() if row[1]
             }
 
+            # Pre-load lot_number for absent lots to include in the warning (RR5-12)
+            absent_lot_owners_result = await db.execute(
+                select(LotOwner.id, LotOwner.lot_number).where(LotOwner.id.in_(absent_lot_owner_ids))
+            )
+            absent_lot_number_map: dict[uuid.UUID, str] = {row[0]: row[1] for row in absent_lot_owners_result.all()}
+
             for lid in absent_lot_owner_ids:
                 owner_emails = emails_by_owner.get(lid, [])
                 proxy_email_val = proxy_by_owner.get(lid)
@@ -1982,6 +2739,13 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
                 contact_emails = list(owner_emails)
                 if proxy_email_val and proxy_email_val not in contact_emails:
                     contact_emails.append(proxy_email_val)
+                # RR5-12: Warn when a lot has no contact emails at all
+                if not contact_emails:
+                    logger.warning(
+                        "lot_no_contact_email",
+                        lot_id=str(lid),
+                        lot_number=absent_lot_number_map.get(lid, "unknown"),
+                    )
                 voter_email_str = ", ".join(contact_emails)
                 db.add(BallotSubmission(
                     general_meeting_id=general_meeting_id,
@@ -1999,13 +2763,180 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
     )
     db.add(email_delivery)
 
+    # RR4-04: Commit ballot data BEFORE computing multi-choice outcomes so that
+    # compute_multi_choice_outcomes reads fully-committed Vote rows, not
+    # in-flight rows that may be rolled back.
     await db.commit()
     await db.refresh(general_meeting)
 
-    # Stub: log email delivery trigger
-    logger.info("Email delivery triggered for General Meeting %s", general_meeting_id)
+    # Compute multi-choice pass/fail outcomes (Slice 4) — runs after commit
+    # so it reads the committed ballot data.
+    await compute_multi_choice_outcomes(general_meeting_id, db)
+
+    absent_count = len(absent_lot_owner_ids) if eligible_lot_owner_ids else 0
+    lot_count = len(eligible_lot_owner_ids) if eligible_lot_owner_ids else 0
+    logger.info(
+        "meeting_closed",
+        agm_id=str(general_meeting_id),
+        lot_count=lot_count,
+        absent_count=absent_count,
+        email_triggered=True,
+    )
 
     return general_meeting
+
+
+async def compute_multi_choice_outcomes(general_meeting_id: uuid.UUID, db: AsyncSession) -> None:
+    """Compute and persist pass/fail/tie outcomes for all multi-choice motions in the meeting.
+
+    Algorithm (per motion):
+    1. total_building_entitlement = sum of all AGMLotWeight.unit_entitlement_snapshot for the meeting.
+    2. For each option:
+       - for_entitlement_sum = sum of UOE for lots with Vote.choice = "selected" for this option.
+       - against_entitlement_sum = sum of UOE for lots with Vote.choice = "against" for this option.
+    3. Mark option as "fail" if against_entitlement_sum / total_building_entitlement > 0.50.
+    4. Among remaining (non-failed) options, rank by for_entitlement_sum descending.
+    5. Top option_limit ranked options: check for ties at the boundary.
+       - If position option_limit and option_limit+1 have the same for_entitlement_sum,
+         mark both (and all others at the boundary) as "tie".
+       - Positions 1..option_limit without a tie boundary: mark "pass".
+       - Positions after option_limit without tie: mark "fail".
+    6. Persist outcome on each MotionOption row.
+    """
+    # Load motions for this meeting
+    motions_result = await db.execute(
+        select(Motion).where(
+            Motion.general_meeting_id == general_meeting_id,
+            Motion.is_multi_choice == True,  # noqa: E712
+        )
+    )
+    mc_motions = list(motions_result.scalars().all())
+    if not mc_motions:
+        return
+
+    # Total building entitlement for this meeting
+    weights_result = await db.execute(
+        select(func.sum(GeneralMeetingLotWeight.unit_entitlement_snapshot)).where(
+            GeneralMeetingLotWeight.general_meeting_id == general_meeting_id
+        )
+    )
+    total_entitlement = weights_result.scalar() or 0
+
+    # RR4-06: Use a single SQL GROUP BY aggregate query to count and sum entitlements
+    # per (option_id, choice), avoiding O(V) Python-side iteration over all votes.
+    # This is O(1) in application memory regardless of vote count.
+    agg_rows = await db.execute(
+        select(
+            Vote.motion_option_id,
+            Vote.choice,
+            func.count(Vote.id).label("voter_count"),
+            func.coalesce(
+                func.sum(GeneralMeetingLotWeight.unit_entitlement_snapshot), 0
+            ).label("entitlement_sum"),
+        )
+        .join(
+            GeneralMeetingLotWeight,
+            (GeneralMeetingLotWeight.lot_owner_id == Vote.lot_owner_id)
+            & (GeneralMeetingLotWeight.general_meeting_id == general_meeting_id),
+            isouter=True,
+        )
+        .where(
+            Vote.general_meeting_id == general_meeting_id,
+            Vote.status == VoteStatus.submitted,
+            Vote.motion_option_id.is_not(None),
+        )
+        .group_by(Vote.motion_option_id, Vote.choice)
+    )
+    # Index aggregated results by (option_id, choice_str) for O(1) lookup
+    agg_by_opt_choice: dict[tuple[uuid.UUID, str], tuple[int, int]] = {}
+    for row in agg_rows.all():
+        opt_id_key = row[0]
+        choice_str = row[1].value if hasattr(row[1], "value") else row[1]
+        agg_by_opt_choice[(opt_id_key, choice_str)] = (int(row[2]), int(row[3]))
+
+    for motion in mc_motions:
+        # Load options for this motion
+        opts_result = await db.execute(
+            select(MotionOption)
+            .where(MotionOption.motion_id == motion.id)
+            .order_by(MotionOption.display_order)
+        )
+        options = list(opts_result.scalars().all())
+        if not options:
+            continue
+
+        option_limit = motion.option_limit or len(options)
+
+        # Read per-option tallies from the pre-aggregated lookup
+        for_voter_counts: dict[uuid.UUID, int] = {}
+        for_sums: dict[uuid.UUID, int] = {}
+        against_voter_counts: dict[uuid.UUID, int] = {}
+        against_sums: dict[uuid.UUID, int] = {}
+        abstained_voter_counts: dict[uuid.UUID, int] = {}
+        abstained_sums: dict[uuid.UUID, int] = {}
+        for opt in options:
+            fc, fs = agg_by_opt_choice.get((opt.id, "selected"), (0, 0))
+            ac, as_ = agg_by_opt_choice.get((opt.id, "against"), (0, 0))
+            abc, abs_ = agg_by_opt_choice.get((opt.id, "abstained"), (0, 0))
+            for_voter_counts[opt.id] = fc
+            for_sums[opt.id] = fs
+            against_voter_counts[opt.id] = ac
+            against_sums[opt.id] = as_
+            abstained_voter_counts[opt.id] = abc
+            abstained_sums[opt.id] = abs_
+
+        # Step 3: mark failed options (>50% against)
+        failed_by_against: set[uuid.UUID] = set()
+        if total_entitlement > 0:
+            for opt in options:
+                if against_sums.get(opt.id, 0) / total_entitlement > 0.50:
+                    failed_by_against.add(opt.id)
+
+        # Step 4 & 5: rank remaining options by for_entitlement_sum
+        remaining = [opt for opt in options if opt.id not in failed_by_against]
+        remaining.sort(key=lambda o: for_sums.get(o.id, 0), reverse=True)
+
+        # Determine outcomes
+        outcome_map: dict[uuid.UUID, str] = {}
+
+        # All against-failed options are "fail"
+        for opt_id in failed_by_against:
+            outcome_map[opt_id] = "fail"
+
+        if remaining:
+            # Check for tie at boundary (position option_limit vs option_limit+1)
+            if len(remaining) > option_limit:
+                boundary_score = for_sums.get(remaining[option_limit - 1].id, 0)
+                next_score = for_sums.get(remaining[option_limit].id, 0)
+                if boundary_score == next_score:
+                    # Tie: mark all options with boundary_score as "tie"
+                    for opt in remaining:
+                        if for_sums.get(opt.id, 0) == boundary_score:
+                            outcome_map[opt.id] = "tie"
+                        elif for_sums.get(opt.id, 0) > boundary_score:
+                            outcome_map[opt.id] = "pass"
+                        else:
+                            outcome_map[opt.id] = "fail"
+                else:
+                    # No tie at boundary
+                    for i, opt in enumerate(remaining):
+                        outcome_map[opt.id] = "pass" if i < option_limit else "fail"
+            else:
+                # All remaining options fit within the limit — all pass
+                for opt in remaining:
+                    outcome_map[opt.id] = "pass"
+
+        # Persist outcomes and all six tally snapshot fields
+        for opt in options:
+            opt.outcome = outcome_map.get(opt.id)
+            opt.for_voter_count = for_voter_counts.get(opt.id, 0)
+            opt.for_entitlement_sum = for_sums.get(opt.id, 0)
+            opt.against_voter_count = against_voter_counts.get(opt.id, 0)
+            opt.against_entitlement_sum = against_sums.get(opt.id, 0)
+            opt.abstained_voter_count = abstained_voter_counts.get(opt.id, 0)
+            opt.abstained_entitlement_sum = abstained_sums.get(opt.id, 0)
+
+    await db.flush()
 
 
 async def delete_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession) -> None:
@@ -2015,7 +2946,28 @@ async def delete_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession
         raise HTTPException(status_code=404, detail="General Meeting not found")
     if meeting.status == GeneralMeetingStatus.open:
         raise HTTPException(status_code=409, detail="Cannot delete an open General Meeting")
-    await db.delete(meeting)
+    # RR5-11: Block deletion of pending meetings that already have data (motions or lot weights),
+    # to prevent accidental loss of configured but not-yet-started meetings.
+    if meeting.status == GeneralMeetingStatus.pending:
+        motion_count_result = await db.execute(
+            select(func.count()).select_from(Motion).where(Motion.general_meeting_id == general_meeting_id)
+        )
+        motion_count = motion_count_result.scalar_one()
+        if motion_count > 0:
+            raise HTTPException(status_code=409, detail="Cannot delete a pending General Meeting that has motions or lot weights")
+        weight_count_result = await db.execute(
+            select(func.count()).select_from(GeneralMeetingLotWeight).where(
+                GeneralMeetingLotWeight.general_meeting_id == general_meeting_id
+            )
+        )
+        weight_count = weight_count_result.scalar_one()
+        if weight_count > 0:
+            raise HTTPException(status_code=409, detail="Cannot delete a pending General Meeting that has motions or lot weights")
+    # Use a statement-level DELETE so PostgreSQL's ondelete=CASCADE FK constraints handle
+    # child rows (votes, motions, ballot_submissions, etc.) at the DB level.  The ORM-level
+    # db.delete() path requires all child collections to be eagerly loaded in the async
+    # session; without that it raises a MissingGreenlet / lazy-load error at runtime.
+    await db.execute(delete(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
     await db.commit()
 
 
@@ -2044,7 +2996,7 @@ async def resend_report(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict
     await db.commit()
 
     # Stub: log email delivery trigger
-    logger.info("Email delivery triggered for General Meeting %s", general_meeting_id)
+    logger.info("email_delivery_triggered", agm_id=str(general_meeting_id))
 
     return {"queued": True}
 
@@ -2227,12 +3179,18 @@ def _parse_proxy_csv_rows(content: bytes) -> list[dict]:
 
     rows = []
     for row in raw_reader:
-        lot_number = row.get("Lot#") or row.get("lot#") or ""
         # Build a case-insensitive lookup
         row_lower = {k.strip().lower(): v for k, v in row.items()}
         lot_number = row_lower.get("lot#", "").strip()
         proxy_email = row_lower.get("proxy email", "").strip()
-        rows.append({"lot_number": lot_number, "proxy_email": proxy_email})
+        given_name = row_lower.get("proxy_given_name", "").strip() or None
+        surname = row_lower.get("proxy_surname", "").strip() or None
+        rows.append({
+            "lot_number": lot_number,
+            "proxy_email": proxy_email,
+            "given_name": given_name,
+            "surname": surname,
+        })
     return rows
 
 
@@ -2241,9 +3199,10 @@ def _parse_proxy_excel_rows(content: bytes) -> list[dict]:
 
     Raises HTTPException 422 on invalid file or missing headers.
     """
+    # RR4-26: Narrow exception catch to file-format errors only; re-raise unexpected ones.
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
-    except Exception as exc:
+    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
 
     ws = wb.worksheets[0]
@@ -2269,6 +3228,8 @@ def _parse_proxy_excel_rows(content: bytes) -> list[dict]:
 
     lot_idx = headers.index("lot#")
     proxy_idx = headers.index("proxy email")
+    given_name_idx = headers.index("proxy_given_name") if "proxy_given_name" in headers else None
+    surname_idx = headers.index("proxy_surname") if "proxy_surname" in headers else None
 
     data_rows = list(rows_iter)
     wb.close()
@@ -2286,6 +3247,8 @@ def _parse_proxy_excel_rows(content: bytes) -> list[dict]:
         rows.append({
             "lot_number": _cell(lot_idx),
             "proxy_email": _cell(proxy_idx),
+            "given_name": _cell(given_name_idx) or None if given_name_idx is not None else None,
+            "surname": _cell(surname_idx) or None if surname_idx is not None else None,
         })
     return rows
 
@@ -2312,6 +3275,16 @@ async def import_proxies(
         lo.lot_number: lo for lo in existing_result.scalars().all()
     }
 
+    # Batch-load all existing proxies for this building's lots in a single query
+    # to avoid N+1 SELECT per row (RR5-04).
+    lot_owner_ids = list({lo.id for lo in lot_owner_map.values()})
+    existing_proxies_result = await db.execute(
+        select(LotProxy).where(LotProxy.lot_owner_id.in_(lot_owner_ids))
+    )
+    proxy_map: dict[uuid.UUID, LotProxy] = {
+        p.lot_owner_id: p for p in existing_proxies_result.scalars().all()
+    }
+
     upserted = 0
     removed = 0
     skipped = 0
@@ -2330,11 +3303,11 @@ async def import_proxies(
             skipped += 1
             continue
 
-        # Load existing proxy for this lot owner
-        proxy_result = await db.execute(
-            select(LotProxy).where(LotProxy.lot_owner_id == lot_owner.id)
-        )
-        existing_proxy = proxy_result.scalar_one_or_none()
+        # Lookup existing proxy from pre-loaded dict (RR5-04: no per-row SELECT)
+        existing_proxy = proxy_map.get(lot_owner.id)
+
+        given_name = row.get("given_name")
+        surname = row.get("surname")
 
         if proxy_email == "":
             # Remove nomination
@@ -2345,8 +3318,17 @@ async def import_proxies(
             # Upsert nomination
             if existing_proxy is not None:
                 existing_proxy.proxy_email = proxy_email
+                if given_name is not None:
+                    existing_proxy.given_name = given_name
+                if surname is not None:
+                    existing_proxy.surname = surname
             else:
-                db.add(LotProxy(lot_owner_id=lot_owner.id, proxy_email=proxy_email))
+                db.add(LotProxy(
+                    lot_owner_id=lot_owner.id,
+                    proxy_email=proxy_email,
+                    given_name=given_name,
+                    surname=surname,
+                ))
             upserted += 1
 
     await db.commit()
@@ -2638,9 +3620,10 @@ def _parse_financial_position_excel_rows(content: bytes) -> list[dict]:
 
     Raises HTTPException 422 on invalid file or missing headers.
     """
+    # RR4-26: Narrow exception catch to file-format errors only; re-raise unexpected ones.
     try:
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
-    except Exception as exc:
+    except (InvalidFileException, zipfile.BadZipFile, KeyError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=f"Invalid Excel file: {exc}") from exc
 
     ws = wb.worksheets[0]
@@ -2768,3 +3751,324 @@ async def import_financial_positions_from_excel(
 ) -> dict[str, int]:
     rows = _parse_financial_position_excel_rows(content)
     return await import_financial_positions(building_id, rows, db)
+
+
+# ---------------------------------------------------------------------------
+# Admin in-person vote entry (US-AVE-01, US-AVE-02, US-AVE-03)
+# ---------------------------------------------------------------------------
+
+
+async def enter_votes_for_meeting(
+    general_meeting_id: uuid.UUID,
+    request: AdminVoteEntryRequest,
+    db: AsyncSession,
+    admin_username: str | None = None,
+) -> dict[str, int]:
+    """
+    Enter votes on behalf of in-person lot owners (US-AVE-01/02).
+
+    Business rules:
+    - Meeting must be open; returns 409 otherwise.
+    - If a lot already has a real (non-absent) BallotSubmission, it is skipped
+      (app-submitted ballots take precedence); skipped_count is incremented.
+    - For each submitted lot, all visible motions are recorded:
+        * in-arrear lots: not_eligible for general/multi_choice; normal for special
+        * inline vote provided → use that choice
+        * no inline vote provided → abstained
+        * multi-choice options provided → validate option_ids and option_limit
+        * no options provided for multi-choice → abstained
+    - All created BallotSubmission rows have submitted_by_admin = True and
+      submitted_by_admin_username = admin_username.
+    - Returns {"submitted_count": N, "skipped_count": M}.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from app.models import (
+        MotionType as _MotionType,
+    )
+
+    # Fetch and validate meeting
+    meeting_result = await db.execute(
+        select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id)
+    )
+    meeting = meeting_result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+
+    effective = get_effective_status(meeting)
+    if effective != GeneralMeetingStatus.open:
+        raise HTTPException(status_code=409, detail="Meeting is not open")
+
+    # Collect all lot_owner_ids being entered
+    lot_owner_ids = [e.lot_owner_id for e in request.entries]
+    if not lot_owner_ids:
+        return {"submitted_count": 0, "skipped_count": 0}
+
+    # Validate all lot_owner_ids exist in the DB
+    lo_result = await db.execute(
+        select(LotOwner.id).where(LotOwner.id.in_(lot_owner_ids))
+    )
+    found_ids: set[uuid.UUID] = {row[0] for row in lo_result.all()}
+    unknown = [str(lid) for lid in lot_owner_ids if lid not in found_ids]
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unknown lot_owner_ids: {unknown}",
+        )
+
+    # Check existing real (non-absent) submissions for these lots.
+    # Retained to distinguish "new submission" from "re-entry submission" in the
+    # BallotSubmission creation step (Fix 4a).
+    existing_result = await db.execute(
+        select(BallotSubmission.lot_owner_id).where(
+            BallotSubmission.general_meeting_id == general_meeting_id,
+            BallotSubmission.lot_owner_id.in_(lot_owner_ids),
+            BallotSubmission.is_absent == False,  # noqa: E712
+        )
+    )
+    already_submitted: set[uuid.UUID] = {row[0] for row in existing_result.all()}
+
+    # Load already-voted motion IDs per lot (single IN query).
+    # Used by the per-motion skip logic to allow admin vote entry on partially-submitted
+    # lots (Fix 4a: mirrors the re-entry logic in submit_ballot).
+    all_voted_result = await db.execute(
+        select(Vote.lot_owner_id, Vote.motion_id).where(
+            Vote.general_meeting_id == general_meeting_id,
+            Vote.lot_owner_id.in_(lot_owner_ids),
+            Vote.status == VoteStatus.submitted,
+        )
+    )
+    already_voted_by_lot: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for row in all_voted_result.all():
+        already_voted_by_lot.setdefault(row[0], set()).add(row[1])
+
+    # Load financial position snapshots for all lots
+    weights_result = await db.execute(
+        select(GeneralMeetingLotWeight).where(
+            GeneralMeetingLotWeight.general_meeting_id == general_meeting_id,
+            GeneralMeetingLotWeight.lot_owner_id.in_(lot_owner_ids),
+        )
+    )
+    weight_by_lot: dict[uuid.UUID, GeneralMeetingLotWeight] = {
+        w.lot_owner_id: w for w in weights_result.scalars().all()
+    }
+
+    # Load all visible motions for this meeting
+    motions_result = await db.execute(
+        select(Motion)
+        .where(
+            Motion.general_meeting_id == general_meeting_id,
+            Motion.is_visible == True,  # noqa: E712
+        )
+        .order_by(Motion.display_order)
+    )
+    visible_motions = list(motions_result.scalars().all())
+    valid_motion_ids = {m.id for m in visible_motions}
+
+    # Load multi-choice options for validation
+    mc_motion_ids = [m.id for m in visible_motions if m.is_multi_choice]
+    mc_options_map: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if mc_motion_ids:
+        opts_result = await db.execute(
+            select(MotionOption).where(MotionOption.motion_id.in_(mc_motion_ids))
+        )
+        for opt in opts_result.scalars().all():
+            mc_options_map.setdefault(opt.motion_id, set()).add(opt.id)
+
+    submitted_count = 0
+    skipped_count = 0
+
+    for entry in request.entries:
+        lot_owner_id = entry.lot_owner_id
+
+        # Determine financial position
+        weight = weight_by_lot.get(lot_owner_id)
+        is_in_arrear = (
+            weight is not None
+            and weight.financial_position_snapshot == FinancialPositionSnapshot.in_arrear
+        )
+
+        # Build inline vote lookup: motion_id -> VoteChoice
+        inline_lookup: dict[uuid.UUID, VoteChoice] = {}
+        for v in entry.votes:
+            mid = uuid.UUID(str(v["motion_id"])) if not isinstance(v["motion_id"], uuid.UUID) else v["motion_id"]
+            choice_str = str(v["choice"]).lower()
+            choice_map = {
+                "yes": VoteChoice.yes,
+                "no": VoteChoice.no,
+                "abstained": VoteChoice.abstained,
+                "for": VoteChoice.yes,
+                "against": VoteChoice.no,
+            }
+            if choice_str not in choice_map:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Invalid choice '{v['choice']}' for motion {mid}",
+                )
+            if mid not in valid_motion_ids:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown motion ID {mid}",
+                )
+            inline_lookup[mid] = choice_map[choice_str]
+
+        # Build multi-choice vote lookup (US-AVE2-01):
+        # motion_id -> list of (option_id, VoteChoice) pairs
+        # Supports both new option_choices format and legacy option_ids format.
+        mc_lookup: dict[uuid.UUID, list[tuple[uuid.UUID, VoteChoice]]] = {}
+        for mv in entry.multi_choice_votes:
+            mid = uuid.UUID(str(mv["motion_id"])) if not isinstance(mv["motion_id"], uuid.UUID) else mv["motion_id"]
+            if mid not in valid_motion_ids:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Unknown motion ID {mid}",
+                )
+            valid_opts = mc_options_map.get(mid, set())
+
+            # New format: option_choices takes precedence over option_ids
+            raw_option_choices = mv.get("option_choices") or []
+            raw_option_ids = mv.get("option_ids") or []
+
+            option_choice_map = {
+                "for": VoteChoice.selected,
+                "against": VoteChoice.against,
+                "abstained": VoteChoice.abstained,
+            }
+
+            if raw_option_choices:
+                # New format: [{option_id, choice}]
+                pairs: list[tuple[uuid.UUID, VoteChoice]] = []
+                for oc in raw_option_choices:
+                    oid = uuid.UUID(str(oc["option_id"])) if not isinstance(oc.get("option_id"), uuid.UUID) else oc["option_id"]
+                    if oid not in valid_opts:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"Invalid option ID {oid} for motion {mid}",
+                        )
+                    choice_str = str(oc.get("choice", "")).lower()
+                    if choice_str not in option_choice_map:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"Invalid choice '{oc.get('choice')}' for option {oid}",
+                        )
+                    pairs.append((oid, option_choice_map[choice_str]))
+                mc_lookup[mid] = pairs
+            else:
+                # Legacy format: option_ids treated as all "for"
+                opt_ids = [
+                    uuid.UUID(str(oid)) if not isinstance(oid, uuid.UUID) else oid
+                    for oid in raw_option_ids
+                ]
+                for oid in opt_ids:
+                    if oid not in valid_opts:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"Invalid option ID {oid} for motion {mid}",
+                        )
+                mc_lookup[mid] = [(oid, VoteChoice.selected) for oid in opt_ids]
+
+        # Build Vote rows for all visible motions.
+        # Fix 4a: skip motions this lot has already voted on (per-motion check),
+        # mirroring the re-entry logic in submit_ballot.  This allows admin vote entry
+        # on partially-submitted lots (e.g. voter submitted M1 online; admin enters M2).
+        already_voted_for_lot: set[uuid.UUID] = already_voted_by_lot.get(lot_owner_id, set())
+        votes_to_add: list[Vote] = []
+        for motion in visible_motions:
+            if motion.id in already_voted_for_lot:
+                continue  # already voted on this motion — skip
+
+            motion_type = motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type
+
+            if motion.is_multi_choice:
+                if is_in_arrear:
+                    votes_to_add.append(Vote(
+                        general_meeting_id=general_meeting_id,
+                        motion_id=motion.id,
+                        voter_email="admin",
+                        lot_owner_id=lot_owner_id,
+                        choice=VoteChoice.not_eligible,
+                        status=VoteStatus.submitted,
+                    ))
+                    continue
+
+                option_pairs = mc_lookup.get(motion.id, [])
+                if not option_pairs:
+                    # No options specified for this motion — skip it entirely.
+                    # The frontend only sends motions the admin explicitly interacted with,
+                    # so an absent motion means the admin made no choice and it should
+                    # remain unrecorded for future entry.
+                    continue
+                else:
+                    for opt_id, vote_choice in option_pairs:
+                        votes_to_add.append(Vote(
+                            general_meeting_id=general_meeting_id,
+                            motion_id=motion.id,
+                            voter_email="admin",
+                            lot_owner_id=lot_owner_id,
+                            choice=vote_choice,
+                            motion_option_id=opt_id,
+                            status=VoteStatus.submitted,
+                        ))
+                continue
+
+            # Standard motion: not_eligible for in-arrear on general motions
+            if is_in_arrear and motion_type == "general":
+                votes_to_add.append(Vote(
+                    general_meeting_id=general_meeting_id,
+                    motion_id=motion.id,
+                    voter_email="admin",
+                    lot_owner_id=lot_owner_id,
+                    choice=VoteChoice.not_eligible,
+                    status=VoteStatus.submitted,
+                ))
+                continue
+
+            if motion.id not in inline_lookup:
+                # No explicit choice supplied for this motion — skip it entirely.
+                # The frontend only sends motions the admin explicitly set, so an absent
+                # motion means no choice was made and it should remain unrecorded for
+                # future entry.
+                continue
+            choice = inline_lookup[motion.id]
+            votes_to_add.append(Vote(
+                general_meeting_id=general_meeting_id,
+                motion_id=motion.id,
+                voter_email="admin",
+                lot_owner_id=lot_owner_id,
+                choice=choice,
+                status=VoteStatus.submitted,
+            ))
+
+        # If all motions for this lot are already voted, skip it entirely.
+        if not votes_to_add:
+            skipped_count += 1
+            continue
+
+        # Create BallotSubmission with submitted_by_admin=True (only when not already
+        # submitted).  On re-entry (lot_owner_id in already_submitted), the existing
+        # BallotSubmission is reused and only the new Vote rows are inserted.
+        # RR4-05: Use a savepoint (begin_nested) so that only this lot's flush is
+        # rolled back on IntegrityError.  Previously a full session rollback wiped
+        # all successfully flushed lots that preceded the conflicting one.
+        try:
+            async with db.begin_nested():
+                if lot_owner_id not in already_submitted:
+                    submission = BallotSubmission(
+                        general_meeting_id=general_meeting_id,
+                        lot_owner_id=lot_owner_id,
+                        voter_email="admin",
+                        proxy_email=None,
+                        submitted_by_admin=True,
+                        submitted_by_admin_username=admin_username,
+                    )
+                    db.add(submission)
+                for vote in votes_to_add:
+                    db.add(vote)
+                await db.flush()
+        except IntegrityError:
+            skipped_count += 1
+            continue
+
+        submitted_count += 1
+
+    await db.commit()
+    return {"submitted_count": submitted_count, "skipped_count": skipped_count}

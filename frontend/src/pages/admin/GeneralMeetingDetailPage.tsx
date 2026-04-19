@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, lazy, Suspense } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -10,6 +10,7 @@ import {
   updateMotion,
   deleteMotion,
   resendReport,
+  closeMotion,
 } from "../../api/admin";
 import type { GeneralMeetingDetail, AddMotionRequest, UpdateMotionRequest, MotionDetail } from "../../api/admin";
 import type { MotionType } from "../../types";
@@ -20,11 +21,17 @@ import EmailStatusBanner from "../../components/admin/EmailStatusBanner";
 import AGMReportView from "../../components/admin/AGMReportView";
 import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
 import MotionManagementTable from "../../components/admin/MotionManagementTable";
+import AdminVoteEntryPanel from "./AdminVoteEntryPanel";
 import { formatLocalDateTime } from "../../utils/dateTime";
+import { useBranding } from "../../context/BrandingContext";
+
+const AgmQrCode = lazy(() => import("../../components/admin/AgmQrCode"));
+const AgmQrCodeModal = lazy(() => import("../../components/admin/AgmQrCodeModal"));
 
 interface DeleteMeetingConfirmModalProps {
   meetingTitle: string;
   deleting: boolean;
+  error?: string | null;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -87,7 +94,7 @@ function DeleteMotionConfirmModal({ onConfirm, onCancel }: DeleteMotionConfirmMo
   );
 }
 
-function DeleteMeetingConfirmModal({ meetingTitle, deleting, onConfirm, onCancel }: DeleteMeetingConfirmModalProps) {
+function DeleteMeetingConfirmModal({ meetingTitle, deleting, error, onConfirm, onCancel }: DeleteMeetingConfirmModalProps) {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.key === "Escape" && !deleting) onCancel();
@@ -127,6 +134,11 @@ function DeleteMeetingConfirmModal({ meetingTitle, deleting, onConfirm, onCancel
         <p style={{ marginBottom: 24, color: "var(--text-secondary)" }}>
           This action cannot be undone. All motions, votes, and ballot submissions for this meeting will be permanently deleted.
         </p>
+        {error && (
+          <p role="alert" style={{ color: "var(--red)", background: "var(--red-bg)", borderRadius: "var(--r-md)", padding: "10px 14px", marginBottom: 16 }}>
+            {error}
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={deleting}>
             Cancel
@@ -140,13 +152,72 @@ function DeleteMeetingConfirmModal({ meetingTitle, deleting, onConfirm, onCancel
   );
 }
 
+// Fix 9: modal dialog to replace the green banner after in-person vote submission
+function VoteEntrySuccessModal({ onClose }: { onClose: () => void }) {
+  const handleClose = useCallback(() => onClose(), [onClose]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") handleClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [handleClose]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="vest-success-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.4)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 1200,
+      }}
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+    >
+      <div
+        style={{
+          background: "var(--white)",
+          borderRadius: "var(--r-lg)",
+          padding: 32,
+          minWidth: 360,
+          maxWidth: 480,
+          width: "100%",
+          boxShadow: "var(--shadow-lg)",
+        }}
+      >
+        <h2 id="vest-success-title" style={{ marginTop: 0, marginBottom: 12 }}>
+          Votes submitted
+        </h2>
+        <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
+          In-person votes have been recorded successfully.
+        </p>
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" className="btn btn--primary" onClick={handleClose}>
+            OK
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function GeneralMeetingDetailPage() {
   const { meetingId } = useParams<{ meetingId: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { effectiveFaviconUrl } = useBranding();
+  // Fix 10: per-motion drill-down — no global collapse needed
   const [visibilityErrors, setVisibilityErrors] = useState<Record<string, string>>({});
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
+  const [deleteMeetingError, setDeleteMeetingError] = useState<string | null>(null);
+  const [showQrModal, setShowQrModal] = useState(false);
 
   // Optimistic motions list — updated immediately on reorder, confirmed on API response
   const [optimisticMotions, setOptimisticMotions] = useState<MotionDetail[] | null>(null);
@@ -221,8 +292,22 @@ export default function GeneralMeetingDetailPage() {
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteGeneralMeeting(meetingId!),
-    onSuccess: () => {
+    onSuccess: async () => {
       navigate("/admin/general-meetings");
+    },
+    onError: (err: Error) => {
+      // Extract the detail message from the raw "HTTP 4xx: {...}" error string
+      let msg = err.message || "Failed to delete meeting";
+      const jsonStart = msg.indexOf("{");
+      if (jsonStart !== -1) {
+        try {
+          const parsed = JSON.parse(msg.slice(jsonStart)) as { detail?: string };
+          if (parsed.detail) msg = parsed.detail;
+        } catch {
+          // leave msg as-is if JSON parse fails
+        }
+      }
+      setDeleteMeetingError(msg);
     },
   });
 
@@ -230,7 +315,7 @@ export default function GeneralMeetingDetailPage() {
   const [resendError, setResendError] = useState<string | null>(null);
   const resendMutation = useMutation({
     mutationFn: () => resendReport(meetingId!),
-    onSuccess: () => {
+    onSuccess: async () => {
       setResendSuccess(true);
       setResendError(null);
     },
@@ -275,13 +360,18 @@ export default function GeneralMeetingDetailPage() {
   // Delete motion confirmation state
   const [pendingDeleteMotionId, setPendingDeleteMotionId] = useState<string | null>(null);
 
+  // Admin vote entry panel
+  const [showVoteEntryPanel, setShowVoteEntryPanel] = useState(false);
+  // Fix 9: modal replaces the old green banner
+  const [showVoteEntrySuccessModal, setShowVoteEntrySuccessModal] = useState(false);
+
   const addMotionMutation = useMutation({
     mutationFn: (data: AddMotionRequest) => addMotionToMeeting(meetingId!, data),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
       setShowAddMotionModal(false);
       setAddMotionError(null);
       setAddMotionForm({ title: "", description: "", motion_type: "general", is_multi_choice: false, motion_number: "", option_limit: "1", options: [{ text: "" }, { text: "" }] });
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
       setAddMotionError(error.message || "Failed to add motion");
@@ -291,10 +381,10 @@ export default function GeneralMeetingDetailPage() {
   const updateMotionMutation = useMutation({
     mutationFn: ({ motionId, data }: { motionId: string; data: UpdateMotionRequest }) =>
       updateMotion(motionId, data),
-    onSuccess: () => {
+    onSuccess: async () => {
       setEditingMotion(null);
       setEditMotionError(null);
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
       setEditMotionError(error.message || "Failed to update motion");
@@ -303,16 +393,41 @@ export default function GeneralMeetingDetailPage() {
 
   const deleteMotionMutation = useMutation({
     mutationFn: (motionId: string) => deleteMotion(motionId),
-    onSuccess: (_data, motionId) => {
+    onSuccess: async (_data, motionId) => {
       setDeleteMotionErrors((prev) => {
         const next = { ...prev };
         delete next[motionId];
         return next;
       });
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error, motionId) => {
       setDeleteMotionErrors((prev) => ({ ...prev, [motionId]: error.message || "Failed to delete motion" }));
+    },
+  });
+
+  // Close Motion state
+  const [closeMotionErrors, setCloseMotionErrors] = useState<Record<string, string>>({});
+  const [pendingCloseMotionId, setPendingCloseMotionId] = useState<string | null>(null);
+  const [pendingCloseMotionConfirmId, setPendingCloseMotionConfirmId] = useState<string | null>(null);
+
+  const closeMotionMutation = useMutation({
+    mutationFn: (motionId: string) => {
+      setPendingCloseMotionId(motionId);
+      return closeMotion(motionId);
+    },
+    onSuccess: async (_data, motionId) => {
+      setPendingCloseMotionId(null);
+      setCloseMotionErrors((prev) => {
+        const next = { ...prev };
+        delete next[motionId];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (error: Error, motionId) => {
+      setPendingCloseMotionId(null);
+      setCloseMotionErrors((prev) => ({ ...prev, [motionId]: error.message || "Failed to close motion" }));
     },
   });
 
@@ -351,9 +466,9 @@ export default function GeneralMeetingDetailPage() {
         : "Failed to update visibility";
       setVisibilityErrors((prev) => ({ ...prev, [variables.motionId]: msg }));
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       setPendingVisibilityMotionId(null);
-      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
   });
 
@@ -411,12 +526,12 @@ export default function GeneralMeetingDetailPage() {
   }
 
   function handleDelete() {
+    setDeleteMeetingError(null);
     setShowDeleteMeetingModal(true);
   }
 
   function handleDeleteMeetingConfirm() {
     deleteMutation.mutate();
-    setShowDeleteMeetingModal(false);
   }
 
   function handleEditSubmit(e: React.FormEvent) {
@@ -483,6 +598,21 @@ export default function GeneralMeetingDetailPage() {
 
   return (
     <div>
+      {showVoteEntryPanel && (
+        <AdminVoteEntryPanel
+          meeting={meeting}
+          onClose={() => setShowVoteEntryPanel(false)}
+          onSuccess={async () => {
+            setShowVoteEntryPanel(false);
+            setShowVoteEntrySuccessModal(true);
+            await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+          }}
+        />
+      )}
+      {/* Fix 9: success modal replaces the old green banner */}
+      {showVoteEntrySuccessModal && (
+        <VoteEntrySuccessModal onClose={() => setShowVoteEntrySuccessModal(false)} />
+      )}
       <button type="button" className="btn btn--ghost back-btn" onClick={() => navigate("/admin/general-meetings")}>
         ← Back
       </button>
@@ -516,47 +646,64 @@ export default function GeneralMeetingDetailPage() {
         )}
       </div>
 
-      <div className="admin-meta">
-        <span className="admin-meta__item">
-          <span className="admin-meta__label">Building</span>
-          {meeting.building_name}
-        </span>
-        <span className="admin-meta__item">
-          <span className="admin-meta__label">Meeting</span>
-          {formatLocalDateTime(meeting.meeting_at)}
-        </span>
-        <span className="admin-meta__item">
-          <span className="admin-meta__label">Voting closes</span>
-          {formatLocalDateTime(meeting.voting_closes_at)}
-        </span>
-        {meeting.closed_at && (
-          <span className="admin-meta__item">
-            <span className="admin-meta__label">Closed at</span>
-            {formatLocalDateTime(meeting.closed_at)}
-          </span>
-        )}
-        <span className="admin-meta__item">
-          <span className="admin-meta__label">Voting link</span>
-          <ShareSummaryLink meetingId={meetingId!} />
-        </span>
-      </div>
+      <div className="meeting-detail-layout">
+        <div className="meeting-detail-layout__info">
+          <div className="admin-meta">
+            <span className="admin-meta__item">
+              <span className="admin-meta__label">Building</span>
+              {meeting.building_name}
+            </span>
+            <span className="admin-meta__item">
+              <span className="admin-meta__label">Meeting</span>
+              {formatLocalDateTime(meeting.meeting_at)}
+            </span>
+            <span className="admin-meta__item">
+              <span className="admin-meta__label">Voting closes</span>
+              {formatLocalDateTime(meeting.voting_closes_at)}
+            </span>
+            {meeting.closed_at && (
+              <span className="admin-meta__item">
+                <span className="admin-meta__label">Closed at</span>
+                {formatLocalDateTime(meeting.closed_at)}
+              </span>
+            )}
+            <span className="admin-meta__item">
+              <span className="admin-meta__label">Voting link</span>
+              <ShareSummaryLink meetingId={meetingId!} />
+            </span>
+          </div>
 
-      <div className="admin-stats">
-        <div className="admin-stats__item">
-          <span className="admin-stats__label">Eligible voters</span>
-          <span className="admin-stats__value">{meeting.total_eligible_voters}</span>
+          <div className="admin-stats">
+            <div className="admin-stats__item">
+              <span className="admin-stats__label">Eligible voters</span>
+              <span className="admin-stats__value">{meeting.total_eligible_voters}</span>
+            </div>
+            <div className="admin-stats__item">
+              <span className="admin-stats__label">Submitted</span>
+              <span className="admin-stats__value">{meeting.total_submitted}</span>
+            </div>
+            <div className="admin-stats__item">
+              <span className="admin-stats__label">Participation</span>
+              <span className="admin-stats__value">
+                {meeting.total_eligible_voters > 0
+                  ? Math.round((meeting.total_submitted / meeting.total_eligible_voters) * 100)
+                  : 0}%
+              </span>
+            </div>
+          </div>
         </div>
-        <div className="admin-stats__item">
-          <span className="admin-stats__label">Submitted</span>
-          <span className="admin-stats__value">{meeting.total_submitted}</span>
-        </div>
-        <div className="admin-stats__item">
-          <span className="admin-stats__label">Participation</span>
-          <span className="admin-stats__value">
-            {meeting.total_eligible_voters > 0
-              ? Math.round((meeting.total_submitted / meeting.total_eligible_voters) * 100)
-              : 0}%
-          </span>
+
+        <div className="meeting-detail-layout__qr">
+          <Suspense fallback={null}>
+            <button
+              type="button"
+              aria-label="Show QR code"
+              className="meeting-detail-layout__qr-btn"
+              onClick={() => setShowQrModal(true)}
+            >
+              <AgmQrCode agmId={meetingId!} faviconUrl={effectiveFaviconUrl} size={160} />
+            </button>
+          </Suspense>
         </div>
       </div>
 
@@ -592,13 +739,24 @@ export default function GeneralMeetingDetailPage() {
       <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
       {meeting.status !== "closed" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => { setShowAddMotionModal(true); setAddMotionError(null); }}
-          >
-            Add Motion
-          </button>
+          <div style={{ display: "flex", gap: "0.5rem" }}>
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => { setShowAddMotionModal(true); setAddMotionError(null); }}
+            >
+              Add Motion
+            </button>
+            {meeting.status === "open" && (
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setShowVoteEntryPanel(true)}
+              >
+                Enter In-Person Votes
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <button
               type="button"
@@ -659,12 +817,83 @@ export default function GeneralMeetingDetailPage() {
             setPendingDeleteMotionId(motionId);
           }}
           deleteMotionErrors={deleteMotionErrors}
+          onCloseMotion={(motionId) => {
+            setCloseMotionErrors((prev) => {
+              const next = { ...prev };
+              delete next[motionId];
+              return next;
+            });
+            setPendingCloseMotionConfirmId(motionId);
+          }}
+          closeMotionErrors={closeMotionErrors}
+          pendingCloseMotionId={pendingCloseMotionId}
         />
       )}
 
 
-      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Results Report</h2>
-      <AGMReportView motions={meeting.motions} agmTitle={meeting.title} totalEntitlement={meeting.total_entitlement} />
+      {/* Fix 10: Results Report always visible; per-motion drill-down inside AGMReportView */}
+      <div style={{ marginTop: 32 }}>
+        <h2 style={{ fontSize: "1.25rem", fontWeight: 700, marginBottom: 16 }}>Results Report</h2>
+        <AGMReportView motions={meeting.motions} agmTitle={meeting.title} totalEntitlement={meeting.total_entitlement} />
+      </div>
+
+      {/* Close Motion Confirmation Modal */}
+      {pendingCloseMotionConfirmId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Close Motion Voting"
+          data-testid="close-motion-confirm-dialog"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(e) => { if (e.target === e.currentTarget) setPendingCloseMotionConfirmId(null); }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              padding: 32,
+              minWidth: 360,
+              maxWidth: 480,
+              width: "100%",
+              boxShadow: "0 4px 24px rgba(0,0,0,0.15)",
+            }}
+          >
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Close voting for this motion?</h2>
+            <p style={{ marginBottom: 24, color: "var(--text-secondary)" }}>
+              Once closed, voters will no longer be able to submit votes for this motion. This cannot be undone.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={() => setPendingCloseMotionConfirmId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                data-testid="close-motion-confirm-btn"
+                onClick={() => {
+                  const id = pendingCloseMotionConfirmId;
+                  setPendingCloseMotionConfirmId(null);
+                  closeMotionMutation.mutate(id);
+                }}
+              >
+                Close Voting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete Motion Modal */}
       {pendingDeleteMotionId && (
@@ -682,8 +911,9 @@ export default function GeneralMeetingDetailPage() {
         <DeleteMeetingConfirmModal
           meetingTitle={meeting.title}
           deleting={deleteMutation.isPending}
+          error={deleteMeetingError}
           onConfirm={handleDeleteMeetingConfirm}
-          onCancel={() => setShowDeleteMeetingModal(false)}
+          onCancel={() => { setShowDeleteMeetingModal(false); setDeleteMeetingError(null); }}
         />
       )}
 
@@ -885,6 +1115,17 @@ export default function GeneralMeetingDetailPage() {
             </form>
           </div>
         </>
+      )}
+
+      {/* QR Code Modal */}
+      {showQrModal && (
+        <Suspense fallback={null}>
+          <AgmQrCodeModal
+            agmId={meetingId!}
+            faviconUrl={effectiveFaviconUrl}
+            onClose={() => setShowQrModal(false)}
+          />
+        </Suspense>
       )}
 
       {/* Edit Motion Modal */}

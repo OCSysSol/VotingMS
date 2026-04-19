@@ -1,6 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import compression from "vite-plugin-compression";
+import compression from "vite-plugin-compression2";
 
 export default defineConfig({
   plugins: [
@@ -11,10 +11,18 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          vendor: ["react", "react-dom", "react-router-dom"],
-          // xlsx is NOT listed here — it is pulled in only via dynamic imports
+        manualChunks(id) {
+          // Group React runtime into a vendor chunk for better caching.
+          // exceljs is NOT listed here — it is pulled in only via dynamic imports
           // inside parseMotionsExcel.ts, so it will only be downloaded by admins.
+          if (
+            id.includes("node_modules/react/") ||
+            id.includes("node_modules/react-dom/") ||
+            id.includes("node_modules/react-router-dom/") ||
+            id.includes("node_modules/react-router/")
+          ) {
+            return "vendor";
+          }
         },
       },
     },
@@ -73,6 +81,9 @@ export default defineConfig({
         "src/components/admin/Pagination.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/admin/BuildingsPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
         "src/pages/admin/GeneralMeetingListPage.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        // Wave 5 code quality (US-CQM-03)
+        "src/components/vote/LotSelectionSection.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
+        "src/components/vote/SubmitSection.tsx": { lines: 100, functions: 100, branches: 100, statements: 100 },
       },
     },
   },

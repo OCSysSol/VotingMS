@@ -216,6 +216,7 @@ class TestImportBuildings:
         assert response.status_code == 422
 
 
+
 # ---------------------------------------------------------------------------
 # GET /api/admin/buildings
 # ---------------------------------------------------------------------------
@@ -425,7 +426,7 @@ class TestCountBuildings:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Omitting ?name returns the same count as the unfiltered list."""
-        list_resp = await client.get("/api/admin/buildings")
+        list_resp = await client.get("/api/admin/buildings?limit=1000")
         count_resp = await client.get("/api/admin/buildings/count")
         assert list_resp.status_code == 200
         assert count_resp.status_code == 200
@@ -437,7 +438,7 @@ class TestCountBuildings:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """?name= (empty string) matches everything — same as no filter."""
-        list_resp = await client.get("/api/admin/buildings")
+        list_resp = await client.get("/api/admin/buildings?limit=1000")
         count_resp = await client.get("/api/admin/buildings/count?name=")
         assert list_resp.status_code == 200
         assert count_resp.status_code == 200
@@ -869,6 +870,7 @@ class TestImportBuildingsExcel:
         assert response.status_code == 422
 
 
+
 # ---------------------------------------------------------------------------
 # POST /api/admin/buildings/{building_id}/archive
 # ---------------------------------------------------------------------------
@@ -1026,6 +1028,36 @@ class TestArchiveBuilding:
 
         await db_session.refresh(lo)
         assert lo.is_archived is True
+
+    async def test_archive_removes_building_from_active_list(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR3-41: Archiving a building removes it from the active (?is_archived=false) list."""
+        b = Building(name="RR341 Archive Active List", manager_email="rr341al@test.com")
+        db_session.add(b)
+        await db_session.commit()
+
+        # Verify it appears in active list before archive
+        pre_resp = await client.get("/api/admin/buildings?is_archived=false")
+        assert pre_resp.status_code == 200
+        names_before = [x["name"] for x in pre_resp.json()]
+        assert b.name in names_before
+
+        # Archive it
+        archive_resp = await client.post(f"/api/admin/buildings/{b.id}/archive")
+        assert archive_resp.status_code == 200
+
+        # Should no longer appear in active list
+        post_resp = await client.get("/api/admin/buildings?is_archived=false")
+        assert post_resp.status_code == 200
+        names_after = [x["name"] for x in post_resp.json()]
+        assert b.name not in names_after
+
+        # Should appear in archived list
+        arch_resp = await client.get("/api/admin/buildings?is_archived=true")
+        assert arch_resp.status_code == 200
+        archived_names = [x["name"] for x in arch_resp.json()]
+        assert b.name in archived_names
 
 
 # ---------------------------------------------------------------------------
@@ -1708,3 +1740,72 @@ class TestListBuildingsSort:
         assert response.status_code == 200
         emails = [b["manager_email"].lower() for b in response.json()]
         assert emails == sorted(emails)
+
+
+# ---------------------------------------------------------------------------
+# RR3-34: File upload size limits (buildings import)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildingImportFileSizeLimit:
+    """File uploads over 5 MB must be rejected with 413 (RR3-34)."""
+
+    async def test_csv_over_5mb_returns_413(self, client: AsyncClient):
+        """Buildings CSV over 5 MB is rejected with HTTP 413."""
+        oversized = b"building_name,manager_email\n" + b"x" * (5 * 1024 * 1024 + 1)
+        response = await client.post(
+            "/api/admin/buildings/import",
+            files={"file": ("big.csv", oversized, "text/csv")},
+        )
+        assert response.status_code == 413
+        assert "5 MB" in response.json()["detail"]
+
+    async def test_excel_over_5mb_returns_413(self, client: AsyncClient):
+        """Buildings Excel over 5 MB is rejected with HTTP 413."""
+        # Build a minimal .xlsx header + pad to exceed 5 MB
+        oversized = b"PK\x03\x04" + b"x" * (5 * 1024 * 1024 + 1)
+        response = await client.post(
+            "/api/admin/buildings/import",
+            files={
+                "file": (
+                    "big.xlsx",
+                    oversized,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert response.status_code == 413
+        assert "5 MB" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting — admin import endpoints (RR4-31)
+# ---------------------------------------------------------------------------
+
+
+class TestAdminImportRateLimitBuildings:
+    """Verify admin_import_limiter returns 429 on the 21st request (RR4-31)."""
+
+    async def test_buildings_import_rate_limited_after_max_requests(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """21st call to /buildings/import within the window returns 429 with Retry-After."""
+        from app.rate_limiter import admin_import_limiter
+
+        # Exhaust the limit
+        admin_import_limiter._timestamps["admin"] = []
+        for _ in range(20):
+            admin_import_limiter._timestamps["admin"].append(
+                __import__("time").monotonic()
+            )
+
+        csv_data = make_csv(
+            ["building_name", "manager_email"],
+            [["Rate Limit Test Building", "rl@test.com"]],
+        )
+        response = await client.post(
+            "/api/admin/buildings/import",
+            files={"file": ("b.csv", csv_data, "text/csv")},
+        )
+        assert response.status_code == 429
+        assert response.headers.get("Retry-After") == "60"

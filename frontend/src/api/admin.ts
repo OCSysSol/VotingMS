@@ -48,6 +48,7 @@ export interface MotionOut {
   is_visible: boolean;
   option_limit: number | null;
   options: MotionOptionOut[];
+  voting_closed_at?: string | null;
 }
 
 export interface GeneralMeetingOut {
@@ -73,9 +74,11 @@ export interface GeneralMeetingListItem {
 
 export interface VoterEntry {
   voter_email?: string;
+  voter_name?: string | null;
   lot_number?: string;
   entitlement: number;
   proxy_email?: string | null;
+  submitted_by_admin?: boolean;
 }
 
 export interface TallyCategory {
@@ -87,8 +90,17 @@ export interface OptionTallyEntry {
   option_id: string;
   option_text: string;
   display_order: number;
+  // Primary tally fields (For/Against/Abstained) — Slice 10: US-MC-ADMIN-01
+  for_voter_count?: number;
+  for_entitlement_sum?: number;
+  against_voter_count?: number;
+  against_entitlement_sum?: number;
+  abstained_voter_count?: number;
+  abstained_entitlement_sum?: number;
+  // Backward-compatible aliases (deprecated, kept for one release)
   voter_count: number;
   entitlement_sum: number;
+  outcome: string | null;
 }
 
 export interface MotionTally {
@@ -106,6 +118,11 @@ export interface MotionVoterLists {
   abstained: VoterEntry[];
   absent: VoterEntry[];
   not_eligible: VoterEntry[];
+  // Per-option voter lists by category (Slice 10: US-MC-ADMIN-01)
+  options_for?: Record<string, VoterEntry[]>;
+  options_against?: Record<string, VoterEntry[]>;
+  options_abstained?: Record<string, VoterEntry[]>;
+  // Backward-compatible alias for options_for
   options: Record<string, VoterEntry[]>;
 }
 
@@ -120,12 +137,14 @@ export interface MotionDetail {
   is_visible: boolean;
   option_limit: number | null;
   options: MotionOptionOut[];
+  voting_closed_at: string | null;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
 
 export interface GeneralMeetingDetail {
   id: string;
+  building_id?: string;
   building_name: string;
   title: string;
   status: string;
@@ -166,18 +185,64 @@ export interface EmailDeliveryInfo {
 
 export interface LotOwnerCreateRequest {
   lot_number: string;
+  given_name?: string | null;
+  surname?: string | null;
   emails: string[];
   unit_entitlement: number;
   financial_position?: string;
 }
 
 export interface LotOwnerUpdateRequest {
+  given_name?: string | null;
+  surname?: string | null;
   unit_entitlement?: number;
   financial_position?: string;
 }
 
 export interface AddEmailRequest {
   email: string;
+}
+
+export interface AddOwnerEmailRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+}
+
+export interface UpdateOwnerEmailRequest {
+  email?: string | null;
+  given_name?: string | null;
+  surname?: string | null;
+}
+
+export async function addOwnerEmailToLotOwner(
+  lotOwnerId: string,
+  data: AddOwnerEmailRequest
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails`, {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function updateOwnerEmail(
+  lotOwnerId: string,
+  emailId: string,
+  data: UpdateOwnerEmailRequest
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails/${emailId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+export async function removeOwnerEmailById(
+  lotOwnerId: string,
+  emailId: string
+): Promise<LotOwner> {
+  return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/owner-emails/${emailId}`, {
+    method: "DELETE",
+  });
 }
 
 export async function addEmailToLotOwner(
@@ -201,11 +266,13 @@ export async function removeEmailFromLotOwner(
 
 export async function setLotOwnerProxy(
   lotOwnerId: string,
-  proxyEmail: string
+  proxyEmail: string,
+  givenName?: string | null,
+  surname?: string | null,
 ): Promise<LotOwner> {
   return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/proxy`, {
     method: "PUT",
-    body: JSON.stringify({ proxy_email: proxyEmail }),
+    body: JSON.stringify({ proxy_email: proxyEmail, given_name: givenName, surname }),
   });
 }
 
@@ -352,8 +419,24 @@ export async function importBuildings(file: File): Promise<BuildingImportResult>
 // Lot owners
 // ---------------------------------------------------------------------------
 
-export async function listLotOwners(buildingId: string): Promise<LotOwner[]> {
-  return apiFetch<LotOwner[]>(`/api/admin/buildings/${buildingId}/lot-owners`);
+export async function listLotOwners(
+  buildingId: string,
+  params?: { limit?: number; offset?: number }
+): Promise<LotOwner[]> {
+  const qs = new URLSearchParams();
+  if (params?.limit !== undefined) qs.set("limit", String(params.limit));
+  if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  const query = qs.toString();
+  return apiFetch<LotOwner[]>(
+    `/api/admin/buildings/${buildingId}/lot-owners${query ? `?${query}` : ""}`
+  );
+}
+
+export async function countLotOwners(buildingId: string): Promise<number> {
+  const data = await apiFetch<{ count: number }>(
+    `/api/admin/buildings/${buildingId}/lot-owners/count`
+  );
+  return data.count;
 }
 
 export async function getLotOwner(lotOwnerId: string): Promise<LotOwner> {
@@ -589,4 +672,60 @@ export async function deleteMotion(motionId: string): Promise<void> {
   return apiFetchVoid(`/api/admin/motions/${motionId}`, {
     method: "DELETE",
   });
+}
+
+export async function closeMotion(motionId: string): Promise<MotionDetail> {
+  return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/close`, {
+    method: "POST",
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin in-person vote entry (US-AVE-01/02/03)
+// ---------------------------------------------------------------------------
+
+export interface AdminVoteEntryItem {
+  motion_id: string;
+  choice: "yes" | "no" | "abstained";
+}
+
+/** US-AVE2-01: per-option For/Against/Abstain choice for admin vote entry */
+export interface AdminMultiChoiceOptionChoice {
+  option_id: string;
+  choice: "for" | "against" | "abstained";
+}
+
+export interface AdminMultiChoiceVoteItem {
+  motion_id: string;
+  /** New format (US-AVE2-01): per-option choices */
+  option_choices: AdminMultiChoiceOptionChoice[];
+}
+
+export interface AdminVoteEntryLot {
+  lot_owner_id: string;
+  votes: AdminVoteEntryItem[];
+  multi_choice_votes: AdminMultiChoiceVoteItem[];
+}
+
+export interface AdminVoteEntryRequest {
+  entries: AdminVoteEntryLot[];
+}
+
+export interface AdminVoteEntryResult {
+  submitted_count: number;
+  skipped_count: number;
+}
+
+export async function enterInPersonVotes(
+  meetingId: string,
+  request: AdminVoteEntryRequest
+): Promise<AdminVoteEntryResult> {
+  return apiFetch<AdminVoteEntryResult>(
+    `/api/admin/general-meetings/${meetingId}/enter-votes`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    }
+  );
 }

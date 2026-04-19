@@ -15,26 +15,52 @@ import type {
   ResendReportOut,
 } from "../../src/api/admin";
 import type { GeneralMeetingSummaryData } from "../../src/api/public";
-import type { TenantConfig } from "../../src/api/config";
+import type { TenantConfig, SmtpConfig, SmtpStatus } from "../../src/api/config";
 
 const BASE = "http://localhost:8000";
 
 export let configFixture: TenantConfig = {
-  app_name: "AGM Voting",
+  app_name: "General Meeting",
   logo_url: "",
   favicon_url: null,
   primary_colour: "#005f73",
   support_email: "",
 };
 
+export let smtpConfigFixture: SmtpConfig = {
+  smtp_host: "",
+  smtp_port: 587,
+  smtp_username: "",
+  smtp_from_email: "",
+  password_is_set: false,
+};
+
+export function resetSmtpConfigFixture() {
+  smtpConfigFixture = {
+    smtp_host: "",
+    smtp_port: 587,
+    smtp_username: "",
+    smtp_from_email: "",
+    password_is_set: false,
+  };
+}
+
+export let smtpStatusFixture: SmtpStatus = { configured: false };
+
+export function resetSmtpStatusFixture() {
+  smtpStatusFixture = { configured: false };
+}
+
 export function resetConfigFixture() {
   configFixture = {
-    app_name: "AGM Voting",
+    app_name: "General Meeting",
     logo_url: "",
     favicon_url: null,
     primary_colour: "#005f73",
     support_email: "",
   };
+  resetSmtpConfigFixture();
+  resetSmtpStatusFixture();
 }
 
 export const ADMIN_BUILDINGS: Building[] = [
@@ -66,19 +92,33 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     id: "lo1",
     building_id: "b1",
     lot_number: "1A",
+    given_name: "Alice",
+    surname: "Smith",
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" },
+    ],
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
     financial_position: "normal",
     proxy_email: null,
+    proxy_given_name: null,
+    proxy_surname: null,
   },
   {
     id: "lo2",
     building_id: "b1",
     lot_number: "2B",
+    given_name: null,
+    surname: null,
+    owner_emails: [
+      { id: "em2", email: "owner2@example.com", given_name: null, surname: null },
+    ],
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
     financial_position: "normal",
     proxy_email: "proxy@example.com",
+    proxy_given_name: null,
+    proxy_surname: null,
   },
 ];
 
@@ -115,11 +155,9 @@ export const ADMIN_MEETING_LIST: GeneralMeetingListItem[] = [
   },
 ];
 
-// Keep backward-compatible alias
-export const ADMIN_AGM_LIST = ADMIN_MEETING_LIST;
-
 export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   id: "agm1",
+  building_id: "b1",
   building_name: "Alpha Tower",
   title: "2024 AGM",
   status: "open",
@@ -140,6 +178,7 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
       is_visible: true,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 2, entitlement_sum: 200 },
         no: { voter_count: 1, entitlement_sum: 100 },
@@ -166,9 +205,6 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   ],
 };
 
-// Keep backward-compatible alias
-export const ADMIN_AGM_DETAIL = ADMIN_MEETING_DETAIL;
-
 export const ADMIN_MEETING_DETAIL_CLOSED: GeneralMeetingDetail = {
   ...ADMIN_MEETING_DETAIL,
   id: "agm2",
@@ -188,6 +224,13 @@ export const ADMIN_MEETING_DETAIL_PENDING: GeneralMeetingDetail = {
   voting_closes_at: "2026-12-31T12:00:00Z",
 };
 
+// A pending meeting that already has motions/lot weights — DELETE returns 409
+export const ADMIN_MEETING_DETAIL_PENDING_CONFIGURED: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL_PENDING,
+  id: "agm-pending-configured",
+  title: "2026 Configured AGM",
+};
+
 export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
   ...ADMIN_MEETING_DETAIL,
   id: "agm-hidden-motion",
@@ -202,6 +245,7 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
       is_visible: false,
       option_limit: null,
       options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
@@ -215,9 +259,6 @@ export const ADMIN_MEETING_DETAIL_HIDDEN_MOTION: GeneralMeetingDetail = {
   ],
 };
 
-// Keep backward-compatible alias
-export const ADMIN_AGM_DETAIL_CLOSED = ADMIN_MEETING_DETAIL_CLOSED;
-
 export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
   ...ADMIN_MEETING_DETAIL,
   id: "agm-mixed",
@@ -230,14 +271,18 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       motion_number: null,
       motion_type: "general" as const,
       is_visible: true,
+      option_limit: null,
+      options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
         abstained: { voter_count: 0, entitlement_sum: 0 },
         absent: { voter_count: 0, entitlement_sum: 0 },
         not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
       },
-      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [] },
+      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [], options: {} },
     },
     {
       id: "m-hidden-1",
@@ -247,14 +292,18 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       motion_number: null,
       motion_type: "general" as const,
       is_visible: false,
+      option_limit: null,
+      options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
         abstained: { voter_count: 0, entitlement_sum: 0 },
         absent: { voter_count: 0, entitlement_sum: 0 },
         not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
       },
-      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [] },
+      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [], options: {} },
     },
     {
       id: "m-hidden-2",
@@ -264,14 +313,18 @@ export const ADMIN_MEETING_DETAIL_MIXED_VISIBILITY: GeneralMeetingDetail = {
       motion_number: null,
       motion_type: "special" as const,
       is_visible: false,
+      option_limit: null,
+      options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
         abstained: { voter_count: 0, entitlement_sum: 0 },
         absent: { voter_count: 0, entitlement_sum: 0 },
         not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
       },
-      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [] },
+      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [], options: {} },
     },
   ],
 };
@@ -288,14 +341,18 @@ export const ADMIN_MEETING_DETAIL_ALL_HIDDEN: GeneralMeetingDetail = {
       motion_number: null,
       motion_type: "general" as const,
       is_visible: false,
+      option_limit: null,
+      options: [],
+      voting_closed_at: null,
       tally: {
         yes: { voter_count: 0, entitlement_sum: 0 },
         no: { voter_count: 0, entitlement_sum: 0 },
         abstained: { voter_count: 0, entitlement_sum: 0 },
         absent: { voter_count: 0, entitlement_sum: 0 },
         not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
       },
-      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [] },
+      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [], options: {} },
     },
   ],
 };
@@ -316,12 +373,219 @@ export const ADMIN_CREATED_MEETING: GeneralMeetingOut = {
       motion_number: null,
       motion_type: "general" as const,
       is_visible: true,
+      option_limit: null,
+      options: [],
     },
   ],
 };
 
-// Keep backward-compatible alias
-export const ADMIN_CREATED_AGM = ADMIN_CREATED_MEETING;
+// Multi-choice meeting detail fixture with computed outcomes (Slice 4)
+export const ADMIN_MEETING_DETAIL_MC_OUTCOME: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL,
+  id: "agm-mc-outcome",
+  status: "closed",
+  closed_at: "2024-06-01T13:00:00Z",
+  motions: [
+    {
+      id: "mc-outcome-m1",
+      title: "Board Election",
+      description: null,
+      display_order: 1,
+      motion_number: "1",
+      motion_type: "general" as const,
+      is_multi_choice: true,
+      is_visible: true,
+      option_limit: 2,
+      voting_closed_at: null,
+      options: [
+        { id: "mc-opt-a", text: "Alice", display_order: 1 },
+        { id: "mc-opt-b", text: "Bob", display_order: 2 },
+        { id: "mc-opt-c", text: "Carol", display_order: 3 },
+      ],
+      tally: {
+        yes: { voter_count: 0, entitlement_sum: 0 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 0, entitlement_sum: 0 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [
+          { option_id: "mc-opt-a", option_text: "Alice", display_order: 1, for_voter_count: 3, for_entitlement_sum: 300, against_voter_count: 0, against_entitlement_sum: 0, abstained_voter_count: 0, abstained_entitlement_sum: 0, voter_count: 3, entitlement_sum: 300, outcome: "pass" },
+          { option_id: "mc-opt-b", option_text: "Bob", display_order: 2, for_voter_count: 2, for_entitlement_sum: 200, against_voter_count: 1, against_entitlement_sum: 50, abstained_voter_count: 0, abstained_entitlement_sum: 0, voter_count: 2, entitlement_sum: 200, outcome: "pass" },
+          { option_id: "mc-opt-c", option_text: "Carol", display_order: 3, for_voter_count: 1, for_entitlement_sum: 100, against_voter_count: 2, against_entitlement_sum: 200, abstained_voter_count: 1, abstained_entitlement_sum: 50, voter_count: 1, entitlement_sum: 100, outcome: "fail" },
+        ],
+      },
+      voter_lists: {
+        yes: [],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options_for: {
+          "mc-opt-a": [{ voter_email: "alice@test.com", lot_number: "1", entitlement: 100 }, { voter_email: "bob@test.com", lot_number: "2", entitlement: 100 }, { voter_email: "carol@test.com", lot_number: "3", entitlement: 100 }],
+          "mc-opt-b": [{ voter_email: "alice@test.com", lot_number: "1", entitlement: 100 }, { voter_email: "bob@test.com", lot_number: "2", entitlement: 100 }],
+          "mc-opt-c": [{ voter_email: "carol@test.com", lot_number: "3", entitlement: 100 }],
+        },
+        options_against: {
+          "mc-opt-b": [{ voter_email: "dave@test.com", lot_number: "4", entitlement: 50 }],
+          "mc-opt-c": [{ voter_email: "alice@test.com", lot_number: "1", entitlement: 100 }, { voter_email: "bob@test.com", lot_number: "2", entitlement: 100 }],
+        },
+        options_abstained: {
+          "mc-opt-c": [{ voter_email: "dave@test.com", lot_number: "4", entitlement: 50 }],
+        },
+        options: {
+          "mc-opt-a": [{ voter_email: "alice@test.com", lot_number: "1", entitlement: 100 }, { voter_email: "bob@test.com", lot_number: "2", entitlement: 100 }, { voter_email: "carol@test.com", lot_number: "3", entitlement: 100 }],
+          "mc-opt-b": [{ voter_email: "alice@test.com", lot_number: "1", entitlement: 100 }, { voter_email: "bob@test.com", lot_number: "2", entitlement: 100 }],
+          "mc-opt-c": [{ voter_email: "carol@test.com", lot_number: "3", entitlement: 100 }],
+        },
+      },
+    },
+  ],
+};
+
+/** US-AVE2-01: meeting with a multi-choice motion for admin vote entry tests */
+export const ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL,
+  id: "agm-mc-entry",
+  status: "open",
+  closed_at: null,
+  motions: [
+    {
+      id: "mc-entry-m1",
+      title: "Board Election Entry",
+      description: null,
+      display_order: 1,
+      motion_number: "1",
+      motion_type: "general" as const,
+      is_multi_choice: true,
+      is_visible: true,
+      option_limit: 2,
+      options: [
+        { id: "mc-entry-opt-a", text: "Alice", display_order: 1 },
+        { id: "mc-entry-opt-b", text: "Bob", display_order: 2 },
+        { id: "mc-entry-opt-c", text: "Carol", display_order: 3 },
+      ],
+      voting_closed_at: null,
+      tally: {
+        yes: { voter_count: 0, entitlement_sum: 0 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 0, entitlement_sum: 0 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
+      },
+      voter_lists: {
+        yes: [],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options: {},
+      },
+    },
+  ],
+};
+
+/**
+ * Fix 5: meeting with admin-submitted votes on lot 1A (binary motion: yes),
+ * and lot 2B with no prior vote. Used for AdminRevoteWarningDialog tests.
+ */
+export const ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL,
+  id: "agm-admin-votes",
+  status: "open",
+  closed_at: null,
+  motions: [
+    {
+      id: "adm-vote-m1",
+      title: "Motion 1",
+      description: "Description 1",
+      display_order: 1,
+      motion_number: null,
+      motion_type: "general" as const,
+      is_visible: true,
+      option_limit: null,
+      options: [],
+      voting_closed_at: null,
+      tally: {
+        yes: { voter_count: 1, entitlement_sum: 100 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 1, entitlement_sum: 200 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
+      },
+      voter_lists: {
+        yes: [
+          { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: true },
+        ],
+        no: [],
+        abstained: [],
+        absent: [
+          { voter_email: "owner2@example.com", lot_number: "2B", entitlement: 200, submitted_by_admin: false },
+        ],
+        not_eligible: [],
+        options: {},
+      },
+    },
+  ],
+};
+
+/**
+ * Fix 5: meeting with admin-submitted votes on a multi-choice motion.
+ * Lot 1A voted For Alice and Against Bob via admin.
+ */
+export const ADMIN_MEETING_DETAIL_MC_WITH_ADMIN_VOTES: GeneralMeetingDetail = {
+  ...ADMIN_MEETING_DETAIL,
+  id: "agm-mc-admin-votes",
+  status: "open",
+  closed_at: null,
+  motions: [
+    {
+      id: "mc-admin-m1",
+      title: "Board Election Admin",
+      description: null,
+      display_order: 1,
+      motion_number: "1",
+      motion_type: "general" as const,
+      is_multi_choice: true,
+      is_visible: true,
+      option_limit: 2,
+      options: [
+        { id: "mc-admin-opt-a", text: "Alice", display_order: 1 },
+        { id: "mc-admin-opt-b", text: "Bob", display_order: 2 },
+        { id: "mc-admin-opt-c", text: "Carol", display_order: 3 },
+      ],
+      voting_closed_at: null,
+      tally: {
+        yes: { voter_count: 0, entitlement_sum: 0 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 0, entitlement_sum: 0 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
+      },
+      voter_lists: {
+        yes: [],
+        no: [],
+        abstained: [],
+        absent: [],
+        not_eligible: [],
+        options_for: {
+          "mc-admin-opt-a": [
+            { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: true },
+          ],
+        },
+        options_against: {
+          "mc-admin-opt-b": [
+            { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: true },
+          ],
+        },
+        options_abstained: {},
+        options: {},
+      },
+    },
+  ],
+};
 
 export const adminHandlers = [
   http.get(`${BASE}/api/admin/auth/me`, () => {
@@ -356,12 +620,16 @@ export const adminHandlers = [
   http.get(`${BASE}/api/admin/buildings`, ({ request }) => {
     const url = new URL(request.url);
     const isArchivedParam = url.searchParams.get("is_archived");
+    const nameParam = url.searchParams.get("name");
     const limitParam = url.searchParams.get("limit");
     const offsetParam = url.searchParams.get("offset");
     let filtered = ADMIN_BUILDINGS;
     if (isArchivedParam !== null) {
       const isArchived = isArchivedParam === "true";
       filtered = filtered.filter((b) => b.is_archived === isArchived);
+    }
+    if (nameParam) {
+      filtered = filtered.filter((b) => b.name.toLowerCase().includes(nameParam.toLowerCase()));
     }
     const offset = offsetParam !== null ? parseInt(offsetParam, 10) : 0;
     const limit = limitParam !== null ? parseInt(limitParam, 10) : filtered.length;
@@ -414,8 +682,19 @@ export const adminHandlers = [
     return HttpResponse.json<BuildingImportResult>({ created: 2, updated: 1 });
   }),
 
-  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, () => {
-    return HttpResponse.json(ADMIN_LOT_OWNERS);
+  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, ({ params }) => {
+    const owners = ADMIN_LOT_OWNERS.filter((lo) => lo.building_id === params.buildingId);
+    return HttpResponse.json({ count: owners.length });
+  }),
+
+  http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request, params }) => {
+    const url = new URL(request.url);
+    const limitParam = url.searchParams.get("limit");
+    const offsetParam = url.searchParams.get("offset");
+    const owners = ADMIN_LOT_OWNERS.filter((lo) => lo.building_id === params.buildingId);
+    const offset = offsetParam !== null ? parseInt(offsetParam, 10) : 0;
+    const limit = limitParam !== null ? parseInt(limitParam, 10) : owners.length;
+    return HttpResponse.json(owners.slice(offset, offset + limit));
   }),
 
   http.get(`${BASE}/api/admin/lot-owners/:lotOwnerId`, ({ params }) => {
@@ -438,20 +717,30 @@ export const adminHandlers = [
       id: "lo-new",
       building_id: "b1",
       lot_number: body?.lot_number ?? "NEW",
+      given_name: null,
+      surname: null,
+      owner_emails: [{ id: "em-new", email: "new@example.com", given_name: null, surname: null }],
       emails: ["new@example.com"],
       unit_entitlement: 50,
       financial_position: "normal",
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     };
     return HttpResponse.json(newOwner, { status: 201 });
   }),
 
   http.post(`${BASE}/api/admin/lot-owners/:lotOwnerId/emails`, async ({ request, params }) => {
     const body = await request.json() as { email?: string };
+    const newEmail = body?.email ?? "new@example.com";
     const updated: LotOwner = {
       ...ADMIN_LOT_OWNERS[0],
       id: params.lotOwnerId as string,
-      emails: [...ADMIN_LOT_OWNERS[0].emails, body?.email ?? "new@example.com"],
+      owner_emails: [
+        ...ADMIN_LOT_OWNERS[0].owner_emails,
+        { id: "em-added", email: newEmail, given_name: null, surname: null },
+      ],
+      emails: [...ADMIN_LOT_OWNERS[0].emails, newEmail],
     };
     return HttpResponse.json(updated);
   }),
@@ -461,7 +750,56 @@ export const adminHandlers = [
     const updated: LotOwner = {
       ...ADMIN_LOT_OWNERS[0],
       id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.filter((e) => e.email !== emailToRemove),
       emails: ADMIN_LOT_OWNERS[0].emails.filter((e) => e !== emailToRemove),
+    };
+    return HttpResponse.json(updated);
+  }),
+
+  // New owner-emails endpoints
+  http.post(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails`, async ({ request, params }) => {
+    const body = await request.json() as { email?: string; given_name?: string | null; surname?: string | null };
+    const newEmail = body?.email ?? "new@example.com";
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: [
+        ...ADMIN_LOT_OWNERS[0].owner_emails,
+        { id: "em-owner-new", email: newEmail, given_name: body?.given_name ?? null, surname: body?.surname ?? null },
+      ],
+      emails: [...ADMIN_LOT_OWNERS[0].emails, newEmail],
+    };
+    return HttpResponse.json(updated, { status: 201 });
+  }),
+
+  http.patch(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId`, async ({ request, params }) => {
+    const body = await request.json() as { email?: string | null; given_name?: string | null; surname?: string | null };
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.map((e) =>
+        e.id === params.emailId
+          ? {
+              ...e,
+              email: body?.email !== undefined ? body.email : e.email,
+              given_name: body?.given_name !== undefined ? body.given_name : e.given_name,
+              surname: body?.surname !== undefined ? body.surname : e.surname,
+            }
+          : e
+      ),
+      emails: ADMIN_LOT_OWNERS[0].emails,
+    };
+    return HttpResponse.json(updated);
+  }),
+
+  http.delete(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId`, ({ params }) => {
+    const updated: LotOwner = {
+      ...ADMIN_LOT_OWNERS[0],
+      id: params.lotOwnerId as string,
+      owner_emails: ADMIN_LOT_OWNERS[0].owner_emails.filter((e) => e.id !== params.emailId),
+      emails: ADMIN_LOT_OWNERS[0].emails.filter(
+        (email) => !ADMIN_LOT_OWNERS[0].owner_emails.find((e) => e.id === params.emailId && e.email === email)
+      ),
     };
     return HttpResponse.json(updated);
   }),
@@ -483,11 +821,13 @@ export const adminHandlers = [
   }),
 
   http.put(`${BASE}/api/admin/lot-owners/:lotOwnerId/proxy`, async ({ request, params }) => {
-    const body = await request.json() as { proxy_email?: string };
+    const body = await request.json() as { proxy_email?: string; given_name?: string | null; surname?: string | null };
     const updated: LotOwner = {
       ...ADMIN_LOT_OWNERS[0],
       id: params.lotOwnerId as string,
       proxy_email: body?.proxy_email ?? null,
+      proxy_given_name: body?.given_name ?? null,
+      proxy_surname: body?.surname ?? null,
     };
     return HttpResponse.json(updated);
   }),
@@ -500,6 +840,8 @@ export const adminHandlers = [
     const updated: LotOwner = {
       ...owner,
       proxy_email: null,
+      proxy_given_name: null,
+      proxy_surname: null,
     };
     return HttpResponse.json(updated);
   }),
@@ -577,6 +919,9 @@ export const adminHandlers = [
     if (params.meetingId === "agm-pending") {
       return HttpResponse.json(ADMIN_MEETING_DETAIL_PENDING);
     }
+    if (params.meetingId === "agm-pending-configured") {
+      return HttpResponse.json(ADMIN_MEETING_DETAIL_PENDING_CONFIGURED);
+    }
     if (params.meetingId === "agm-hidden-motion") {
       return HttpResponse.json(ADMIN_MEETING_DETAIL_HIDDEN_MOTION);
     }
@@ -585,6 +930,12 @@ export const adminHandlers = [
     }
     if (params.meetingId === "agm-all-hidden") {
       return HttpResponse.json(ADMIN_MEETING_DETAIL_ALL_HIDDEN);
+    }
+    if (params.meetingId === "agm-admin-votes") {
+      return HttpResponse.json(ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES);
+    }
+    if (params.meetingId === "agm-mc-admin-votes") {
+      return HttpResponse.json(ADMIN_MEETING_DETAIL_MC_WITH_ADMIN_VOTES);
     }
     return HttpResponse.json(ADMIN_MEETING_DETAIL);
   }),
@@ -630,6 +981,9 @@ export const adminHandlers = [
   http.delete(`${BASE}/api/admin/general-meetings/:meetingId`, ({ params }) => {
     if (params.meetingId === "agm1") {
       return HttpResponse.json({ detail: "Cannot delete an open General Meeting" }, { status: 409 });
+    }
+    if (params.meetingId === "agm-pending-configured") {
+      return HttpResponse.json({ detail: "Cannot delete a pending General Meeting that has motions or lot weights" }, { status: 409 });
     }
     if (params.meetingId === "agm-notfound-delete") {
       return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
@@ -750,6 +1104,28 @@ export const adminHandlers = [
     });
   }),
 
+  // Close motion voting
+  http.post(`${BASE}/api/admin/motions/:motionId/close`, ({ params }) => {
+    if (params.motionId === "motion-hidden-close") {
+      return HttpResponse.json({ detail: "Cannot close a hidden motion" }, { status: 409 });
+    }
+    if (params.motionId === "motion-already-closed") {
+      return HttpResponse.json({ detail: "Motion voting is already closed" }, { status: 409 });
+    }
+    if (params.motionId === "motion-close-not-open") {
+      return HttpResponse.json({ detail: "Cannot close motion on a meeting that is not open" }, { status: 409 });
+    }
+    if (params.motionId === "motion-notfound-close") {
+      return HttpResponse.json({ detail: "Motion not found" }, { status: 404 });
+    }
+    const motion = ADMIN_MEETING_DETAIL.motions[0];
+    return HttpResponse.json({
+      ...motion,
+      id: params.motionId as string,
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    });
+  }),
+
   // Delete motion
   http.delete(`${BASE}/api/admin/motions/:motionId`, ({ params }) => {
     if (params.motionId === "motion-visible-delete") {
@@ -759,6 +1135,19 @@ export const adminHandlers = [
       return HttpResponse.json({ detail: "Server error" }, { status: 500 });
     }
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Admin vote entry
+  http.post(`${BASE}/api/admin/general-meetings/:meetingId/enter-votes`, async ({ params, request }) => {
+    if (params.meetingId === "agm-closed-enter") {
+      return HttpResponse.json({ detail: "Meeting is not open" }, { status: 409 });
+    }
+    if (params.meetingId === "agm-enter-fail") {
+      return HttpResponse.json({ detail: "Unknown lot_owner_ids: [\"unknown-lot\"]" }, { status: 422 });
+    }
+    const body = await request.json() as { entries?: Array<{ lot_owner_id: string }> };
+    const count = body?.entries?.length ?? 0;
+    return HttpResponse.json({ submitted_count: count, skipped_count: 0 });
   }),
 
   // Tenant config — admin endpoints
@@ -790,6 +1179,43 @@ export const adminHandlers = [
       support_email: body.support_email ?? "",
     };
     return HttpResponse.json(configFixture);
+  }),
+
+  // SMTP configuration endpoints
+  http.get(`${BASE}/api/admin/config/smtp/status`, () => {
+    return HttpResponse.json(smtpStatusFixture);
+  }),
+
+  http.get(`${BASE}/api/admin/config/smtp`, () => {
+    return HttpResponse.json(smtpConfigFixture);
+  }),
+
+  http.put(`${BASE}/api/admin/config/smtp`, async ({ request }) => {
+    const body = await request.json() as Record<string, unknown>;
+    if (!body?.smtp_host || !(body.smtp_host as string).trim()) {
+      return HttpResponse.json({ detail: "smtp_host must not be empty" }, { status: 422 });
+    }
+    const port = body.smtp_port as number;
+    if (!port || port < 1 || port > 65535) {
+      return HttpResponse.json({ detail: "smtp_port must be between 1 and 65535" }, { status: 422 });
+    }
+    const fromEmail = body.smtp_from_email as string;
+    if (!fromEmail || !fromEmail.includes("@")) {
+      return HttpResponse.json({ detail: "smtp_from_email must be a valid email address" }, { status: 422 });
+    }
+    const hadPassword = smtpConfigFixture.password_is_set;
+    smtpConfigFixture = {
+      smtp_host: body.smtp_host as string,
+      smtp_port: port,
+      smtp_username: (body.smtp_username as string) ?? "",
+      smtp_from_email: fromEmail,
+      password_is_set: body.smtp_password ? true : hadPassword,
+    };
+    return HttpResponse.json(smtpConfigFixture);
+  }),
+
+  http.post(`${BASE}/api/admin/config/smtp/test`, () => {
+    return HttpResponse.json({ ok: true });
   }),
 ];
 
@@ -859,6 +1285,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
   {
     id: MOTION_ID_2,
@@ -872,6 +1299,7 @@ export const motionFixtures = [
     submitted_choice: null,
     option_limit: null,
     options: [],
+    voting_closed_at: null,
   },
 ];
 
@@ -886,11 +1314,28 @@ export const mcMotionFixtureVoter = {
   is_visible: true,
   already_voted: false,
   submitted_choice: null,
+  submitted_option_choices: {} as Record<string, string>,
   option_limit: 2,
   options: [
     { id: "opt-alice", text: "Alice", display_order: 1 },
     { id: "opt-bob", text: "Bob", display_order: 2 },
     { id: "opt-carol", text: "Carol", display_order: 3 },
+  ],
+};
+
+export const mcBallotVoteFixture = {
+  motion_id: MOTION_ID_MC,
+  motion_title: "Board Election",
+  display_order: 3,
+  motion_number: null,
+  choice: "selected" as const,
+  eligible: true,
+  motion_type: "general" as const,
+  is_multi_choice: true,
+  selected_options: [{ id: "opt-alice", text: "Alice", display_order: 1 }],
+  option_choices: [
+    { option_id: "opt-alice", option_text: "Alice", choice: "for" },
+    { option_id: "opt-bob", option_text: "Bob", choice: "against" },
   ],
 };
 
@@ -903,6 +1348,8 @@ export const myBallotFixture = {
       lot_owner_id: "lo-e2e",
       lot_number: "E2E-1",
       financial_position: "normal",
+      submitter_email: "owner@example.com",
+      proxy_email: null,
       votes: [
         {
           motion_id: MOTION_ID_1,
@@ -911,6 +1358,10 @@ export const myBallotFixture = {
           motion_number: null,
           choice: "yes" as const,
           eligible: true,
+          motion_type: "general" as const,
+          is_multi_choice: false,
+          selected_options: [],
+          option_choices: [],
         },
         {
           motion_id: MOTION_ID_2,
@@ -919,6 +1370,10 @@ export const myBallotFixture = {
           motion_number: null,
           choice: "no" as const,
           eligible: true,
+          motion_type: "general" as const,
+          is_multi_choice: false,
+          selected_options: [],
+          option_choices: [],
         },
       ],
     },
@@ -1017,6 +1472,30 @@ export const handlers = [
   http.get(`${BASE}/api/general-meeting/:meetingId/my-ballot`, () =>
     HttpResponse.json(myBallotFixture)
   ),
+
+  http.get(`${BASE}/api/general-meeting/:meetingId`, ({ params }) => {
+    if (params.meetingId === "non-existent-meeting-id") {
+      return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
+    }
+    if (params.meetingId === AGM_ID) {
+      return HttpResponse.json({
+        id: AGM_ID,
+        title: "2024 AGM",
+        status: "open",
+        meeting_at: "2024-06-01T10:00:00Z",
+        voting_closes_at: "2024-06-01T12:00:00Z",
+        building_name: "Sunset Towers",
+      });
+    }
+    return HttpResponse.json({
+      id: params.meetingId,
+      title: "2024 AGM",
+      status: "open",
+      meeting_at: "2024-06-01T10:00:00Z",
+      voting_closes_at: "2024-06-01T12:00:00Z",
+      building_name: "Sunset Towers",
+    });
+  }),
 
   http.get(`${BASE}/api/general-meeting/:meetingId/summary`, ({ params }) => {
     if (params.meetingId === "agm-summary-notfound") {

@@ -4,19 +4,14 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:5173";
 const isDeployed = !!process.env.PLAYWRIGHT_BASE_URL;
 
 export default defineConfig({
-  testDir: "./e2e",
-  fullyParallel: true,
+  testDir: "../e2e_tests",
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  // Retry once on deployed targets (cold-start flakiness); twice in CI
   retries: process.env.CI ? 2 : isDeployed ? 1 : 0,
-  // Limit parallelism on deployed targets to avoid hammering the Lambda
-  workers: process.env.CI ? 2 : isDeployed ? 4 : undefined,
-  reporter: "html",
-  globalSetup: "./e2e/global-setup.ts",
-  // Increase default expect/action timeout for deployed Lambda targets: API
-  // calls can take up to 10s on cold start; the Playwright default of 5s is
-  // too short and causes flaky failures on the first assertion after page load.
-  timeout: isDeployed ? 60000 : 30000,
+  workers: process.env.CI ? 1 : isDeployed ? 4 : undefined,
+  // In CI shard jobs: emit blob reports for later merging; locally: HTML only
+  reporter: process.env.CI ? [["blob"], ["list"]] : [["html"]],
+  timeout: isDeployed ? 180000 : 30000,
   expect: {
     timeout: isDeployed ? 10000 : 5000,
   },
@@ -26,22 +21,62 @@ export default defineConfig({
     ignoreHTTPSErrors: true,
   },
   projects: [
-    // Admin tests — reuse authenticated session created by globalSetup
+    // ── Setup project ─────────────────────────────────────────────────────────
+    // Seeds data and saves auth state to e2e_tests/.auth/.
+    // - Local dev: referenced via `dependencies: ['setup']` on each test project
+    // - CI: run as a dedicated setup job before shard jobs start
+    {
+      name: "setup",
+      testMatch: "**/global.setup.ts",
+    },
+
+    // ── Admin tests ───────────────────────────────────────────────────────────
+    // All tests under e2e_tests/admin/ and root-level admin specs.
+    // Use the admin-authenticated session.
+    // In CI the setup job runs first; locally, 'setup' runs automatically.
     {
       name: "admin",
-      testMatch: /e2e\/admin\/.*\.spec\.ts/,
+      testMatch: [
+        /e2e_tests\/admin\/.*\.spec\.ts/,
+        /e2e_tests\/admin-vote-entry-partial\.spec\.ts/,
+      ],
+      dependencies: process.env.CI ? [] : ["setup"],
       use: {
         ...devices["Desktop Chrome"],
-        storageState: "e2e/.auth/admin.json",
+        storageState: "../e2e_tests/.auth/admin.json",
       },
     },
-    // Public / voting tests — use bypass cookie only (no admin session)
+
+    // ── Public: voter edge cases + smoke + core voting flow ───────────────────
+    // Lighter voter-focused tests. No admin session needed.
     {
-      name: "public",
-      testMatch: /e2e\/(?!admin\/).*\.spec\.ts/,
+      name: "public-voter",
+      testMatch: [
+        /e2e_tests\/voter\/.*\.spec\.ts/,
+        /e2e_tests\/smoke\.spec\.ts/,
+        /e2e_tests\/voting-flow\.spec\.ts/,
+      ],
+      dependencies: process.env.CI ? [] : ["setup"],
       use: {
         ...devices["Desktop Chrome"],
-        storageState: "e2e/.auth/public.json",
+        storageState: "../e2e_tests/.auth/public.json",
+      },
+    },
+
+    // ── Public: workflows + multi-lot + proxy + public summary ────────────────
+    // Heavier end-to-end workflow tests. No admin session needed.
+    {
+      name: "public-workflow",
+      testMatch: [
+        /e2e_tests\/workflows\/.*\.spec\.ts/,
+        /e2e_tests\/multi-lot-voting\.spec\.ts/,
+        /e2e_tests\/proxy-voting\.spec\.ts/,
+        /e2e_tests\/public-summary\.spec\.ts/,
+      ],
+      dependencies: process.env.CI ? [] : ["setup"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: "../e2e_tests/.auth/public.json",
       },
     },
   ],

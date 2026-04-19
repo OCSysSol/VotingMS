@@ -17,7 +17,8 @@ class LotOwner(Base):
     __tablename__ = "lot_owners"
     __table_args__ = (
         UniqueConstraint("building_id", "lot_number", name="uq_lot_owners_building_lot"),
-        CheckConstraint("unit_entitlement >= 0", name="ck_lot_owners_entitlement_nonneg"),
+        CheckConstraint("unit_entitlement > 0", name="ck_lot_owners_entitlement_positive"),
+        CheckConstraint("lot_number <> ''", name="ck_lot_owners_lot_number_nonempty"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -29,6 +30,8 @@ class LotOwner(Base):
         nullable=False,
     )
     lot_number: Mapped[str] = mapped_column(String, nullable=False)
+    given_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    surname: Mapped[str | None] = mapped_column(String, nullable=True)
     unit_entitlement: Mapped[int] = mapped_column(Integer, nullable=False)
     financial_position: Mapped[FinancialPosition] = mapped_column(
         Enum(FinancialPosition, name="financialposition"),

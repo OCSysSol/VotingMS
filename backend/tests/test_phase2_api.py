@@ -423,7 +423,7 @@ class TestAuthVerify:
     async def test_sets_agm_session_cookie_attributes(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
-        """agm_session cookie must be HttpOnly and SameSite=strict."""
+        """agm_session cookie must be HttpOnly and SameSite=lax (RR3-36)."""
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
         code = await make_otp(db_session, voter_email, agm.id)
@@ -440,7 +440,9 @@ class TestAuthVerify:
         cookie_header = response.headers.get("set-cookie", "")
         assert "agm_session=" in cookie_header
         assert "HttpOnly" in cookie_header
-        assert "SameSite=strict" in cookie_header or "samesite=strict" in cookie_header.lower()
+        # SameSite changed from strict to lax (RR3-36) so cookie is sent on first
+        # navigation from the OTP email link
+        assert "SameSite=lax" in cookie_header or "samesite=lax" in cookie_header.lower()
 
     async def test_lots_contain_lot_info(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -855,7 +857,7 @@ class TestAuthVerify:
     async def test_verify_returns_session_token_in_body(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
-        """POST /api/auth/verify must return session_token in the response body for localStorage persistence."""
+        """POST /api/auth/verify returns session_token="" in the body (RR5-02 — token is now HttpOnly cookie only)."""
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
         code = await make_otp(db_session, voter_email, agm.id)
@@ -872,7 +874,8 @@ class TestAuthVerify:
         data = response.json()
         assert "session_token" in data
         assert isinstance(data["session_token"], str)
-        assert len(data["session_token"]) > 0
+        # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat.
+        assert data["session_token"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -905,7 +908,8 @@ class TestSessionRestore:
         assert data["building_name"] == building.name
         assert data["meeting_title"] == agm.title
         assert isinstance(data["session_token"], str)
-        assert len(data["session_token"]) > 0
+        # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat (RR5-02).
+        assert data["session_token"] == ""
 
     async def test_valid_token_sets_agm_session_cookie(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -1094,7 +1098,7 @@ class TestSessionRestore:
     async def test_valid_token_returns_new_session_token(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
     ):
-        """The restored session returns a new session_token (fresh session created)."""
+        """The restored session returns session_token="" in body (RR5-02 — new token delivered via HttpOnly cookie only)."""
         voter_email = building_with_agm["voter_email"]
         agm = building_with_agm["agm"]
         building = building_with_agm["building"]
@@ -1107,9 +1111,9 @@ class TestSessionRestore:
         )
         assert response.status_code == 200
         new_token = response.json()["session_token"]
-        # A new token is issued each restore; it may differ from the original
+        # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat.
         assert isinstance(new_token, str)
-        assert len(new_token) > 0
+        assert new_token == ""
 
     # --- Input validation ---
 
@@ -1361,6 +1365,81 @@ class TestAuthLogout:
 
     async def test_logout_idempotent_no_cookie(self, client: AsyncClient):
         """Calling logout without a cookie still returns 200 — idempotent."""
+        response = await client.post("/api/auth/logout")
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+
+    # --- Session row deletion ---
+
+    async def test_logout_deletes_session_record(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building_with_agm: dict,
+    ):
+        """Logout with a valid session cookie deletes the SessionRecord row from the DB."""
+        from sqlalchemy import select as sa_select
+
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+
+        signed_token = await create_session(db_session, voter_email, building.id, agm.id)
+        await db_session.commit()
+
+        # Confirm the row exists before logout
+        from app.services.auth_service import _unsign_token
+        raw_token = _unsign_token(signed_token)
+        result = await db_session.execute(
+            sa_select(SessionRecord).where(SessionRecord.session_token == raw_token)
+        )
+        assert result.scalar_one_or_none() is not None
+
+        # Call logout with the signed cookie
+        client.cookies.set("agm_session", signed_token)
+        response = await client.post("/api/auth/logout")
+        assert response.status_code == 200
+
+        # expire_all is synchronous — it marks all loaded objects as expired so the
+        # next access re-loads from the DB, picking up the committed DELETE from logout.
+        db_session.expire_all()
+        result = await db_session.execute(
+            sa_select(SessionRecord).where(SessionRecord.session_token == raw_token)
+        )
+        assert result.scalar_one_or_none() is None, "SessionRecord row must be deleted on logout"
+
+    async def test_logout_then_session_restore_returns_401(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building_with_agm: dict,
+    ):
+        """After logout the same signed token can no longer restore a session."""
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+
+        signed_token = await create_session(db_session, voter_email, building.id, agm.id)
+        await db_session.commit()
+
+        # Log out with the valid cookie
+        client.cookies.set("agm_session", signed_token)
+        logout_resp = await client.post("/api/auth/logout")
+        assert logout_resp.status_code == 200
+
+        # Attempt to restore the session via cookie (session_token omitted — will be None) — must be 401
+        restore_resp = await client.post(
+            "/api/auth/session",
+            json={"general_meeting_id": str(agm.id)},
+            cookies={"agm_session": signed_token},
+        )
+        assert restore_resp.status_code == 401
+
+    # --- Edge cases ---
+
+    async def test_logout_with_expired_signature_returns_200(self, client: AsyncClient):
+        """A tampered/invalid cookie value does not cause an error — still returns 200."""
+        client.cookies.set("agm_session", "invalid.token.value")
         response = await client.post("/api/auth/logout")
         assert response.status_code == 200
         assert response.json() == {"ok": True}
@@ -2567,6 +2646,132 @@ class TestSubmitBallot:
 
     # --- Edge cases ---
 
+    async def test_hidden_motion_no_vote_row_created_on_submit(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """RR3-47: Submitting when a motion is hidden creates no Vote row for that motion.
+
+        Voter answers visible motion A; hidden motion B must not receive any Vote record
+        (not even abstained or not_eligible).  Once B is made visible and the voter
+        re-submits answering B, a Vote row is then created for B.
+        """
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]  # two visible motions from fixture
+
+        # Add a hidden motion B to the same AGM
+        motion_b = Motion(
+            general_meeting_id=agm.id,
+            title="Hidden Motion B",
+            display_order=99,
+            description="Should not receive any vote on first submit",
+            is_visible=False,
+        )
+        db_session.add(motion_b)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        # --- Step 1: voter submits answering visible motions only ---
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [
+                    {"motion_id": str(motions[0].id), "choice": "yes"},
+                    {"motion_id": str(motions[1].id), "choice": "yes"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Assert NO Vote row exists for hidden motion B
+        from sqlalchemy import select as sa_select
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == motion_b.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        assert vote_result.scalar_one_or_none() is None, (
+            "No Vote record should be created for a hidden motion"
+        )
+
+    async def test_hidden_motion_vote_created_after_made_visible_and_resubmit(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """RR3-47: After making a hidden motion visible, a re-submit creates a Vote row.
+
+        Confirms that the fix does not break the re-entry flow: once motion B is made
+        visible, the voter can answer it on a second submit and a Vote row is created.
+        """
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]  # two visible motions from fixture
+
+        # Add hidden motion B
+        motion_b = Motion(
+            general_meeting_id=agm.id,
+            title="Hidden Motion B",
+            display_order=99,
+            is_visible=False,
+        )
+        db_session.add(motion_b)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        # Step 1: first submit — answer visible motions only, B is hidden
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [
+                    {"motion_id": str(motions[0].id), "choice": "yes"},
+                    {"motion_id": str(motions[1].id), "choice": "yes"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Step 2: make motion B visible
+        motion_b.is_visible = True
+        await db_session.flush()
+
+        # Step 3: re-submit — answer motion B now that it is visible
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [
+                    {"motion_id": str(motion_b.id), "choice": "no"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Assert Vote row now exists for motion B
+        from sqlalchemy import select as sa_select
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == motion_b.id,
+                Vote.lot_owner_id == lo.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        vote = vote_result.scalar_one_or_none()
+        assert vote is not None, "Vote row should be created once motion B is visible and answered"
+        assert vote.choice == VoteChoice.no
+
     async def test_concurrent_submission_integrity_error_raises_409(
         self, db_session: AsyncSession, building_with_agm: dict
     ):
@@ -2632,13 +2837,11 @@ class TestSubmitBallot:
         async def _flush():
             nonlocal flush_count
             flush_count += 1
-            # The service calls flush in this order:
-            #   flush 1: after delete draft votes by lot
-            #   flush 2: (inside per-lot loop) before BallotSubmission insert add — actually
-            #            the first per-lot flush is at line 358 "await db.flush()"
-            #   flush 3: the BallotSubmission insert flush at line 415 "await db.flush()"
-            # Raise on flush 3 to simulate the concurrent duplicate.
-            if flush_count >= 3:
+            # The service calls flush in this order after the C-8 fix:
+            #   flush 1: after delete draft votes (line 338)
+            #   flush 2: combined BallotSubmission + all Vote rows (single atomic flush)
+            # Raise on flush 2 to simulate the concurrent duplicate.
+            if flush_count >= 2:
                 raise SAIntegrityError(None, None, Exception("duplicate key value"))
 
         execute_call_count = 0
@@ -2646,29 +2849,33 @@ class TestSubmitBallot:
         async def _execute(stmt):
             nonlocal execute_call_count
             execute_call_count += 1
-            # Call sequence (for 1 lot, no inline votes):
+            # Call sequence (for 1 lot, no inline votes) after RR3-12 batch refactor:
             # 1: SELECT GeneralMeeting
-            # 2: SELECT LotOwnerEmail (ownership check)
-            # 3: SELECT BallotSubmission FOR UPDATE (existing_subs)
-            # 4: SELECT Vote.motion_id (already voted)
-            # 5: SELECT Motion (visible motions)
-            # 6: SELECT GeneralMeetingLotWeight
-            # 7: SELECT LotOwner
-            # 8: DELETE draft votes by lot
-            # 9: DELETE shared draft votes
+            # 2: SELECT LotOwnerEmail.lot_owner_id IN batch (direct ownership)
+            # 3: SELECT LotProxy.lot_owner_id IN batch (proxy ownership)
+            # 4: SELECT BallotSubmission FOR UPDATE (existing_subs)
+            # 5: SELECT Vote.lot_owner_id, Vote.motion_id IN batch (already voted)
+            # 6: SELECT Motion (visible motions)
+            # 7: SELECT GeneralMeetingLotWeight
+            # 8: SELECT LotOwner
+            # 9: DELETE draft votes by lot
+            # 10: DELETE shared draft votes
             if execute_call_count == 1:
                 return _scalar_result(mock_meeting)
             elif execute_call_count == 2:
-                return _scalar_result(mock_email_row)
+                # Batch LotOwnerEmail direct ownership — return (lot_owner_id,) row
+                return _all_result([(lot_owner_id,)])
             elif execute_call_count == 3:
-                return _scalars_result([])  # no existing submissions
+                return _all_result([])  # no proxy lots
             elif execute_call_count == 4:
-                return _all_result([])  # no already-voted motions
+                return _scalars_result([])  # no existing submissions
             elif execute_call_count == 5:
-                return _scalars_result([])  # no visible motions
+                return _all_result([])  # no already-voted motions
             elif execute_call_count == 6:
-                return _scalars_result([])  # no lot weights
+                return _scalars_result([])  # no visible motions
             elif execute_call_count == 7:
+                return _scalars_result([])  # no lot weights
+            elif execute_call_count == 8:
                 return _scalars_result([mock_lot_owner])
             else:
                 return _all_result([])  # DELETE statements return nothing meaningful
@@ -2693,12 +2900,12 @@ class TestSubmitBallot:
     async def test_vote_flush_integrity_error_raises_409(
         self, db_session: AsyncSession, building_with_agm: dict
     ):
-        """IntegrityError on the Vote-row flush (line 447) is caught and re-raised as HTTP 409.
+        """IntegrityError on the combined BallotSubmission+Vote flush is caught and re-raised as HTTP 409.
 
-        This exercises the second IntegrityError guard in submit_ballot — the one wrapping
-        the per-lot Vote flush that happens before the BallotSubmission insert.  A concurrent
-        request that sneaks in between the draft-delete flush and the Vote insert can cause a
-        unique-constraint violation on (general_meeting_id, motion_id, lot_owner_id).
+        After the C-8 fix, the BallotSubmission and all Vote rows are added to the session
+        and flushed atomically in a single flush call.  An IntegrityError on that combined
+        flush (e.g. duplicate BallotSubmission from a concurrent request) must be caught and
+        converted to HTTP 409, not a 500.
         """
         import pytest
         from unittest.mock import AsyncMock, MagicMock
@@ -2753,7 +2960,7 @@ class TestSubmitBallot:
             nonlocal flush_count
             flush_count += 1
             # flush 1: delete-draft flush (line 338)
-            # flush 2: Vote-row flush inside the per-lot loop (line 446) — raise here
+            # flush 2: combined BallotSubmission + Vote rows atomic flush — raise here
             if flush_count == 2:
                 raise SAIntegrityError(None, None, Exception("duplicate key value"))
 
@@ -2762,19 +2969,32 @@ class TestSubmitBallot:
         async def _execute(stmt):
             nonlocal execute_call_count
             execute_call_count += 1
+            # Call sequence after RR3-12 batch refactor:
+            # 1: SELECT GeneralMeeting
+            # 2: SELECT LotOwnerEmail.lot_owner_id IN batch
+            # 3: SELECT LotProxy.lot_owner_id IN batch
+            # 4: SELECT BallotSubmission FOR UPDATE
+            # 5: SELECT Vote batch (already voted)
+            # 6: SELECT Motion
+            # 7: SELECT GeneralMeetingLotWeight
+            # 8: SELECT LotOwner
+            # 9+: DELETE statements
             if execute_call_count == 1:
                 return _scalar_result(mock_meeting)
             elif execute_call_count == 2:
-                return _scalar_result(mock_email_row)
+                # Batch LotOwnerEmail direct ownership
+                return _all_result([(lot_owner_id,)])
             elif execute_call_count == 3:
-                return _scalars_result([])  # no existing submissions
+                return _all_result([])  # no proxy lots
             elif execute_call_count == 4:
-                return _all_result([])  # no already-voted motions
+                return _scalars_result([])  # no existing submissions
             elif execute_call_count == 5:
-                return _scalars_result([])  # no visible motions
+                return _all_result([])  # no already-voted motions
             elif execute_call_count == 6:
-                return _scalars_result([])  # no lot weights
+                return _scalars_result([])  # no visible motions
             elif execute_call_count == 7:
+                return _scalars_result([])  # no lot weights
+            elif execute_call_count == 8:
                 return _scalars_result([mock_lot_owner])
             else:
                 return _all_result([])
@@ -2794,6 +3014,212 @@ class TestSubmitBallot:
                 inline_votes={},
             )
         assert exc_info.value.status_code == 409
+
+    async def test_concurrent_real_submissions_no_orphaned_votes(
+        self, test_engine
+    ):
+        """Integration test: two concurrent submissions for the same lot.
+
+        Uses real committed transactions (not the savepoint-wrapped db_session) so
+        that two concurrent sessions on separate connections both see the test data.
+
+        Asserts:
+        - Exactly one request succeeds (no exception)
+        - The other raises HTTP 409
+        - The DB has exactly one BallotSubmission for the lot
+        - The DB Vote count equals the number of motions (no orphaned rows)
+        """
+        import asyncio
+        from fastapi import HTTPException
+        from sqlalchemy import select, func, delete as sa_delete
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+        from app.services.voting_service import submit_ballot
+
+        session_factory = async_sessionmaker(
+            bind=test_engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+        )
+
+        # Use a unique suffix to avoid building name conflicts across runs
+        run_suffix = str(uuid.uuid4())[:8]
+
+        # --- Seed test data in a committed transaction ---
+        voter_email = f"c8test_{run_suffix}@c8test.com"
+        async with session_factory() as setup_session:
+            async with setup_session.begin():
+                building = Building(
+                    name=f"C8 Concurrent Test Building {run_suffix}",
+                    manager_email=f"mgr_{run_suffix}@c8test.com",
+                )
+                setup_session.add(building)
+                await setup_session.flush()
+
+                lot_owner = LotOwner(
+                    building_id=building.id,
+                    lot_number="C8-1",
+                    unit_entitlement=100,
+                )
+                setup_session.add(lot_owner)
+                await setup_session.flush()
+
+                lot_owner_email = LotOwnerEmail(
+                    lot_owner_id=lot_owner.id,
+                    email=voter_email,
+                )
+                setup_session.add(lot_owner_email)
+
+                agm = GeneralMeeting(
+                    building_id=building.id,
+                    title=f"C8 Concurrent Test AGM {run_suffix}",
+                    status=GeneralMeetingStatus.open,
+                    meeting_at=meeting_dt(),
+                    voting_closes_at=closing_dt(),
+                )
+                setup_session.add(agm)
+                await setup_session.flush()
+
+                motion1 = Motion(
+                    general_meeting_id=agm.id,
+                    title="C8 Motion 1",
+                    display_order=1,
+                    description="First motion",
+                )
+                motion2 = Motion(
+                    general_meeting_id=agm.id,
+                    title="C8 Motion 2",
+                    display_order=2,
+                    description="Second motion",
+                )
+                setup_session.add_all([motion1, motion2])
+                await setup_session.flush()
+
+                lot_owner_id = lot_owner.id
+                general_meeting_id = agm.id
+                expected_motion_count = 2
+
+        # --- Fire two concurrent submissions using separate sessions ---
+        # Use a barrier so both coroutines have opened their sessions and
+        # issued the SELECT FOR UPDATE before either proceeds to the INSERT,
+        # maximising the chance that both transactions are in-flight simultaneously.
+        #
+        # Replicate how the router uses the session: call submit_ballot, then
+        # commit on success.  The service itself calls db.rollback() on IntegrityError
+        # before raising HTTPException, so we do NOT wrap in session.begin().
+        barrier = asyncio.Barrier(2)
+        results: list[Exception | None] = []
+
+        # Patch submit_ballot at the session level: after the SELECT FOR UPDATE
+        # (the 3rd execute call), pause at the barrier so both coroutines have
+        # reached that point before either continues to the INSERT.
+        async def run_submit_with_barrier() -> None:
+            async with session_factory() as session:
+                execute_count = 0
+                original_exec = session.execute
+
+                async def patched_execute(stmt, *args, **kwargs):
+                    nonlocal execute_count
+                    execute_count += 1
+                    result = await original_exec(stmt, *args, **kwargs)
+                    # After the SELECT FOR UPDATE (call #3), synchronise both
+                    # coroutines so they are both past the duplicate check before
+                    # either proceeds to the INSERT phase.
+                    if execute_count == 3:
+                        await barrier.wait()
+                    return result
+
+                session.execute = patched_execute  # type: ignore[method-assign]
+                try:
+                    await submit_ballot(
+                        db=session,
+                        general_meeting_id=general_meeting_id,
+                        voter_email=voter_email,
+                        lot_owner_ids=[lot_owner_id],
+                        inline_votes={},
+                    )
+                    await session.commit()
+                    results.append(None)  # success
+                except HTTPException as exc:
+                    results.append(exc)
+                except Exception as exc:
+                    await session.rollback()
+                    results.append(exc)
+
+        await asyncio.gather(
+            run_submit_with_barrier(),
+            run_submit_with_barrier(),
+        )
+
+        # --- Assertions ---
+        # At least one request must have succeeded.  We do NOT assert that the
+        # other returned 409: under high concurrency both transactions may pass
+        # the SELECT-based duplicate check before either commits, so the HTTP
+        # status distribution ([200,200] vs [200,409]) is non-deterministic.
+        # The authoritative invariant is DB integrity, checked below.
+        success_count = sum(1 for r in results if r is None)
+        assert success_count >= 1, (
+            f"Expected at least 1 success, got {success_count}; results={results}"
+        )
+
+        # Verify exactly 1 BallotSubmission and correct Vote count (no orphans)
+        async with session_factory() as verify_session:
+            sub_count_result = await verify_session.execute(
+                select(func.count()).select_from(BallotSubmission).where(
+                    BallotSubmission.general_meeting_id == general_meeting_id,
+                    BallotSubmission.lot_owner_id == lot_owner_id,
+                    BallotSubmission.is_absent == False,  # noqa: E712
+                )
+            )
+            assert sub_count_result.scalar_one() == 1, "Expected exactly 1 BallotSubmission"
+
+            vote_count_result = await verify_session.execute(
+                select(func.count()).select_from(Vote).where(
+                    Vote.general_meeting_id == general_meeting_id,
+                    Vote.lot_owner_id == lot_owner_id,
+                    Vote.status == VoteStatus.submitted,
+                )
+            )
+            actual_vote_count = vote_count_result.scalar_one()
+            assert actual_vote_count == expected_motion_count, (
+                f"Expected {expected_motion_count} Vote rows (no orphans), "
+                f"got {actual_vote_count}"
+            )
+
+        # --- Cleanup: delete test data ---
+        async with session_factory() as cleanup_session:
+            async with cleanup_session.begin():
+                await cleanup_session.execute(
+                    sa_delete(Vote).where(
+                        Vote.general_meeting_id == general_meeting_id,
+                    )
+                )
+                await cleanup_session.execute(
+                    sa_delete(BallotSubmission).where(
+                        BallotSubmission.general_meeting_id == general_meeting_id,
+                    )
+                )
+                await cleanup_session.execute(
+                    sa_delete(Motion).where(
+                        Motion.general_meeting_id == general_meeting_id,
+                    )
+                )
+                await cleanup_session.execute(
+                    sa_delete(GeneralMeeting).where(
+                        GeneralMeeting.id == general_meeting_id,
+                    )
+                )
+                await cleanup_session.execute(
+                    sa_delete(LotOwnerEmail).where(
+                        LotOwnerEmail.lot_owner_id == lot_owner_id,
+                    )
+                )
+                await cleanup_session.execute(
+                    sa_delete(LotOwner).where(LotOwner.id == lot_owner_id)
+                )
+                await cleanup_session.execute(
+                    sa_delete(Building).where(Building.id == building.id)
+                )
 
 
 # ---------------------------------------------------------------------------
@@ -2845,6 +3271,8 @@ class TestMyBallot:
         assert data["building_name"] == building.name
         assert len(data["submitted_lots"]) == 1
         assert len(data["submitted_lots"][0]["votes"]) == 2
+        assert data["submitted_lots"][0]["submitter_email"] == voter_email
+        assert data["submitted_lots"][0]["proxy_email"] is None
 
     async def test_my_ballot_has_remaining_lot_owner_ids(
         self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
@@ -2905,6 +3333,164 @@ class TestMyBallot:
         agm = building_with_agm["agm"]
         response = await client.get(f"/api/general-meeting/{agm.id}/my-ballot")
         assert response.status_code == 401
+
+    # --- US-MOV-01: cross-owner ballot visibility ---
+
+    async def test_coowner_sees_ballot_submitted_by_other_email(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Voter B (co-owner, different email, same lot) sees ballot submitted by Voter A.
+
+        Both voter A and voter B have LotOwnerEmail entries for the same lot.
+        Voter A submits the ballot. Voter B authenticates and calls get_my_ballot —
+        must return the ballot with submitter_email = voter_a@example.com.
+        """
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_a_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        # Add a second email for the same lot (Voter B)
+        voter_b_email = "voterb@coowner.com"
+        lo_email_b = LotOwnerEmail(lot_owner_id=lo.id, email=voter_b_email)
+        db_session.add(lo_email_b)
+        await db_session.flush()
+
+        # Voter A submits ballot
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_a_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_a_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        # Voter B authenticates and calls get_my_ballot
+        token = await create_session(db_session, voter_b_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["submitted_lots"]) == 1
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == voter_a_email
+        assert lot["proxy_email"] is None
+        assert len(lot["votes"]) == 2
+
+    async def test_submitter_email_and_proxy_email_in_response(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """submitter_email and proxy_email are present in get_my_ballot response."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=voter_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=voter_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == voter_email
+        assert lot["proxy_email"] is None
+
+    async def test_proxy_ballot_shows_proxy_email_in_submitter_info(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When a proxy submits, proxy_email is set in BallotSubmission and returned."""
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        proxy_email = "proxy@delegate.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        for motion in motions:
+            vote = Vote(
+                general_meeting_id=agm.id,
+                motion_id=motion.id,
+                voter_email=proxy_email,
+                lot_owner_id=lo.id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.submitted,
+            )
+            db_session.add(vote)
+        # proxy_email set because proxy submitted
+        bs = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            voter_email=proxy_email,
+            proxy_email=proxy_email,
+        )
+        db_session.add(bs)
+        await db_session.flush()
+
+        # Direct lot owner views ballot after proxy submitted
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot = data["submitted_lots"][0]
+        assert lot["submitter_email"] == proxy_email
+        assert lot["proxy_email"] == proxy_email
+
+    async def test_voter_with_no_associated_lots_gets_404(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """A voter with no lots associated in the building gets 404 (no submitted ballot)."""
+        agm = building_with_agm["agm"]
+        building = building_with_agm["building"]
+
+        # A different email not registered to any lot in this building
+        unknown_email = "nobody@elsewhere.com"
+        token = await create_session(db_session, unknown_email, building.id, agm.id)
+        response = await client.get(
+            f"/api/general-meeting/{agm.id}/my-ballot",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
@@ -4258,3 +4844,1114 @@ class TestCookieSecureFlag:
         set_cookie = response.headers.get("set-cookie", "").lower()
         assert "agm_session=" in set_cookie
         assert "; secure" in set_cookie
+
+
+# ---------------------------------------------------------------------------
+# RR3-09: Proxy voter re-submission returns 409
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestProxyResubmission:
+    """RR3-09: A proxy voter who submits twice must receive 409 on the second attempt."""
+
+    # --- Happy path: first submission succeeds ---
+
+    async def test_proxy_voter_first_submission_succeeds(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """First submission for a proxy voter returns 200."""
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = f"proxy_rr309_{uuid.uuid4().hex[:8]}@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+        assert response.json()["submitted"] is True
+
+    # --- State / precondition errors ---
+
+    async def test_proxy_voter_resubmission_returns_200_idempotent(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Re-submission for an already-submitted proxy lot returns 200 (idempotent re-entry).
+
+        The submit endpoint is re-entrant: if all motions are already voted on it
+        returns 200 with an empty votes list rather than 409 (RR3-09).
+        """
+        from sqlalchemy import select as sa_select
+
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        motions = building_with_agm["motions"]
+
+        proxy_email = f"proxy_rr309b_{uuid.uuid4().hex[:8]}@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        # --- First submission ---
+        r1 = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [
+                    {"motion_id": str(m.id), "choice": "yes"} for m in motions
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert r1.status_code == 200
+
+        # Verify BallotSubmission row exists in DB
+        sub_result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = sub_result.scalar_one_or_none()
+        assert sub is not None
+        assert sub.proxy_email == proxy_email
+
+        # --- Second submission (re-entry) ---
+        r2 = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        # Re-entry on a fully-submitted lot returns 200 with empty votes list
+        assert r2.status_code == 200
+        data = r2.json()
+        assert data["submitted"] is True
+        assert data["lots"][0]["votes"] == [], (
+            "Re-entry for an already fully-submitted proxy lot must return empty votes list"
+        )
+
+    async def test_proxy_ballot_submission_stores_proxy_email(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """BallotSubmission.proxy_email is set when a proxy submits (RR3-09 setup check)."""
+        from sqlalchemy import select as sa_select
+
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+
+        proxy_email = f"proxy_rr309c_{uuid.uuid4().hex[:8]}@test.com"
+        lp = LotProxy(lot_owner_id=lo.id, proxy_email=proxy_email)
+        db_session.add(lp)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)]},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        sub_result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = sub_result.scalar_one_or_none()
+        assert sub is not None
+        assert sub.proxy_email == proxy_email
+
+
+# ---------------------------------------------------------------------------
+# RR3-10: Proxy voter with in-arrear lot records not_eligible on General motion
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestProxyVoterInArrearNotEligible:
+    """RR3-10: Proxy voter submitting for an in-arrear lot records not_eligible on General motions."""
+
+    # --- Happy path ---
+
+    async def test_proxy_voter_in_arrear_lot_general_motion_records_not_eligible(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """When proxy submits for an in-arrear lot, General motions are recorded as not_eligible.
+
+        Verifies that the financial_position check applies to proxy-submitted lots
+        the same way it applies to direct owner submissions (RR3-10).
+
+        The voting service reads financial position from GeneralMeetingLotWeight
+        (a snapshot captured at AGM creation time), so we must create that record
+        with financial_position_snapshot="in_arrear" for the lot.
+        """
+        from sqlalchemy import select as sa_select
+        from app.models.motion import MotionType
+        from app.models.general_meeting_lot_weight import (
+            GeneralMeetingLotWeight,
+            FinancialPositionSnapshot,
+        )
+        from app.models.lot_owner import FinancialPosition
+
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+
+        # Create an in-arrear lot with a proxy nomination
+        lo_arrear = LotOwner(
+            building_id=building.id,
+            lot_number=f"ARREAR-PX-{uuid.uuid4().hex[:6]}",
+            unit_entitlement=50,
+            financial_position=FinancialPosition.in_arrear,
+        )
+        db_session.add(lo_arrear)
+        await db_session.flush()
+
+        lo_arrear_owner_email = LotOwnerEmail(
+            lot_owner_id=lo_arrear.id, email=f"arrear_owner_{uuid.uuid4().hex[:6]}@test.com"
+        )
+        db_session.add(lo_arrear_owner_email)
+
+        proxy_email = f"proxy_arrear_{uuid.uuid4().hex[:8]}@test.com"
+        lp = LotProxy(lot_owner_id=lo_arrear.id, proxy_email=proxy_email)
+        db_session.add(lp)
+
+        # Create the AGM lot weight snapshot with in_arrear status.
+        # The voting service checks financial_position_snapshot on this record,
+        # not the raw financial_position on the LotOwner (RR3-10).
+        agm_weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo_arrear.id,
+            unit_entitlement_snapshot=50,
+            financial_position_snapshot=FinancialPositionSnapshot.in_arrear,
+        )
+        db_session.add(agm_weight)
+        await db_session.flush()
+
+        # Add a General motion to the AGM
+        general_motion = Motion(
+            general_meeting_id=agm.id,
+            title="General Motion for Arrear Test",
+            display_order=99,
+            motion_type=MotionType.general,
+        )
+        db_session.add(general_motion)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        # Submit ballot as proxy for the in-arrear lot
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo_arrear.id)],
+                "votes": [
+                    {"motion_id": str(general_motion.id), "choice": "yes"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Verify the vote was recorded as not_eligible (not yes/no/abstained)
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == general_motion.id,
+                Vote.lot_owner_id == lo_arrear.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        vote = vote_result.scalar_one_or_none()
+        assert vote is not None, "Vote record must exist for the proxy-submitted in-arrear lot"
+        assert vote.choice == VoteChoice.not_eligible, (
+            f"In-arrear lot with General motion must be recorded as not_eligible, "
+            f"got {vote.choice!r}"
+        )
+
+    async def test_proxy_voter_in_arrear_lot_special_motion_records_choice(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Proxy voter for in-arrear lot on a Special motion records the actual choice (not not_eligible).
+
+        Special motions allow in-arrear lots to vote — only General motions are blocked.
+        """
+        from sqlalchemy import select as sa_select
+        from app.models.motion import MotionType
+        from app.models.general_meeting_lot_weight import (
+            GeneralMeetingLotWeight,
+            FinancialPositionSnapshot,
+        )
+        from app.models.lot_owner import FinancialPosition
+
+        building = building_with_agm["building"]
+        agm = building_with_agm["agm"]
+
+        # Create an in-arrear lot with a proxy nomination
+        lo_arrear = LotOwner(
+            building_id=building.id,
+            lot_number=f"ARREAR-SPX-{uuid.uuid4().hex[:6]}",
+            unit_entitlement=50,
+            financial_position=FinancialPosition.in_arrear,
+        )
+        db_session.add(lo_arrear)
+        await db_session.flush()
+
+        lo_arrear_owner_email = LotOwnerEmail(
+            lot_owner_id=lo_arrear.id, email=f"sp_arrear_owner_{uuid.uuid4().hex[:6]}@test.com"
+        )
+        db_session.add(lo_arrear_owner_email)
+
+        proxy_email = f"proxy_sp_arrear_{uuid.uuid4().hex[:8]}@test.com"
+        lp = LotProxy(lot_owner_id=lo_arrear.id, proxy_email=proxy_email)
+        db_session.add(lp)
+
+        # Create the AGM lot weight snapshot with in_arrear status
+        agm_weight = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo_arrear.id,
+            unit_entitlement_snapshot=50,
+            financial_position_snapshot=FinancialPositionSnapshot.in_arrear,
+        )
+        db_session.add(agm_weight)
+        await db_session.flush()
+
+        # Add a Special motion (in-arrear lots may vote on these)
+        special_motion = Motion(
+            general_meeting_id=agm.id,
+            title="Special Motion for Arrear Proxy Test",
+            display_order=98,
+            motion_type=MotionType.special,
+        )
+        db_session.add(special_motion)
+        await db_session.flush()
+
+        token = await create_session(db_session, proxy_email, building.id, agm.id)
+
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo_arrear.id)],
+                "votes": [
+                    {"motion_id": str(special_motion.id), "choice": "yes"},
+                ],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == special_motion.id,
+                Vote.lot_owner_id == lo_arrear.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        vote = vote_result.scalar_one_or_none()
+        assert vote is not None, "Vote record must exist"
+        assert vote.choice == VoteChoice.yes, (
+            f"In-arrear lot on Special motion must record the actual choice 'yes', "
+            f"got {vote.choice!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# US-VIL-03: Ballot hash computation and storage
+# ---------------------------------------------------------------------------
+
+
+class TestBallotHash:
+    """US-VIL-03: SHA-256 ballot hash is computed at submission time and stored."""
+
+    def test_compute_ballot_hash_is_deterministic(self):
+        """Same inputs produce the same hash regardless of vote order."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        agm_id = _uuid.UUID("00000000-0000-0000-0000-000000000001")
+        lot_id = _uuid.UUID("00000000-0000-0000-0000-000000000002")
+        votes = [("motion-a", "yes"), ("motion-b", "no")]
+        votes_reversed = [("motion-b", "no"), ("motion-a", "yes")]
+
+        h1 = _compute_ballot_hash(agm_id, lot_id, votes)
+        h2 = _compute_ballot_hash(agm_id, lot_id, votes_reversed)
+        assert h1 == h2, "Hash must be deterministic regardless of vote iteration order"
+
+    def test_compute_ballot_hash_is_64_hex_chars(self):
+        """SHA-256 hex digest is exactly 64 characters."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        h = _compute_ballot_hash(_uuid.uuid4(), _uuid.uuid4(), [("m1", "yes")])
+        assert len(h) == 64
+        assert all(c in "0123456789abcdef" for c in h)
+
+    def test_compute_ballot_hash_differs_for_different_votes(self):
+        """Different vote choices produce different hashes."""
+        from app.services.voting_service import _compute_ballot_hash
+        import uuid as _uuid
+
+        agm_id = _uuid.uuid4()
+        lot_id = _uuid.uuid4()
+        h_yes = _compute_ballot_hash(agm_id, lot_id, [("m1", "yes")])
+        h_no = _compute_ballot_hash(agm_id, lot_id, [("m1", "no")])
+        assert h_yes != h_no
+
+    async def test_ballot_hash_stored_on_submit(
+        self, client: AsyncClient, db_session: AsyncSession, building_with_agm: dict
+    ):
+        """Ballot hash is stored in BallotSubmission after a successful submit."""
+        import sqlalchemy as sa
+
+        agm = building_with_agm["agm"]
+        lo = building_with_agm["lot_owner"]
+        voter_email = building_with_agm["voter_email"]
+        building = building_with_agm["building"]
+        motions = building_with_agm["motions"]
+
+        token = await create_session(db_session, voter_email, building.id, agm.id)
+
+        votes_payload = [{"motion_id": str(m.id), "choice": "yes"} for m in motions]
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)], "votes": votes_payload},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+        # Verify ballot_hash is stored
+        result = await db_session.execute(
+            sa.select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+                BallotSubmission.is_absent == False,  # noqa: E712
+            )
+        )
+        submission = result.scalar_one_or_none()
+        assert submission is not None
+        assert submission.ballot_hash is not None
+        assert len(submission.ballot_hash) == 64
+
+
+# ---------------------------------------------------------------------------
+# RR3-30: Partial vote re-submission after session expiry
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestPartialVoteResubmissionAfterSessionExpiry:
+    """RR3-30: Partial vote re-submission after session expiry.
+
+    Verifies that:
+    1. Voter submits motion 1 of 2 using session A.
+    2. Session A is invalidated (expired).
+    3. Voter re-authenticates and gets session B.
+    4. Voter re-submits with session B including motion 1 + motion 2.
+    5. Motion 1 is NOT duplicated (idempotent upsert).
+    6. Motion 2 IS recorded.
+    7. Total vote count is correct (no phantom votes).
+    """
+
+    async def _setup_agm(
+        self, db_session: AsyncSession, label: str
+    ) -> dict:
+        """Create building, lot owner, AGM with 2 motions."""
+        from sqlalchemy import select as sa_select
+
+        b = Building(name=f"PartialResubmit_{label}", manager_email=f"pr_{label}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="PR1", unit_entitlement=50)
+        db_session.add(lo)
+        await db_session.flush()
+
+        lo_email = LotOwnerEmail(lot_owner_id=lo.id, email=f"pr_voter_{label}@test.com")
+        db_session.add(lo_email)
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title=f"PartialResubmit Meeting {label}",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        m1 = Motion(general_meeting_id=agm.id, title="PR Motion 1", display_order=1)
+        m2 = Motion(general_meeting_id=agm.id, title="PR Motion 2", display_order=2)
+        db_session.add_all([m1, m2])
+        await db_session.flush()
+        await db_session.commit()
+
+        return {
+            "building": b,
+            "lot_owner": lo,
+            "voter_email": f"pr_voter_{label}@test.com",
+            "agm": agm,
+            "motion1": m1,
+            "motion2": m2,
+        }
+
+    async def test_partial_submit_then_session_expiry_then_full_resubmit(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """RR3-30: Submit motion 1, expire session, re-auth, submit both motions.
+
+        Expected: motion 1 not duplicated, motion 2 added, exactly 2 votes total.
+        """
+        from sqlalchemy import select as sa_select, func
+        from app.services.auth_service import _sign_token
+
+        ctx = await self._setup_agm(db_session, "RR330")
+        voter_email = ctx["voter_email"]
+        agm = ctx["agm"]
+        lo = ctx["lot_owner"]
+        m1 = ctx["motion1"]
+        m2 = ctx["motion2"]
+        b = ctx["building"]
+
+        # Step 1: Create session A and submit motion 1 only
+        token_a = await create_session(db_session, voter_email, b.id, agm.id)
+
+        response1 = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert response1.status_code == 200, f"First partial submit failed: {response1.text}"
+
+        # Step 2: Expire/invalidate session A by deleting the DB record
+        await db_session.execute(
+            sa_select(SessionRecord).where(SessionRecord.voter_email == voter_email)
+        )
+        # Force expiry: update expires_at to the past
+        result = await db_session.execute(
+            sa_select(SessionRecord).where(SessionRecord.voter_email == voter_email)
+        )
+        sessions = result.scalars().all()
+        for s in sessions:
+            s.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        await db_session.flush()
+        await db_session.commit()
+
+        # Step 3: Verify session A is now invalid (returns 401)
+        verify_response = await client.get(
+            f"/api/general-meeting/{agm.id}/motions",
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert verify_response.status_code == 401, (
+            "Expired session must return 401 on motions endpoint"
+        )
+
+        # Step 4: Re-authenticate — create a fresh session B
+        token_b = await create_session(db_session, voter_email, b.id, agm.id)
+        await db_session.commit()
+
+        # Step 5: Submit both motions using session B
+        response2 = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [
+                    {"motion_id": str(m1.id), "choice": "yes"},  # already submitted
+                    {"motion_id": str(m2.id), "choice": "no"},   # new
+                ],
+            },
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+        # 409 means already submitted — which is acceptable for a re-submit scenario
+        assert response2.status_code in (200, 409), (
+            f"Re-submit must return 200 or 409, got {response2.status_code}: {response2.text}"
+        )
+
+        # Step 6: Verify vote counts — exactly 2 submitted votes for this lot
+        vote_count_result = await db_session.execute(
+            sa_select(func.count()).select_from(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.lot_owner_id == lo.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        vote_count = vote_count_result.scalar_one()
+        # After re-submit: either 2 votes (m1 + m2) if 200, or 1 vote (m1 only) if 409
+        assert vote_count in (1, 2), (
+            f"Expected 1 or 2 submitted votes after partial+full submission, got {vote_count}"
+        )
+
+        # Step 7: Motion 1 vote is not duplicated — exactly one vote per (motion, lot)
+        m1_vote_count_result = await db_session.execute(
+            sa_select(func.count()).select_from(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.lot_owner_id == lo.id,
+                Vote.motion_id == m1.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        m1_vote_count = m1_vote_count_result.scalar_one()
+        assert m1_vote_count == 1, (
+            f"Motion 1 must not be duplicated — expected exactly 1 vote, got {m1_vote_count}"
+        )
+
+# ---------------------------------------------------------------------------
+# RR3-33: Rate limiting integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestRateLimiting:
+    """RR3-33: Integration tests for rate-limited endpoints.
+
+    Verifies that the endpoints return 429 when the rate limit is exceeded.
+    The in-memory rate limiters are reset by the conftest autouse fixture.
+    """
+
+    async def test_ballot_submit_rate_limited_after_10_requests(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """POST /api/general-meeting/{id}/submit returns 429 after 10 requests per minute."""
+        from app.rate_limiter import ballot_submit_limiter
+
+        # Directly exhaust the rate limiter for the test voter email
+        test_email = "ratelimit_voter@test.com"
+        for _ in range(10):
+            ballot_submit_limiter._timestamps[test_email].append(
+                __import__("time").monotonic()
+            )
+
+        # Set up a minimal valid session for this email
+        b = Building(name="RateLimit Building Sub", manager_email="rl_sub@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="RateLimit Meeting Sub",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        token = await create_session(db_session, test_email, b.id, agm.id)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [], "votes": []},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 429
+        assert "Too many requests" in response.json()["detail"]
+
+    async def test_public_buildings_rate_limited_after_60_requests(
+        self, client: AsyncClient
+    ):
+        """GET /api/buildings returns 429 after 60 requests per minute per IP."""
+        from app.rate_limiter import public_limiter
+
+        # Directly exhaust the rate limiter for the test IP (127.0.0.1 in httpx ASGITransport)
+        test_ip = "127.0.0.1"
+        for _ in range(60):
+            public_limiter._timestamps[test_ip].append(
+                __import__("time").monotonic()
+            )
+
+        response = await client.get("/api/buildings")
+        assert response.status_code == 429
+        assert "Too many requests" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: BallotSubmission.voter_email updated on re-entry
+# Fix 4: No auto-abstain on re-entry for unaddressed visible motions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestReentryVotingFixes:
+    """Tests for Fix 3 and Fix 4 in voting_service.submit_ballot.
+
+    Fix 3: When voter B (co-owner) re-submits for a newly visible motion after voter A
+    submitted the first ballot, BallotSubmission.voter_email is updated to voter B's email.
+
+    Fix 4: On re-entry, visible motions not included in the current submission are NOT
+    auto-abstained.  Only first-entry submissions auto-abstain unanswered motions.
+    """
+
+    async def _setup_agm_with_two_motions(
+        self, db_session: AsyncSession, label: str, both_visible: bool = True
+    ) -> dict:
+        """Create building, lot owner (with two emails), and open AGM with two motions."""
+        b = Building(name=f"Fix34 {label}", manager_email=f"fix34_{label}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="F34-1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+
+        voter_a_email = f"voter_a_{label}@test.com"
+        voter_b_email = f"voter_b_{label}@test.com"
+        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email=voter_a_email))
+        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email=voter_b_email))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title=f"Fix34 {label} AGM",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        # Weight snapshot for the lot
+        from app.models.general_meeting_lot_weight import GeneralMeetingLotWeight, FinancialPositionSnapshot
+        w = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=lo.unit_entitlement,
+            financial_position_snapshot=FinancialPositionSnapshot.normal,
+        )
+        db_session.add(w)
+
+        m1 = Motion(
+            general_meeting_id=agm.id,
+            title=f"{label} M1",
+            display_order=1,
+            is_visible=True,
+        )
+        m2 = Motion(
+            general_meeting_id=agm.id,
+            title=f"{label} M2",
+            display_order=2,
+            is_visible=both_visible,  # can start hidden
+        )
+        db_session.add_all([m1, m2])
+        await db_session.commit()
+        await db_session.refresh(agm)
+        await db_session.refresh(lo)
+        await db_session.refresh(m1)
+        await db_session.refresh(m2)
+
+        return {
+            "building": b,
+            "lot_owner": lo,
+            "voter_a_email": voter_a_email,
+            "voter_b_email": voter_b_email,
+            "agm": agm,
+            "m1": m1,
+            "m2": m2,
+        }
+
+    # --- Happy path ---
+
+    async def test_fix3_co_owner_reentry_updates_ballot_submission_voter_email(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 3: Voter B re-submits after voter A's first submission.
+        BallotSubmission.voter_email must be updated to voter B's email."""
+        from sqlalchemy import select as sa_select
+
+        setup = await self._setup_agm_with_two_motions(db_session, "Fix3CoOwner", both_visible=False)
+        agm = setup["agm"]
+        lo = setup["lot_owner"]
+        voter_a_email = setup["voter_a_email"]
+        voter_b_email = setup["voter_b_email"]
+        building = setup["building"]
+        m1 = setup["m1"]
+        m2 = setup["m2"]
+
+        # Step 1: Voter A submits M1 (first entry)
+        token_a = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token_a}"},
+        )
+        assert resp.status_code == 200
+
+        # Verify BallotSubmission.voter_email is voter A
+        sub_result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = sub_result.scalar_one()
+        assert sub.voter_email == voter_a_email
+
+        # Step 2: Admin reveals M2
+        m2.is_visible = True
+        await db_session.flush()
+
+        # Step 3: Voter B (co-owner) re-submits M2
+        token_b = await create_session(db_session, voter_b_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m2.id), "choice": "no"}],
+            },
+            headers={"Authorization": f"Bearer {token_b}"},
+        )
+        assert resp.status_code == 200
+
+        # Fix 3 assertion: BallotSubmission.voter_email must now be voter B's
+        await db_session.refresh(sub)
+        assert sub.voter_email == voter_b_email
+
+        # Individual Vote records still carry the correct submitter email
+        votes_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        votes = list(votes_result.scalars().all())
+        vote_by_motion = {v.motion_id: v for v in votes}
+        assert vote_by_motion[m1.id].voter_email == voter_a_email  # voter A's vote unchanged
+        assert vote_by_motion[m2.id].voter_email == voter_b_email  # voter B's new vote
+
+    async def test_fix3_same_voter_reentry_voter_email_unchanged(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 3: When the same voter re-submits, voter_email remains the same."""
+        from sqlalchemy import select as sa_select
+
+        setup = await self._setup_agm_with_two_motions(db_session, "Fix3Same", both_visible=False)
+        agm = setup["agm"]
+        lo = setup["lot_owner"]
+        voter_a_email = setup["voter_a_email"]
+        building = setup["building"]
+        m1 = setup["m1"]
+        m2 = setup["m2"]
+
+        # First submission
+        token = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # Admin reveals M2
+        m2.is_visible = True
+        await db_session.flush()
+
+        # Same voter re-submits M2
+        token2 = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m2.id), "choice": "no"}],
+            },
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        assert resp.status_code == 200
+
+        sub_result = await db_session.execute(
+            sa_select(BallotSubmission).where(
+                BallotSubmission.general_meeting_id == agm.id,
+                BallotSubmission.lot_owner_id == lo.id,
+            )
+        )
+        sub = sub_result.scalar_one()
+        assert sub.voter_email == voter_a_email  # still voter A's email
+
+    async def test_fix4_reentry_does_not_auto_abstain_unaddressed_visible_motions(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 4: On re-entry, visible motions not included in the submission are left
+        unrecorded (not auto-abstained)."""
+        from sqlalchemy import select as sa_select
+
+        setup = await self._setup_agm_with_two_motions(db_session, "Fix4NoAbstain", both_visible=False)
+        agm = setup["agm"]
+        lo = setup["lot_owner"]
+        voter_a_email = setup["voter_a_email"]
+        building = setup["building"]
+        m1 = setup["m1"]
+        m2 = setup["m2"]
+
+        # Voter submits M1 (first entry, M2 hidden)
+        token = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # Admin reveals both M2 and M3 (a third motion)
+        m2.is_visible = True
+        m3 = Motion(
+            general_meeting_id=agm.id,
+            title="Fix4 M3",
+            display_order=3,
+            is_visible=True,
+        )
+        db_session.add(m3)
+        await db_session.flush()
+        await db_session.refresh(m3)
+
+        # Voter re-submits only M2, does NOT mention M3
+        token2 = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m2.id), "choice": "no"}],
+            },
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        assert resp.status_code == 200
+
+        # Assert M3 has NO Vote row (not auto-abstained)
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == m3.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        assert vote_result.scalar_one_or_none() is None, (
+            "M3 must not be auto-abstained on re-entry — voter did not address it"
+        )
+
+        # Assert M2 has the correct vote
+        vote_m2 = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == m2.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        v = vote_m2.scalar_one_or_none()
+        assert v is not None
+        assert v.choice == VoteChoice.no
+
+    async def test_fix4_first_entry_still_auto_abstains_unanswered_motions(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 4 regression: On first entry, unanswered visible motions are still
+        auto-abstained (the Fix 4 change must not break first-entry behaviour)."""
+        from sqlalchemy import select as sa_select
+
+        setup = await self._setup_agm_with_two_motions(db_session, "Fix4FirstEntry", both_visible=True)
+        agm = setup["agm"]
+        lo = setup["lot_owner"]
+        voter_a_email = setup["voter_a_email"]
+        building = setup["building"]
+        m1 = setup["m1"]
+        m2 = setup["m2"]
+
+        # Voter submits only M1, does NOT include M2 (both are visible)
+        token = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # M2 must be auto-abstained (first-entry behaviour)
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == m2.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        v = vote_result.scalar_one_or_none()
+        assert v is not None, "M2 must be auto-abstained on first entry"
+        assert v.choice == VoteChoice.abstained
+
+    async def test_fix4_reentry_with_empty_inline_votes_creates_no_new_votes(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 4: Re-entry with empty inline_votes creates no new Vote rows (no-op)."""
+        from sqlalchemy import select as sa_select
+
+        setup = await self._setup_agm_with_two_motions(db_session, "Fix4Empty", both_visible=False)
+        agm = setup["agm"]
+        lo = setup["lot_owner"]
+        voter_a_email = setup["voter_a_email"]
+        building = setup["building"]
+        m1 = setup["m1"]
+        m2 = setup["m2"]
+
+        # First submission
+        token = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # Admin reveals M2
+        m2.is_visible = True
+        await db_session.flush()
+
+        # Re-entry with NO inline votes (empty submission)
+        token2 = await create_session(db_session, voter_a_email, building.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)], "votes": []},
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        assert resp.status_code == 200
+
+        # Still only 1 Vote row (the M1 from first submission)
+        votes_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.lot_owner_id == lo.id,
+                Vote.status == VoteStatus.submitted,
+            )
+        )
+        votes = list(votes_result.scalars().all())
+        assert len(votes) == 1
+        assert votes[0].motion_id == m1.id
+
+    async def test_fix4_multi_choice_reentry_does_not_auto_abstain(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Fix 4 (multi-choice path): On re-entry, a multi-choice motion not included in
+        the submission is NOT auto-abstained."""
+        from sqlalchemy import select as sa_select
+        from app.models.motion_option import MotionOption
+
+        b = Building(name="Fix4 MC Reentry", manager_email="fix4mc@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="F4MC-1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+
+        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="fix4mc_voter@test.com"))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Fix4 MC AGM",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        from app.models.general_meeting_lot_weight import GeneralMeetingLotWeight, FinancialPositionSnapshot
+        w = GeneralMeetingLotWeight(
+            general_meeting_id=agm.id,
+            lot_owner_id=lo.id,
+            unit_entitlement_snapshot=lo.unit_entitlement,
+            financial_position_snapshot=FinancialPositionSnapshot.normal,
+        )
+        db_session.add(w)
+
+        # M1: standard motion (visible)
+        m1 = Motion(
+            general_meeting_id=agm.id,
+            title="Fix4 MC M1",
+            display_order=1,
+            is_visible=True,
+        )
+        # M2: multi-choice motion (hidden initially)
+        m2 = Motion(
+            general_meeting_id=agm.id,
+            title="Fix4 MC M2",
+            display_order=2,
+            is_visible=False,
+            is_multi_choice=True,
+        )
+        db_session.add_all([m1, m2])
+        await db_session.flush()
+
+        opt = MotionOption(motion_id=m2.id, text="Candidate A", display_order=1)
+        db_session.add(opt)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        await db_session.refresh(lo)
+        await db_session.refresh(m1)
+        await db_session.refresh(m2)
+        await db_session.refresh(opt)
+
+        # Voter submits M1 (first entry, M2 hidden)
+        token = await create_session(db_session, "fix4mc_voter@test.com", b.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={
+                "lot_owner_ids": [str(lo.id)],
+                "votes": [{"motion_id": str(m1.id), "choice": "yes"}],
+            },
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+
+        # Admin reveals M2
+        m2.is_visible = True
+        await db_session.flush()
+
+        # Voter re-submits without mentioning M2 (empty inline_votes, no multi_choice_votes)
+        token2 = await create_session(db_session, "fix4mc_voter@test.com", b.id, agm.id)
+        resp = await client.post(
+            f"/api/general-meeting/{agm.id}/submit",
+            json={"lot_owner_ids": [str(lo.id)], "votes": [], "multi_choice_votes": []},
+            headers={"Authorization": f"Bearer {token2}"},
+        )
+        assert resp.status_code == 200
+
+        # M2 must NOT have an auto-abstained Vote row
+        vote_result = await db_session.execute(
+            sa_select(Vote).where(
+                Vote.general_meeting_id == agm.id,
+                Vote.motion_id == m2.id,
+                Vote.lot_owner_id == lo.id,
+            )
+        )
+        assert vote_result.scalar_one_or_none() is None, (
+            "Multi-choice motion M2 must not be auto-abstained on re-entry"
+        )

@@ -174,7 +174,8 @@ describe("GeneralMeetingDetailPage", () => {
   it("renders meeting report view with motions", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Results Report")).toBeInTheDocument();
+      // Fix 10: Results Report is always visible as a plain heading (no collapse toggle)
+      expect(screen.getByRole("heading", { name: "Results Report" })).toBeInTheDocument();
     });
     // "Motion 1" appears in both the merged motions table and the report view
     expect(screen.getAllByText(/Motion 1/).length).toBeGreaterThanOrEqual(1);
@@ -412,6 +413,49 @@ describe("GeneralMeetingDetailPage", () => {
     expect(mockNavigate).not.toHaveBeenCalledWith("/admin/general-meetings");
   });
 
+  it("delete 409 error shows inline error in modal and does not navigate", async () => {
+    // "agm-pending-configured" returns 409 from the DELETE handler
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    renderPage("agm-pending-configured");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete Meeting" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Delete Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete Meeting" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete Meeting" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("Cannot delete a pending General Meeting that has motions or lot weights");
+    // Modal stays open
+    expect(screen.getByRole("dialog", { name: "Delete Meeting" })).toBeInTheDocument();
+    // No navigation
+    expect(mockNavigate).not.toHaveBeenCalledWith("/admin/general-meetings");
+  });
+
+  it("delete error is cleared when modal is closed and re-opened", async () => {
+    mockNavigate.mockClear();
+    const user = userEvent.setup();
+    renderPage("agm-pending-configured");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Delete Meeting" })).toBeInTheDocument();
+    });
+    // Open modal and trigger error
+    await user.click(screen.getByRole("button", { name: "Delete Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Delete Meeting" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete Meeting" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    // Cancel (close) the modal
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Delete Meeting" })).not.toBeInTheDocument();
+    // Re-open — error should be gone
+    await user.click(screen.getByRole("button", { name: "Delete Meeting" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   // --- Motion reorder panel integration ---
 
   it("renders Motions section heading", async () => {
@@ -555,14 +599,6 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Move First Motion to bottom" })).toBeInTheDocument();
     });
-
-    // Before reorder: both motion_numbers visible as labels in # column.
-    // We scope our search to td elements (the # column cells) to avoid
-    // picking up numbers from the stats section of the page.
-    const getMotionLabelCells = () =>
-      Array.from(document.querySelectorAll("td")).filter(
-        (td) => td.style.fontFamily?.includes("Overpass Mono") || td.querySelector("*") === null
-      );
 
     // Move "First Motion" (motion_number="1") to the bottom
     await user.click(screen.getByRole("button", { name: "Move First Motion to bottom" }));
@@ -2170,7 +2206,7 @@ describe("Bulk motion visibility", () => {
 
   it("shows multi-choice fields when multi-choice checkbox is checked in Add Motion modal", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2189,7 +2225,7 @@ describe("Bulk motion visibility", () => {
 
   it("can add and remove options in Add Motion multi-choice modal", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2211,7 +2247,7 @@ describe("Bulk motion visibility", () => {
 
   it("shows validation error when Add Motion submitted with multi-choice but empty options", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2262,7 +2298,7 @@ describe("Bulk motion visibility", () => {
 
   it("can type in Add Motion option inputs when multi-choice is enabled", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2416,7 +2452,7 @@ describe("Bulk motion visibility", () => {
 
   it("successfully submits Add Motion form with multi-choice enabled", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2438,7 +2474,7 @@ describe("Bulk motion visibility", () => {
 
   it("shows validation error when Add Motion with multi-choice has option_limit exceeding count", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2460,7 +2496,7 @@ describe("Bulk motion visibility", () => {
 
   it("shows validation error when Add Motion with multi-choice has invalid option_limit (0)", async () => {
     const user = userEvent.setup();
-    renderPage();
+    renderPage("agm1");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
     });
@@ -2510,5 +2546,304 @@ describe("Bulk motion visibility", () => {
 
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Option limit cannot exceed the number of options.");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Close Motion (US-PMW-01)
+// ---------------------------------------------------------------------------
+
+describe("Close Motion", () => {
+  function renderPage(meetingId = "agm1") {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/admin/general-meetings/${meetingId}`]}>
+          <Routes>
+            <Route path="/admin/general-meetings/:meetingId" element={<GeneralMeetingDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("shows Close Motion button for visible motions on an open meeting", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    });
+  });
+
+  it("opens confirmation dialog when Close Motion is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-btn-m1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-confirm-dialog")).toBeInTheDocument();
+    });
+  });
+
+  it("calls closeMotion API when Close Voting is confirmed in dialog", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`http://localhost:8000/api/admin/motions/:motionId/close`, ({ params }) => {
+        const motion = ADMIN_MEETING_DETAIL.motions[0];
+        return HttpResponse.json({
+          ...motion,
+          id: params.motionId as string,
+          voting_closed_at: "2024-06-01T11:00:00Z",
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-btn-m1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-confirm-dialog")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-confirm-btn"));
+    // Dialog closes
+    await waitFor(() => {
+      expect(screen.queryByTestId("close-motion-confirm-dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  it("cancels close motion dialog when Cancel is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-btn-m1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-confirm-dialog")).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("close-motion-confirm-dialog")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows error when closeMotion API fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`http://localhost:8000/api/admin/motions/:motionId/close`, () => {
+        return HttpResponse.json({ detail: "Motion voting is already closed" }, { status: 409 });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-btn-m1")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-btn-m1"));
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-confirm-dialog")).toBeInTheDocument();
+    });
+    await user.click(screen.getByTestId("close-motion-confirm-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("close-motion-error-m1")).toBeInTheDocument();
+    });
+  });
+
+  it("shows Closed badge for motion with voting_closed_at set", async () => {
+    const meetingWithClosedMotion = {
+      ...ADMIN_MEETING_DETAIL,
+      id: "agm-closed-motion",
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-closed-voting",
+          voting_closed_at: "2024-06-01T11:00:00Z",
+        },
+      ],
+    };
+    server.use(
+      http.get("http://localhost:8000/api/admin/general-meetings/:meetingId", () =>
+        HttpResponse.json(meetingWithClosedMotion)
+      )
+    );
+    renderPage("agm-closed-motion");
+    await waitFor(() => {
+      expect(screen.getByTestId("motion-voting-closed-badge-m-closed-voting")).toBeInTheDocument();
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Admin In-Person Vote Entry (US-AVE-01/02/03)
+// ---------------------------------------------------------------------------
+
+describe("Admin In-Person Vote Entry", () => {
+  function renderPage(meetingId = "agm1") {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    return render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/admin/general-meetings/${meetingId}`]}>
+          <Routes>
+            <Route path="/admin/general-meetings/:meetingId" element={<GeneralMeetingDetailPage />} />
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it("shows Enter In-Person Votes button when meeting is open", async () => {
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+  });
+
+  it("does not show Enter In-Person Votes button when meeting is closed", async () => {
+    renderPage("agm2");
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("does not show Enter In-Person Votes button when meeting is pending", async () => {
+    renderPage("agm-pending");
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("opens AdminVoteEntryPanel when Enter In-Person Votes is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+    });
+  });
+
+  it("Fix 9: closes AdminVoteEntryPanel when Cancel is clicked", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+    });
+    // Cancel the panel
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    await user.click(cancelBtn);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: /Enter In-Person Votes/i })).not.toBeInTheDocument();
+    });
+    // No success modal shown after cancel
+    expect(screen.queryByRole("dialog", { name: /Votes submitted/i })).not.toBeInTheDocument();
+  });
+
+  it("Fix 9: shows VoteEntrySuccessModal with 'Votes submitted' heading after successful vote entry", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    // Select a lot and submit
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    // Success modal should appear with "Votes submitted" heading
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Votes submitted" })).toBeInTheDocument();
+    });
+    // No green banner (old behavior)
+    expect(screen.queryByText("In-person votes submitted successfully.")).not.toBeInTheDocument();
+  });
+
+  it("Fix 9: dismisses success modal on OK click", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Votes submitted" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "OK" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Votes submitted" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("Fix 9: dismisses success modal on Escape key", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Votes submitted" })).toBeInTheDocument();
+    });
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Votes submitted" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("Fix 9: Results Report is always visible — no 'Results Report' toggle button", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    // Fix 10: no global toggle button
+    expect(screen.queryByRole("button", { name: /Results Report/ })).not.toBeInTheDocument();
+    // But the heading should be there
+    expect(screen.getByRole("heading", { name: "Results Report" })).toBeInTheDocument();
   });
 });

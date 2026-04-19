@@ -1,6 +1,8 @@
+import type { ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchMyBallot } from "../../api/voter";
+import type { BallotVoteItem } from "../../api/voter";
 import { useBranding } from "../../context/BrandingContext";
 
 const CHOICE_LABELS: Record<string, string> = {
@@ -11,13 +13,69 @@ const CHOICE_LABELS: Record<string, string> = {
   selected: "Selected",
 };
 
-function renderChoiceLabel(vote: { choice: string; is_multi_choice?: boolean; selected_options?: Array<{ text: string }> }): string {
+const OPTION_CHOICE_LABELS: Record<string, string> = {
+  for: "For",
+  against: "Against",
+  abstained: "Abstained",
+};
+
+/** Maps an option-level choice to the matching binary vote CSS class suffix */
+function optionChoiceClass(choice: string): string {
+  if (choice === "for") return "yes";
+  if (choice === "against") return "no";
+  return "abstained";
+}
+
+function renderChoiceContent(vote: BallotVoteItem): ReactNode {
   if (vote.is_multi_choice) {
-    if (vote.choice === "not_eligible") return "Not eligible";
-    if (vote.choice === "abstained" || !vote.selected_options || vote.selected_options.length === 0) return "Abstained";
-    return vote.selected_options.map((o) => o.text).join(", ");
+    if (vote.choice === "not_eligible") {
+      return (
+        <span className="vote-item__choice vote-item__choice--abstained">
+          Not eligible
+        </span>
+      );
+    }
+    // Use option_choices if present (Slice 3 format) — render per-option coloured list
+    if (vote.option_choices && vote.option_choices.length > 0) {
+      return (
+        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+          {vote.option_choices.map((oc) => (
+            <li
+              key={oc.option_id}
+              style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 4 }}
+            >
+              <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+                {oc.option_text}
+              </span>
+              <span
+                className={`vote-item__choice vote-item__choice--${optionChoiceClass(oc.choice)}`}
+              >
+                {OPTION_CHOICE_LABELS[oc.choice] ?? oc.choice}
+              </span>
+            </li>
+          ))}
+        </ul>
+      );
+    }
+    // Fallback to selected_options (backward compat for legacy abstain rows)
+    if (vote.choice === "abstained" || !vote.selected_options || vote.selected_options.length === 0) {
+      return (
+        <span className="vote-item__choice vote-item__choice--abstained">
+          Abstained
+        </span>
+      );
+    }
+    return (
+      <span className="vote-item__choice vote-item__choice--abstained">
+        {vote.selected_options.map((o) => o.text).join(", ")}
+      </span>
+    );
   }
-  return CHOICE_LABELS[vote.choice] ?? vote.choice;
+  return (
+    <span className={`vote-item__choice vote-item__choice--${vote.choice}`}>
+      {CHOICE_LABELS[vote.choice] ?? vote.choice}
+    </span>
+  );
 }
 
 export function ConfirmationPage() {
@@ -64,7 +122,7 @@ export function ConfirmationPage() {
   }
 
   // Collect all votes across submitted lots, deduplicated by motion_id (first lot wins)
-  const allVotes: { motion_id: string; motion_title: string; display_order: number; motion_number: string | null; choice: string; lot_number: string; is_multi_choice?: boolean; selected_options?: Array<{ text: string }> }[] = [];
+  const allVotes: (BallotVoteItem & { lot_number: string })[] = [];
   for (const lot of data.submitted_lots) {
     for (const v of lot.votes) {
       if (!allVotes.find((x) => x.motion_id === v.motion_id && x.lot_number === lot.lot_number)) {
@@ -74,6 +132,21 @@ export function ConfirmationPage() {
   }
   const sortedVotes = [...allVotes].sort((a, b) => a.display_order - b.display_order);
   const isMultiLot = data.submitted_lots.length > 1;
+
+  function renderSubmitterInfo(lot: { submitter_email: string; proxy_email?: string | null }) {
+    if (lot.proxy_email) {
+      return (
+        <p className="vote-meta__submitter">
+          Submitted via proxy by {lot.proxy_email}
+        </p>
+      );
+    }
+    return (
+      <p className="vote-meta__submitter">
+        This ballot was submitted by {lot.submitter_email}
+      </p>
+    );
+  }
 
   return (
     <main className="voter-content">
@@ -103,32 +176,40 @@ export function ConfirmationPage() {
 
         <div className="vote-summary">
           <p className="vote-summary__heading">Your votes</p>
-          <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
-            {isMultiLot
-              ? data.submitted_lots.map((lot) => (
+          {isMultiLot
+            ? (
+              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                {data.submitted_lots.map((lot) => (
                   <li key={lot.lot_owner_id} style={{ marginBottom: "12px" }}>
                     <p style={{ fontWeight: 600, marginBottom: "4px" }}>Lot {lot.lot_number}</p>
+                    {renderSubmitterInfo(lot)}
                     <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
                       {[...lot.votes].sort((a, b) => a.display_order - b.display_order).map((v) => (
                         <li className="vote-item" key={v.motion_id}>
                           <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
-                          <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
-                            {renderChoiceLabel(v)}
-                          </span>
+                          {renderChoiceContent(v)}
                         </li>
                       ))}
                     </ul>
                   </li>
-                ))
-              : sortedVotes.map((v) => (
-                  <li className="vote-item" key={v.motion_id}>
-                    <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
-                    <span className={`vote-item__choice vote-item__choice--${v.choice}`}>
-                      {renderChoiceLabel(v)}
-                    </span>
-                  </li>
                 ))}
-          </ul>
+              </ul>
+            )
+            : (
+              <>
+                {data.submitted_lots.length === 1 && renderSubmitterInfo(data.submitted_lots[0])}
+                {/* RR4-37: wrap <li> elements in a <ul> to ensure valid semantic HTML */}
+                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                  {sortedVotes.map((v) => (
+                    <li className="vote-item" key={v.motion_id}>
+                      <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
+                      {renderChoiceContent(v)}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )
+          }
         </div>
 
         <div className="submit-section" style={{ borderTop: "none", marginTop: "24px", paddingTop: "0" }}>

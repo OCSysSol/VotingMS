@@ -119,6 +119,32 @@ describe("AuthForm — step 1 (email)", () => {
     expect(label.classList.contains("field__label--required")).toBe(true);
   });
 
+  // --- US-ACC-05: Step indicator ---
+  it("shows 'Step 1 of 2' indicator on step 1", () => {
+    render(<AuthForm {...step1Props()} />);
+    expect(screen.getByText(/Step 1 of 2/i)).toBeInTheDocument();
+  });
+
+  // --- RR5-10: aria-live on step indicator ---
+  it("step indicator has aria-live='polite' for screen reader announcements", () => {
+    render(<AuthForm {...step1Props()} />);
+    const indicator = screen.getByText(/Step 1 of 2/i);
+    expect(indicator).toHaveAttribute("aria-live", "polite");
+  });
+
+  // --- RR5-08: no inline style props for colour/spacing ---
+  it("step indicator uses CSS class, not inline style props", () => {
+    render(<AuthForm {...step1Props()} />);
+    const indicator = screen.getByText(/Step 1 of 2/i);
+    expect(indicator).not.toHaveAttribute("style");
+  });
+
+  it("required field legend uses CSS class, not inline style props", () => {
+    render(<AuthForm {...step1Props()} />);
+    const legend = screen.getByText(/Required field/);
+    expect(legend).not.toHaveAttribute("style");
+  });
+
   // --- No code field on step 1 ---
   it("does not render 'Lot number' field on step 1", () => {
     render(<AuthForm {...step1Props()} />);
@@ -226,6 +252,26 @@ describe("AuthForm — step 2 (code)", () => {
     await user.type(screen.getByLabelText("Verification code"), "ABCD1234");
     await user.click(screen.getByRole("button", { name: "Resend code" }));
     expect(screen.queryByDisplayValue("ABCD1234")).not.toBeInTheDocument();
+  });
+
+  // --- US-ACC-05: Step indicator ---
+  it("shows 'Step 2 of 2' indicator on step 2", () => {
+    render(<AuthForm {...step2Props()} />);
+    expect(screen.getByText(/Step 2 of 2/i)).toBeInTheDocument();
+  });
+
+  // --- RR5-10: aria-live on step 2 indicator ---
+  it("step indicator on step 2 has aria-live='polite'", () => {
+    render(<AuthForm {...step2Props()} />);
+    const indicator = screen.getByText(/Step 2 of 2/i);
+    expect(indicator).toHaveAttribute("aria-live", "polite");
+  });
+
+  // --- RR5-08: no inline style props in step 2 ---
+  it("required field legend on step 2 uses CSS class, not inline style props", () => {
+    render(<AuthForm {...step2Props()} />);
+    const legend = screen.getByText(/Required field/);
+    expect(legend).not.toHaveAttribute("style");
   });
 
   // --- US-ACC-05: OTP helper text ---

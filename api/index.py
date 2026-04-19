@@ -5,14 +5,13 @@ Makes the backend package importable from the project root, then exports
 the FastAPI `app` instance for Vercel's Python runtime (ASGI).
 
 Environment variables expected (set in Vercel project settings):
-  DATABASE_URL      postgresql+asyncpg://... (cloud Postgres)
-  SESSION_SECRET    random secret for session cookies
-  SMTP_HOST         SMTP server hostname (e.g. mail-au.smtp2go.com)
-  SMTP_PORT         SMTP server port (e.g. 2525 for STARTTLS)
-  SMTP_USERNAME     SMTP authentication username
-  SMTP_PASSWORD     SMTP authentication password
-  SMTP_FROM_EMAIL   sender address for result emails
-  ALLOWED_ORIGIN    frontend URL (e.g. https://your-project.vercel.app)
+  DATABASE_URL         postgresql+asyncpg://... (cloud Postgres)
+  SESSION_SECRET       random secret for session cookies
+  SMTP_ENCRYPTION_KEY  base64url-encoded 32-byte key for encrypting stored SMTP passwords
+  ALLOWED_ORIGIN       frontend URL (e.g. https://your-project.vercel.app)
+
+  SMTP settings (host, port, username, password, from_email) are configured
+  via the admin Settings page and stored encrypted in the database.
 """
 import os
 import sys
@@ -38,6 +37,20 @@ if postgres_url and "DATABASE_URL" not in os.environ:
 if "DATABASE_URL" in os.environ:
     os.environ["DATABASE_URL"] = (
         os.environ["DATABASE_URL"]
+        .replace("postgres://", "postgresql+asyncpg://", 1)
+        .replace("postgresql://", "postgresql+asyncpg://", 1)
+        .replace("sslmode=require", "ssl=require")
+        .replace("&channel_binding=require", "")
+        .replace("channel_binding=require&", "")
+        .replace("channel_binding=require", "")
+    )
+
+# Sanitize DATABASE_URL_UNPOOLED the same way: the Neon-Vercel integration
+# injects it as a raw postgresql:// URL with channel_binding and sslmode.
+# database.py reads this directly so it must be in asyncpg format before import.
+if "DATABASE_URL_UNPOOLED" in os.environ:
+    os.environ["DATABASE_URL_UNPOOLED"] = (
+        os.environ["DATABASE_URL_UNPOOLED"]
         .replace("postgres://", "postgresql+asyncpg://", 1)
         .replace("postgresql://", "postgresql+asyncpg://", 1)
         .replace("sslmode=require", "ssl=require")
@@ -117,6 +130,7 @@ if _db_url:  # pragma: no cover — requires a live DB; exercised by integration
 # frontend/dist is included in the Lambda via vercel.json includeFiles.
 _dist_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(_dist_dir):
+    from fastapi import HTTPException  # noqa: E402
     from fastapi.staticfiles import StaticFiles  # noqa: E402
     from fastapi.responses import FileResponse  # noqa: E402
     from starlette.types import Scope  # noqa: E402
@@ -146,6 +160,12 @@ if os.path.isdir(_dist_dir):
         candidate = os.path.join(_dist_dir, full_path)  # pragma: no cover
         if os.path.isfile(candidate):  # pragma: no cover
             return FileResponse(candidate)  # pragma: no cover
+        _, ext = os.path.splitext(full_path)  # pragma: no cover
+        if ext and ext.lower() in {  # pragma: no cover
+            '.png', '.jpg', '.jpeg', '.ico', '.svg', '.webp', '.gif',  # pragma: no cover
+            '.woff', '.woff2', '.ttf', '.eot', '.map'  # pragma: no cover
+        }:  # pragma: no cover
+            raise HTTPException(status_code=404)  # pragma: no cover
         return FileResponse(  # pragma: no cover
             os.path.join(_dist_dir, "index.html"),  # pragma: no cover
             headers=_NO_CACHE,  # pragma: no cover

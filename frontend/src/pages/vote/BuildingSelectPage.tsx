@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { fetchBuildings, fetchGeneralMeetings } from "../../api/voter";
-import { BuildingDropdown } from "../../components/vote/BuildingDropdown";
+import { VoterBuildingCombobox } from "../../components/vote/VoterBuildingCombobox";
 import { GeneralMeetingList } from "../../components/vote/GeneralMeetingList";
 
 export function BuildingSelectPage() {
@@ -71,7 +71,7 @@ export function BuildingSelectPage() {
         {buildingsLoading ? (
           <p className="state-message">Loading buildings...</p>
         ) : (
-          <BuildingDropdown
+          <VoterBuildingCombobox
             buildings={buildings ?? []}
             value={selectedBuildingId}
             onChange={handleBuildingChange}
@@ -79,7 +79,7 @@ export function BuildingSelectPage() {
           />
         )}
         {meetingsLoading && (
-          <p className="state-message" style={{ padding: "24px 0 8px" }}>
+          <p className="state-message" role="status" style={{ padding: "24px 0 8px" }}>
             Loading General Meetings...
           </p>
         )}

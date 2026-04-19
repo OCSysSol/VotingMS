@@ -21,6 +21,7 @@ class VoteChoice(str, enum.Enum):
     abstained = "abstained"
     not_eligible = "not_eligible"
     selected = "selected"
+    against = "against"
 
 
 class VoteStatus(str, enum.Enum):
@@ -79,7 +80,7 @@ class Vote(Base):
     )
 
     motion_option_id: Mapped[uuid.UUID | None] = mapped_column(
-        ForeignKey("motion_options.id", ondelete="SET NULL"),
+        ForeignKey("motion_options.id", ondelete="RESTRICT"),
         nullable=True,
     )
 

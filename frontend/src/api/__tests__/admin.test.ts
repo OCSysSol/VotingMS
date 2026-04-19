@@ -6,6 +6,8 @@ import {
   getGeneralMeetingsCount,
   listBuildings,
   listGeneralMeetings,
+  listLotOwners,
+  countLotOwners,
   deleteGeneralMeeting,
   deleteBuilding,
   deleteMotion,
@@ -13,6 +15,7 @@ import {
   importLotOwners,
   importProxyNominations,
   importFinancialPositions,
+  closeMotion,
 } from "../admin";
 
 const BASE = "http://localhost:8000";
@@ -417,6 +420,120 @@ describe("listGeneralMeetings with params", () => {
   });
 });
 
+describe("listLotOwners", () => {
+  // --- Happy path ---
+
+  it("fetches lot owners without pagination params", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([{ id: "lo1" }]);
+      })
+    );
+    const result = await listLotOwners("b1");
+    expect(result).toEqual([{ id: "lo1" }]);
+    expect(capturedUrl).not.toContain("?");
+  });
+
+  it("sends limit and offset when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { limit: 20, offset: 40 });
+    expect(capturedUrl).toContain("limit=20");
+    expect(capturedUrl).toContain("offset=40");
+  });
+
+  it("sends only limit when offset is undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { limit: 20 });
+    expect(capturedUrl).toContain("limit=20");
+    expect(capturedUrl).not.toContain("offset");
+  });
+
+  it("sends only offset when limit is undefined", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { offset: 20 });
+    expect(capturedUrl).toContain("offset=20");
+    expect(capturedUrl).not.toContain("limit");
+  });
+
+  it("sends no query string when params object is empty", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", {});
+    expect(capturedUrl).not.toContain("?");
+  });
+
+  // --- State / precondition errors ---
+
+  it("throws on non-ok response", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, () =>
+        HttpResponse.json({ detail: "Not found" }, { status: 404 })
+      )
+    );
+    await expect(listLotOwners("b-missing")).rejects.toThrow("404");
+  });
+});
+
+describe("countLotOwners", () => {
+  // --- Happy path ---
+
+  it("returns count as a number", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ count: 42 })
+      )
+    );
+    const result = await countLotOwners("b1");
+    expect(result).toBe(42);
+  });
+
+  it("returns 0 for empty building", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ count: 0 })
+      )
+    );
+    const result = await countLotOwners("b-empty");
+    expect(result).toBe(0);
+  });
+
+  // --- State / precondition errors ---
+
+  it("throws on non-ok response", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, () =>
+        HttpResponse.json({ detail: "Not found" }, { status: 404 })
+      )
+    );
+    await expect(countLotOwners("b-missing")).rejects.toThrow("404");
+  });
+});
+
 describe("deleteGeneralMeeting", () => {
   // --- Happy path ---
 
@@ -596,5 +713,58 @@ describe("importFinancialPositions", () => {
     );
     const file = new File(["bad"], "bad.csv");
     await expect(importFinancialPositions("b-1", file)).rejects.toThrow("422");
+  });
+});
+
+describe("closeMotion", () => {
+  it("calls POST /api/admin/motions/{id}/close and returns MotionDetail", async () => {
+    const motionDetail = {
+      id: "m-close-test",
+      title: "Test Motion",
+      description: null,
+      display_order: 1,
+      motion_number: null,
+      motion_type: "general",
+      is_multi_choice: false,
+      is_visible: true,
+      option_limit: null,
+      options: [],
+      voting_closed_at: "2024-06-01T11:00:00Z",
+      tally: {
+        yes: { voter_count: 0, entitlement_sum: 0 },
+        no: { voter_count: 0, entitlement_sum: 0 },
+        abstained: { voter_count: 0, entitlement_sum: 0 },
+        absent: { voter_count: 0, entitlement_sum: 0 },
+        not_eligible: { voter_count: 0, entitlement_sum: 0 },
+        options: [],
+      },
+      voter_lists: { yes: [], no: [], abstained: [], absent: [], not_eligible: [], options: {} },
+    };
+    server.use(
+      http.post(`${BASE}/api/admin/motions/m-close-test/close`, () =>
+        HttpResponse.json(motionDetail)
+      )
+    );
+    const result = await closeMotion("m-close-test");
+    expect(result.id).toBe("m-close-test");
+    expect(result.voting_closed_at).toBe("2024-06-01T11:00:00Z");
+  });
+
+  it("throws on 409 when motion is already closed", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/motions/m-already-closed/close`, () =>
+        HttpResponse.json({ detail: "Motion voting is already closed" }, { status: 409 })
+      )
+    );
+    await expect(closeMotion("m-already-closed")).rejects.toThrow("409");
+  });
+
+  it("throws on 404 when motion is not found", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/motions/m-notfound/close`, () =>
+        HttpResponse.json({ detail: "Motion not found" }, { status: 404 })
+      )
+    );
+    await expect(closeMotion("m-notfound")).rejects.toThrow("404");
   });
 });

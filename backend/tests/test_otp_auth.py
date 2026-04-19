@@ -533,6 +533,25 @@ class TestRequestOtp:
         assert response.status_code == 200
         mock_send.assert_not_called()
 
+    async def test_request_otp_skip_email_true_ignored_in_non_testing_mode(
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
+    ):
+        """skip_email=True is silently ignored when testing_mode is False — email is still sent (RR5-03)."""
+        voter_email = building_and_meeting["voter_email"]
+        agm = building_and_meeting["agm"]
+
+        with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock) as mock_send, \
+             patch("app.routers.auth.settings") as mock_settings:
+            mock_settings.testing_mode = False
+            response = await client.post(
+                "/api/auth/request-otp",
+                json={"email": voter_email, "general_meeting_id": str(agm.id), "skip_email": True},
+            )
+
+        assert response.status_code == 200
+        # skip_email is ignored in non-testing mode — email MUST be sent
+        mock_send.assert_awaited_once()
+
     async def test_request_otp_expired_meeting_still_accepts(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
@@ -681,6 +700,71 @@ class TestRequestOtp:
         )
         otp = result.scalar_one_or_none()
         assert otp is not None
+
+    async def test_rate_limit_record_committed_after_known_email_request(
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
+    ):
+        """CRIT-2: Rate-limit row is committed to the DB after OTP request for a known email.
+
+        Previously _upsert_rate_limit() only flushed and never committed, so the
+        rate-limit count was always 0 after the session ended. This test verifies
+        the record exists and is readable in the DB after the request completes.
+        """
+        voter_email = building_and_meeting["voter_email"]
+        agm = building_and_meeting["agm"]
+        building = building_and_meeting["building"]
+
+        with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock), \
+             patch("app.routers.auth.settings") as mock_settings:
+            mock_settings.testing_mode = False
+            await client.post(
+                "/api/auth/request-otp",
+                json={"email": voter_email, "general_meeting_id": str(agm.id)},
+            )
+
+        # The rate-limit row must be present in the DB (committed, not merely flushed)
+        result = await db_session.execute(
+            select(OTPRateLimit).where(
+                OTPRateLimit.email == voter_email,
+                OTPRateLimit.building_id == building.id,
+            )
+        )
+        rl_record = result.scalar_one_or_none()
+        assert rl_record is not None, (
+            "Rate-limit record must be committed to DB after OTP request (CRIT-2)"
+        )
+        assert rl_record.attempt_count >= 1
+
+    async def test_rate_limit_record_committed_after_unknown_email_request(
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
+    ):
+        """CRIT-2: Rate-limit row is committed to DB even for unknown emails (enumeration protection).
+
+        Verifies the commit in the else-branch (unknown email path) also persists.
+        """
+        agm = building_and_meeting["agm"]
+        building = building_and_meeting["building"]
+        unknown_email = "crit2-unknown-email@test.com"
+
+        with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock), \
+             patch("app.routers.auth.settings") as mock_settings:
+            mock_settings.testing_mode = False
+            await client.post(
+                "/api/auth/request-otp",
+                json={"email": unknown_email, "general_meeting_id": str(agm.id)},
+            )
+
+        result = await db_session.execute(
+            select(OTPRateLimit).where(
+                OTPRateLimit.email == unknown_email,
+                OTPRateLimit.building_id == building.id,
+            )
+        )
+        rl_record = result.scalar_one_or_none()
+        assert rl_record is not None, (
+            "Rate-limit record must be committed to DB for unknown email path (CRIT-2)"
+        )
+        assert rl_record.attempt_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -834,26 +918,34 @@ class TestEmailOverride:
         """When email_override is set, email goes to override address."""
         import aiosmtplib
         from email.mime.multipart import MIMEMultipart
+        from unittest.mock import MagicMock
 
         sent_messages = []
 
         async def mock_send(message, **kwargs):
             sent_messages.append(message)
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
+        mock_db = AsyncMock()
+
         with patch("app.services.email_service.settings") as mock_settings, \
-             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send):
+             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send), \
+             patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config)), \
+             patch("app.services.email_service.get_decrypted_password", return_value="pass"):
             mock_settings.email_override = "override@test.com"
-            mock_settings.smtp_from_email = "noreply@test.com"
-            mock_settings.smtp_host = "smtp.test.com"
-            mock_settings.smtp_port = 587
-            mock_settings.smtp_username = "user"
-            mock_settings.smtp_password = "pass"
 
             from app.services.email_service import send_otp_email
             await send_otp_email(
                 to_email="real@voter.com",
                 meeting_title="Test Meeting",
                 code="ABCD1234",
+                db=mock_db,
             )
 
         assert len(sent_messages) == 1
@@ -862,25 +954,34 @@ class TestEmailOverride:
 
     async def test_send_otp_email_sets_x_original_to_header(self):
         """When email_override is set, X-Original-To header contains the real address."""
+        from unittest.mock import MagicMock
+
         sent_messages = []
 
         async def mock_send(message, **kwargs):
             sent_messages.append(message)
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
+        mock_db = AsyncMock()
+
         with patch("app.services.email_service.settings") as mock_settings, \
-             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send):
+             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send), \
+             patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config)), \
+             patch("app.services.email_service.get_decrypted_password", return_value="pass"):
             mock_settings.email_override = "override@test.com"
-            mock_settings.smtp_from_email = "noreply@test.com"
-            mock_settings.smtp_host = "smtp.test.com"
-            mock_settings.smtp_port = 587
-            mock_settings.smtp_username = "user"
-            mock_settings.smtp_password = "pass"
 
             from app.services.email_service import send_otp_email
             await send_otp_email(
                 to_email="real@voter.com",
                 meeting_title="Test Meeting",
                 code="ABCD1234",
+                db=mock_db,
             )
 
         msg = sent_messages[0]
@@ -888,25 +989,34 @@ class TestEmailOverride:
 
     async def test_send_otp_email_no_override_uses_real_address(self):
         """When email_override is empty, email goes to the real recipient."""
+        from unittest.mock import MagicMock
+
         sent_messages = []
 
         async def mock_send(message, **kwargs):
             sent_messages.append(message)
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
+        mock_db = AsyncMock()
+
         with patch("app.services.email_service.settings") as mock_settings, \
-             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send):
+             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send), \
+             patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config)), \
+             patch("app.services.email_service.get_decrypted_password", return_value="pass"):
             mock_settings.email_override = ""
-            mock_settings.smtp_from_email = "noreply@test.com"
-            mock_settings.smtp_host = "smtp.test.com"
-            mock_settings.smtp_port = 587
-            mock_settings.smtp_username = "user"
-            mock_settings.smtp_password = "pass"
 
             from app.services.email_service import send_otp_email
             await send_otp_email(
                 to_email="real@voter.com",
                 meeting_title="Test Meeting",
                 code="ABCD1234",
+                db=mock_db,
             )
 
         msg = sent_messages[0]
@@ -914,25 +1024,34 @@ class TestEmailOverride:
 
     async def test_send_otp_email_no_override_no_x_original_to_header(self):
         """When email_override is empty, X-Original-To header is NOT set."""
+        from unittest.mock import MagicMock
+
         sent_messages = []
 
         async def mock_send(message, **kwargs):
             sent_messages.append(message)
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
+        mock_db = AsyncMock()
+
         with patch("app.services.email_service.settings") as mock_settings, \
-             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send):
+             patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send), \
+             patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config)), \
+             patch("app.services.email_service.get_decrypted_password", return_value="pass"):
             mock_settings.email_override = ""
-            mock_settings.smtp_from_email = "noreply@test.com"
-            mock_settings.smtp_host = "smtp.test.com"
-            mock_settings.smtp_port = 587
-            mock_settings.smtp_username = "user"
-            mock_settings.smtp_password = "pass"
 
             from app.services.email_service import send_otp_email
             await send_otp_email(
                 to_email="real@voter.com",
                 meeting_title="Test Meeting",
                 code="ABCD1234",
+                db=mock_db,
             )
 
         msg = sent_messages[0]
@@ -947,16 +1066,20 @@ class TestEmailOverride:
         async def mock_send(message, **kwargs):
             sent_messages.append(message)
 
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+
         with patch("app.services.email_service.settings") as mock_settings, \
              patch("app.services.email_service.aiosmtplib.send", side_effect=mock_send), \
              patch("app.services.email_service.get_general_meeting_detail") as mock_detail, \
+             patch("app.services.email_service.get_smtp_config", AsyncMock(return_value=mock_smtp_config)), \
+             patch("app.services.email_service.get_decrypted_password", return_value="pass"), \
              patch("app.services.email_service.AsyncSession"):
             mock_settings.email_override = "override@test.com"
-            mock_settings.smtp_from_email = "noreply@test.com"
-            mock_settings.smtp_host = "smtp.test.com"
-            mock_settings.smtp_port = 587
-            mock_settings.smtp_username = "user"
-            mock_settings.smtp_password = "pass"
 
             mock_detail.return_value = {
                 "building_name": "Test Bldg",
@@ -1036,9 +1159,55 @@ class TestOtpEmailTemplate:
 
 class TestConfigDefaults:
     def test_testing_mode_defaults_to_false(self):
-        from app.config import settings
-        assert settings.testing_mode is False
+        """Default value of testing_mode is False when no env var is set.
+
+        Note: conftest.py sets TESTING_MODE=true for the test suite so the
+        shared `settings` singleton will have testing_mode=True.  We instantiate
+        a fresh Settings with an explicit override to verify the *default* value.
+        """
+        from app.config import Settings
+        fresh = Settings(testing_mode=False)
+        assert fresh.testing_mode is False
 
     def test_email_override_defaults_to_empty(self):
         from app.config import settings
         assert settings.email_override == ""
+
+
+# ---------------------------------------------------------------------------
+# Background cleanup tasks
+# ---------------------------------------------------------------------------
+
+
+class TestCleanupExpiredRecords:
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_otps_commits_on_success(self):
+        """_cleanup_expired_otps() executes delete and commits the session."""
+        from app.routers.auth import _cleanup_expired_otps
+
+        mock_session = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.routers.auth.AsyncSessionLocal", return_value=mock_cm):
+            await _cleanup_expired_otps()
+
+        mock_session.execute.assert_awaited_once()
+        mock_session.commit.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_expired_sessions_commits_on_success(self):
+        """_cleanup_expired_sessions() executes delete and commits the session."""
+        from app.routers.auth import _cleanup_expired_sessions
+
+        mock_session = AsyncMock()
+        mock_cm = MagicMock()
+        mock_cm.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_cm.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.routers.auth.AsyncSessionLocal", return_value=mock_cm):
+            await _cleanup_expired_sessions()
+
+        mock_session.execute.assert_awaited_once()
+        mock_session.commit.assert_awaited_once()

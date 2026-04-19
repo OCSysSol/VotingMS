@@ -64,7 +64,7 @@ describe("SettingsPage", () => {
 
   it("shows Save button after loading", async () => {
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
   });
 
   it("saves settings and shows success message", async () => {
@@ -74,7 +74,7 @@ describe("SettingsPage", () => {
 
     await user.clear(screen.getByLabelText("App name"));
     await user.type(screen.getByLabelText("App name"), "New Corp AGM");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByTestId("branding-save-btn"));
 
     await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
   });
@@ -95,7 +95,7 @@ describe("SettingsPage", () => {
 
     await user.clear(screen.getByLabelText("App name"));
     await user.type(screen.getByLabelText("App name"), "Instant Brand");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByTestId("branding-save-btn"));
 
     await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
 
@@ -114,10 +114,10 @@ describe("SettingsPage", () => {
       })
     );
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Save" }));
-    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled());
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("branding-save-btn"));
+    expect(screen.getByTestId("branding-save-btn")).toBeDisabled();
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).not.toBeDisabled());
   });
 
   it("success message disappears after 3 seconds", async () => {
@@ -125,7 +125,7 @@ describe("SettingsPage", () => {
     const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByTestId("branding-save-btn"));
     await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
     act(() => vi.advanceTimersByTime(3100));
     await waitFor(() => expect(screen.queryByText("Settings saved.")).not.toBeInTheDocument());
@@ -154,8 +154,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("branding-save-btn"));
     await waitFor(() => expect(screen.getByText(/HTTP 422/)).toBeInTheDocument());
   });
 
@@ -163,8 +163,8 @@ describe("SettingsPage", () => {
     // Cover the `false` branch of `err instanceof Error ? err.message : "Failed to save settings."`
     vi.spyOn(configApi, "updateAdminConfig").mockRejectedValueOnce("plain string error");
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument());
-    await userEvent.setup().click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
+    await userEvent.setup().click(screen.getByTestId("branding-save-btn"));
     await waitFor(() => expect(screen.getByText("Failed to save settings.")).toBeInTheDocument());
   });
 
@@ -401,7 +401,7 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
     await user.type(screen.getByLabelText("Favicon URL"), "https://cdn.example.com/fav.ico");
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByTestId("branding-save-btn"));
     await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({ favicon_url: "https://cdn.example.com/fav.ico" })
@@ -510,6 +510,508 @@ describe("SettingsPage", () => {
     fireEvent.change(screen.getByLabelText("Upload favicon image"), { target: { files: [] } });
 
     expect(screen.queryByText("Failed to upload favicon.")).not.toBeInTheDocument();
+  });
+
+  // --- Upload success feedback ---
+
+  it("shows 'Logo uploaded successfully' after a successful logo upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "logo.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Logo uploaded successfully")).toBeInTheDocument()
+    );
+  });
+
+  it("shows 'Favicon uploaded successfully' after a successful favicon upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Favicon uploaded successfully")).toBeInTheDocument()
+    );
+  });
+
+  it("shows 'Save settings to apply the changes' hint after logo upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "logo.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Save settings to apply the changes")).toBeInTheDocument()
+    );
+  });
+
+  it("shows 'Save settings to apply the changes' hint after favicon upload", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "favicon.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Save settings to apply the changes")).toBeInTheDocument()
+    );
+  });
+
+  it("'Save settings to apply the changes' hint disappears after clicking Save", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "logo.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file);
+
+    await waitFor(() =>
+      expect(screen.getByText("Save settings to apply the changes")).toBeInTheDocument()
+    );
+
+    await user.click(screen.getByTestId("branding-save-btn"));
+
+    await waitFor(() =>
+      expect(screen.queryByText("Save settings to apply the changes")).not.toBeInTheDocument()
+    );
+  });
+
+  it("upload success messages have role='status' for accessibility", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
+
+    const file = new File(["fake-png"], "logo.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file);
+
+    await waitFor(() => {
+      const statuses = screen.getAllByRole("status");
+      const texts = statuses.map((el) => el.textContent);
+      expect(texts.some((t) => t?.includes("Logo uploaded successfully"))).toBe(true);
+    });
+  });
+
+  it("logo upload success clears error state first", async () => {
+    const user = userEvent.setup();
+    // First trigger an error
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/logo", () =>
+        HttpResponse.json({ detail: "Upload failed" }, { status: 502 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
+    const file1 = new File(["fake1"], "logo1.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file1);
+    await waitFor(() => expect(screen.getByText(/HTTP 502/)).toBeInTheDocument());
+
+    // Now succeed on second upload with a different file object (avoids no-change event)
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/logo", () =>
+        HttpResponse.json({ url: "https://public.blob.vercel-storage.com/logo-test.png" })
+      )
+    );
+    const file2 = new File(["fake2"], "logo2.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload logo image"), file2);
+    await waitFor(() => expect(screen.getByText("Logo uploaded successfully")).toBeInTheDocument());
+    // Error should be gone
+    expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
+  });
+
+  it("favicon upload success clears favicon error state first", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/favicon", () =>
+        HttpResponse.json({ detail: "Upload failed" }, { status: 502 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+    const file1 = new File(["fake1"], "favicon1.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file1);
+    await waitFor(() => expect(screen.getByText(/HTTP 502/)).toBeInTheDocument());
+
+    server.use(
+      http.post("http://localhost:8000/api/admin/config/favicon", () =>
+        HttpResponse.json({ url: "https://public.blob.vercel-storage.com/favicon-test.png" })
+      )
+    );
+    const file2 = new File(["fake2"], "favicon2.png", { type: "image/png" });
+    await user.upload(screen.getByLabelText("Upload favicon image"), file2);
+    await waitFor(() => expect(screen.getByText("Favicon uploaded successfully")).toBeInTheDocument());
+    expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
+  });
+
+  // --- Mail Server (SMTP) section ---
+
+  it("updates SMTP port field on user input", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Port")).toBeInTheDocument());
+    const portInput = screen.getByLabelText("Port");
+    await user.clear(portInput);
+    await user.type(portInput, "465");
+    expect(portInput).toHaveValue(465);
+  });
+
+  it("renders Mail Server section after loading", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Mail Server")).toBeInTheDocument());
+    expect(screen.getByLabelText("Host")).toBeInTheDocument();
+    expect(screen.getByLabelText("Port")).toBeInTheDocument();
+    expect(screen.getByLabelText("Username")).toBeInTheDocument();
+    expect(screen.getByLabelText("From email address")).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  it("shows unconfigured notice when SMTP is not set up", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "",
+          smtp_port: 587,
+          smtp_username: "",
+          smtp_from_email: "",
+          password_is_set: false,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/Mail server is not configured/)).toBeInTheDocument()
+    );
+  });
+
+  it("does not show unconfigured notice when SMTP is configured", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Mail Server")).toBeInTheDocument());
+    expect(screen.queryByText(/Mail server is not configured/)).not.toBeInTheDocument();
+  });
+
+  it("saves SMTP settings and shows success message", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "",
+          smtp_port: 587,
+          smtp_username: "",
+          smtp_from_email: "",
+          password_is_set: false,
+        })
+      ),
+      http.put(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Host")).toBeInTheDocument());
+
+    await user.clear(screen.getByLabelText("Host"));
+    await user.type(screen.getByLabelText("Host"), "smtp.example.com");
+    await user.clear(screen.getByLabelText("Username"));
+    await user.type(screen.getByLabelText("Username"), "user");
+    await user.clear(screen.getByLabelText("From email address"));
+    await user.type(screen.getByLabelText("From email address"), "from@example.com");
+    await user.type(screen.getByLabelText("Password"), "secret");
+
+    const saveBtns = screen.getAllByRole("button", { name: "Save" });
+    // SMTP save button is the second Save button
+    await user.click(saveBtns[1]);
+
+    await waitFor(() => expect(screen.getByText("SMTP settings saved.")).toBeInTheDocument());
+  });
+
+  it("shows error when SMTP save fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      ),
+      http.put(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({ detail: "Validation error" }, { status: 422 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
+    const saveBtns = screen.getAllByRole("button", { name: "Save" });
+    await user.click(saveBtns[1]);
+    await waitFor(() => expect(screen.getByText(/HTTP 422|Validation error/)).toBeInTheDocument());
+  });
+
+  it("shows fallback error when SMTP save throws non-Error", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    vi.spyOn(configApi, "updateSmtpConfig").mockRejectedValueOnce("smtp string error");
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
+    const saveBtns = screen.getAllByRole("button", { name: "Save" });
+    await userEvent.setup().click(saveBtns[1]);
+    await waitFor(() => expect(screen.getByText("Failed to save SMTP settings.")).toBeInTheDocument());
+  });
+
+  it("sends test email and shows success", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Recipient email"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByText(/Test email sent to/)).toBeInTheDocument());
+  });
+
+  it("shows error when test email fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      ),
+      http.post(`${BASE}/api/admin/config/smtp/test`, () =>
+        HttpResponse.json({ detail: "Connection refused" }, { status: 400 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Recipient email"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByText(/Connection refused/)).toBeInTheDocument());
+  });
+
+  it("Escape key closes test email modal", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    fireEvent.keyDown(overlay, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByLabelText("Recipient email")).not.toBeInTheDocument());
+  });
+
+  it("backdrop click closes test email modal", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    fireEvent.click(overlay);
+
+    await waitFor(() => expect(screen.queryByLabelText("Recipient email")).not.toBeInTheDocument());
+  });
+
+  it("Cancel button closes test email modal", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await waitFor(() => expect(screen.queryByLabelText("Recipient email")).not.toBeInTheDocument());
+  });
+
+  it("shows fallback error when test email throws non-Error", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    vi.spyOn(configApi, "testSmtpConfig").mockRejectedValueOnce("smtp plain error");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Recipient email"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.getByText("Test email failed.")).toBeInTheDocument());
+  });
+
+  it("SMTP Save button shows Saving state while submitting", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      ),
+      http.put(`${BASE}/api/admin/config/smtp`, async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
+    const saveBtns = screen.getAllByRole("button", { name: "Save" });
+    await user.click(saveBtns[1]);
+    expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Save" }).length).toBeGreaterThan(0));
+  });
+
+  it("Send test email shows Sending state while in-flight", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      ),
+      http.post(`${BASE}/api/admin/config/smtp/test`, async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({ ok: true });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
+    await user.click(screen.getByRole("button", { name: "Send test email" }));
+    await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Recipient email"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByText(/Test email sent to/)).toBeInTheDocument());
+  });
+
+  it("SMTP success message disappears after 3 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+        })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
+    const saveBtns = screen.getAllByRole("button", { name: "Save" });
+    await user.click(saveBtns[1]);
+    await waitFor(() => expect(screen.getByText("SMTP settings saved.")).toBeInTheDocument());
+    act(() => vi.advanceTimersByTime(3100));
+    await waitFor(() => expect(screen.queryByText("SMTP settings saved.")).not.toBeInTheDocument());
+    vi.useRealTimers();
   });
 
 });

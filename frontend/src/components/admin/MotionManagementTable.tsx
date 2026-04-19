@@ -33,6 +33,9 @@ export interface MotionManagementTableProps {
   onEdit: (motion: MotionDetail) => void;
   onDelete: (motionId: string) => void;
   deleteMotionErrors: Record<string, string>;
+  onCloseMotion?: (motionId: string) => void;
+  closeMotionErrors?: Record<string, string>;
+  pendingCloseMotionId?: string | null;
 }
 
 interface SortableRowProps {
@@ -52,6 +55,9 @@ interface SortableRowProps {
   deleteMotionErrors: Record<string, string>;
   onMoveTop: () => void;
   onMoveBottom: () => void;
+  onCloseMotion?: (motionId: string) => void;
+  closeMotionErrors?: Record<string, string>;
+  pendingCloseMotionId?: string | null;
 }
 
 function SortableRow({
@@ -71,6 +77,9 @@ function SortableRow({
   deleteMotionErrors,
   onMoveTop,
   onMoveBottom,
+  onCloseMotion,
+  closeMotionErrors,
+  pendingCloseMotionId,
 }: SortableRowProps) {
   const {
     attributes,
@@ -93,16 +102,21 @@ function SortableRow({
   const isLast = index === total - 1;
   const label = motion.motion_number?.trim() || String(motion.display_order);
   const isClosed = meetingStatus === "closed";
+  const isMotionVotingClosed = !!motion.voting_closed_at;
+  const isCloseMotionPending = pendingCloseMotionId === motion.id;
 
   const isVisLoading = pendingVisibilityMotionId === motion.id;
   const isVisDisabled =
     isClosed ||
+    isMotionVotingClosed ||
     motionsWithVotes.has(motion.id) ||
     isVisLoading ||
     isBulkLoading;
   const disabledReason =
     isClosed
       ? "Meeting is closed"
+      : isMotionVotingClosed
+      ? "Motion voting is closed"
       : motionsWithVotes.has(motion.id)
       ? "Motion has received votes"
       : undefined;
@@ -155,14 +169,18 @@ function SortableRow({
       <td className={mutedCell}>
         <span
           className={`motion-type-badge motion-type-badge--${motion.motion_type}`}
-          aria-label={`Motion type: ${motion.motion_type === "special" ? "Special" : motion.motion_type === "multi_choice" ? "Multi-Choice" : "General"}`}
+          aria-label={`Motion type: ${motion.motion_type === "special" ? "Special" : "General"}`}
         >
-          {motion.motion_type === "special"
-            ? "Special"
-            : motion.motion_type === "multi_choice"
-            ? `Multi-Choice${motion.options && motion.options.length > 0 ? ` (${motion.options.length} options)` : ""}`
-            : "General"}
+          {motion.motion_type === "special" ? "Special" : "General"}
         </span>
+        {motion.is_multi_choice && (
+          <span
+            className="motion-type-badge motion-type-badge--multi_choice"
+            aria-label="Multi-choice motion"
+          >
+            {`Multi-Choice${motion.options && motion.options.length > 0 ? ` (${motion.options.length})` : ""}`}
+          </span>
+        )}
       </td>
       <td>
         <label
@@ -231,10 +249,37 @@ function SortableRow({
             >
               Delete
             </button>
+            {onCloseMotion && (
+              isMotionVotingClosed ? (
+                <span
+                  className="motion-type-badge motion-type-badge--closed motion-voting-closed-badge"
+                  data-testid={`motion-voting-closed-badge-${motion.id}`}
+                  aria-label="Motion voting closed"
+                >
+                  Voting Closed
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn--secondary btn--sm"
+                  data-testid={`close-motion-btn-${motion.id}`}
+                  disabled={!motion.is_visible || isCloseMotionPending}
+                  title={!motion.is_visible ? "Motion must be visible to close voting" : undefined}
+                  onClick={() => onCloseMotion(motion.id)}
+                >
+                  {isCloseMotionPending ? "Closing…" : "Close Motion"}
+                </button>
+              )
+            )}
           </div>
           {deleteMotionErrors[motion.id] && (
             <span style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginTop: 4 }} role="alert">
               {deleteMotionErrors[motion.id]}
+            </span>
+          )}
+          {closeMotionErrors?.[motion.id] && (
+            <span style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginTop: 4 }} role="alert" data-testid={`close-motion-error-${motion.id}`}>
+              {closeMotionErrors[motion.id]}
             </span>
           )}
         </td>
@@ -257,6 +302,9 @@ export default function MotionManagementTable({
   onEdit,
   onDelete,
   deleteMotionErrors,
+  onCloseMotion,
+  closeMotionErrors,
+  pendingCloseMotionId,
 }: MotionManagementTableProps) {
   const isEditable = meetingStatus === "open" || meetingStatus === "pending";
   const isClosed = meetingStatus === "closed";
@@ -275,6 +323,7 @@ export default function MotionManagementTable({
         m.motion_type !== localOrder[i]?.motion_type ||
         m.motion_number !== localOrder[i]?.motion_number ||
         m.option_limit !== localOrder[i]?.option_limit ||
+        m.voting_closed_at !== localOrder[i]?.voting_closed_at ||
         JSON.stringify(m.options) !== JSON.stringify(localOrder[i]?.options)
     )
   ) {
@@ -377,6 +426,9 @@ export default function MotionManagementTable({
                       deleteMotionErrors={deleteMotionErrors}
                       onMoveTop={() => moveItem(index, 0)}
                       onMoveBottom={() => moveItem(index, localOrder.length - 1)}
+                      onCloseMotion={onCloseMotion}
+                      closeMotionErrors={closeMotionErrors}
+                      pendingCloseMotionId={pendingCloseMotionId}
                     />
                   );
                 })}

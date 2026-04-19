@@ -3,6 +3,12 @@
   "buildCommand": "cd frontend && npm install && npx vite build && cp -r dist ../api/static && bash ../scripts/migrate.sh",
   "headers": [
     {
+      "source": "/((?!assets/).*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-cache, must-revalidate" }
+      ]
+    },
+    {
       "source": "/assets/(.*)",
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },

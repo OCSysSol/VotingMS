@@ -5,10 +5,15 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
 
 from app.models.motion import MotionType
+from app.schemas.shared import MotionOptionOut
+
+# Re-export so existing callers that import MotionOptionOut from admin keep working.
+__all__ = ["MotionOptionOut"]
 
 
 # ---------------------------------------------------------------------------
@@ -27,8 +32,8 @@ class BuildingOut(BaseModel):
 
 
 class BuildingCreate(BaseModel):
-    name: str
-    manager_email: str
+    name: str = Field(..., max_length=255)
+    manager_email: str = Field(..., max_length=254)
 
     @field_validator("name")
     @classmethod
@@ -46,8 +51,8 @@ class BuildingCreate(BaseModel):
 
 
 class BuildingUpdate(BaseModel):
-    name: str | None = None
-    manager_email: str | None = None
+    name: str | None = Field(default=None, max_length=255)
+    manager_email: str | None = Field(default=None, max_length=254)
 
     @field_validator("name")
     @classmethod
@@ -80,28 +85,49 @@ class BuildingImportResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LotOwnerOut(BaseModel):
+class LotOwnerEmailOut(BaseModel):
     id: uuid.UUID
-    lot_number: str
-    emails: list[str]
-    unit_entitlement: int
-    financial_position: str
-    proxy_email: str | None = None
+    email: str | None
+    given_name: str | None = None
+    surname: str | None = None
 
     model_config = {"from_attributes": True}
 
 
-class LotOwnerCreate(BaseModel):
+class LotOwnerOut(BaseModel):
+    id: uuid.UUID
     lot_number: str
+    given_name: str | None = None
+    surname: str | None = None
+    owner_emails: list[LotOwnerEmailOut] = []
+    unit_entitlement: int
+    financial_position: str
+    proxy_email: str | None = None
+    proxy_given_name: str | None = None
+    proxy_surname: str | None = None
+
+    model_config = {"from_attributes": True}
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def emails(self) -> list[str]:
+        """Backward-compatible alias: flat list of email strings."""
+        return [e.email for e in self.owner_emails if e.email]
+
+
+class LotOwnerCreate(BaseModel):
+    lot_number: str = Field(..., max_length=255)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
     unit_entitlement: int
     financial_position: str = "normal"
     emails: list[str] = []
 
     @field_validator("unit_entitlement")
     @classmethod
-    def entitlement_non_negative(cls, v: int) -> int:
-        if v < 0:
-            raise ValueError("unit_entitlement must be >= 0")
+    def entitlement_positive(cls, v: int) -> int:
+        if v <= 0:
+            raise ValueError("unit_entitlement must be > 0")
         return v
 
     @field_validator("lot_number")
@@ -120,14 +146,16 @@ class LotOwnerCreate(BaseModel):
 
 
 class LotOwnerUpdate(BaseModel):
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
     unit_entitlement: int | None = None
     financial_position: str | None = None
 
     @field_validator("unit_entitlement")
     @classmethod
-    def entitlement_non_negative(cls, v: int | None) -> int | None:
-        if v is not None and v < 0:
-            raise ValueError("unit_entitlement must be >= 0")
+    def entitlement_positive(cls, v: int | None) -> int | None:
+        if v is not None and v <= 0:
+            raise ValueError("unit_entitlement must be > 0")
         return v
 
     @field_validator("financial_position")
@@ -139,13 +167,18 @@ class LotOwnerUpdate(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "LotOwnerUpdate":
-        if self.unit_entitlement is None and self.financial_position is None:
-            raise ValueError("At least one of unit_entitlement or financial_position must be provided")
+        if (
+            self.given_name is None
+            and self.surname is None
+            and self.unit_entitlement is None
+            and self.financial_position is None
+        ):
+            raise ValueError("At least one field must be provided")
         return self
 
 
 class AddEmailRequest(BaseModel):
-    email: str
+    email: str = Field(..., max_length=254)
 
     @field_validator("email")
     @classmethod
@@ -155,8 +188,35 @@ class AddEmailRequest(BaseModel):
         return v
 
 
+class AddOwnerEmailRequest(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
+class UpdateOwnerEmailRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "UpdateOwnerEmailRequest":
+        if self.email is None and self.given_name is None and self.surname is None:
+            raise ValueError("At least one field must be provided")
+        return self
+
+
 class SetProxyRequest(BaseModel):
-    proxy_email: str
+    proxy_email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
 
     @field_validator("proxy_email")
     @classmethod
@@ -190,49 +250,23 @@ class MotionOptionCreate(BaseModel):
         return v
 
 
-class MotionOptionOut(BaseModel):
-    id: uuid.UUID
-    text: str
-    display_order: int
-
-    model_config = {"from_attributes": True}
-
-
 # ---------------------------------------------------------------------------
 # Motion schemas
 # ---------------------------------------------------------------------------
 
 
 class MotionCreate(BaseModel):
-    title: str
-    description: str | None = None
+    title: str = Field(..., max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
     display_order: int
     motion_type: MotionType = MotionType.general
     is_multi_choice: bool = False
-    motion_number: str | None = None
+    motion_number: str | None = Field(default=None, max_length=50)
     option_limit: int | None = None
     options: list[MotionOptionCreate] = []
 
-    @field_validator("title")
-    @classmethod
-    def title_max_length(cls, v: str) -> str:
-        if len(v) > 500:
-            raise ValueError("title must not exceed 500 characters")
-        return v
-
-    @field_validator("description")
-    @classmethod
-    def description_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 2000:
-            raise ValueError("description must not exceed 2000 characters")
-        return v
-
-    @field_validator("motion_number")
-    @classmethod
-    def motion_number_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 50:
-            raise ValueError("motion_number must not exceed 50 characters")
-        return v
+    # Note: max_length limits are enforced by Field() above.
+    # No separate length validators needed — Field(max_length=...) runs first.
 
     @model_validator(mode="after")
     def validate_multi_choice_fields(self) -> "MotionCreate":
@@ -286,11 +320,11 @@ class MotionVisibilityOut(BaseModel):
 
 
 class MotionAddRequest(BaseModel):
-    title: str
-    description: str | None = None
+    title: str = Field(..., max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
     motion_type: MotionType = MotionType.general
     is_multi_choice: bool = False
-    motion_number: str | None = None
+    motion_number: str | None = Field(default=None, max_length=50)
     option_limit: int | None = None
     options: list[MotionOptionCreate] = []
 
@@ -299,23 +333,9 @@ class MotionAddRequest(BaseModel):
     def title_non_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("title must not be empty")
-        if len(v) > 500:
-            raise ValueError("title must not exceed 500 characters")
         return v
 
-    @field_validator("description")
-    @classmethod
-    def description_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 2000:
-            raise ValueError("description must not exceed 2000 characters")
-        return v
-
-    @field_validator("motion_number")
-    @classmethod
-    def motion_number_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 50:
-            raise ValueError("motion_number must not exceed 50 characters")
-        return v
+    # Note: description, motion_number max_length enforced by Field() above.
 
     @model_validator(mode="after")
     def validate_multi_choice_fields(self) -> "MotionAddRequest":
@@ -335,11 +355,11 @@ class MotionAddRequest(BaseModel):
 
 
 class MotionUpdateRequest(BaseModel):
-    title: str | None = None
-    description: str | None = None
+    title: str | None = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=5000)
     motion_type: MotionType | None = None
     is_multi_choice: bool | None = None
-    motion_number: str | None = None
+    motion_number: str | None = Field(default=None, max_length=50)
     option_limit: int | None = None
     options: list[MotionOptionCreate] | None = None
 
@@ -362,23 +382,9 @@ class MotionUpdateRequest(BaseModel):
     def title_non_empty(cls, v: str | None) -> str | None:
         if v is not None and not v.strip():
             raise ValueError("title must not be empty")
-        if v is not None and len(v) > 500:
-            raise ValueError("title must not exceed 500 characters")
         return v
 
-    @field_validator("description")
-    @classmethod
-    def description_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 2000:
-            raise ValueError("description must not exceed 2000 characters")
-        return v
-
-    @field_validator("motion_number")
-    @classmethod
-    def motion_number_max_length(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 50:
-            raise ValueError("motion_number must not exceed 50 characters")
-        return v
+    # Note: description, motion_number max_length enforced by Field() above.
 
 
 # ---------------------------------------------------------------------------
@@ -388,7 +394,7 @@ class MotionUpdateRequest(BaseModel):
 
 class GeneralMeetingCreate(BaseModel):
     building_id: uuid.UUID
-    title: str
+    title: str = Field(..., max_length=500)
     meeting_at: datetime
     voting_closes_at: datetime
     motions: list[MotionCreate]
@@ -439,9 +445,13 @@ class GeneralMeetingListItem(BaseModel):
 
 class VoterEntry(BaseModel):
     voter_email: str
+    voter_name: str | None = None
     lot_number: str
     entitlement: int
     proxy_email: str | None = None
+    ballot_hash: str | None = None  # US-VIL-03: SHA-256 audit hash of submitted ballot
+    submitted_by_admin: bool = False
+    submitted_by_admin_username: str | None = None
 
 
 class TallyCategory(BaseModel):
@@ -453,8 +463,30 @@ class OptionTallyEntry(BaseModel):
     option_id: uuid.UUID
     option_text: str
     display_order: int
-    voter_count: int
-    entitlement_sum: int
+    # Primary tally fields (For/Against/Abstained)
+    for_voter_count: int = 0
+    for_entitlement_sum: int = 0
+    against_voter_count: int = 0
+    against_entitlement_sum: int = 0
+    abstained_voter_count: int = 0
+    abstained_entitlement_sum: int = 0
+    outcome: str | None = None
+    # Backward-compatible alias fields (serialized in JSON response)
+    voter_count: int = 0
+    entitlement_sum: int = 0
+
+    @model_validator(mode="after")
+    def populate_backward_compat_aliases(self) -> "OptionTallyEntry":
+        """Ensure voter_count/entitlement_sum always mirror for_voter_count/for_entitlement_sum."""
+        # If old fields were provided but new ones weren't, propagate old → new
+        if self.voter_count and not self.for_voter_count:
+            self.for_voter_count = self.voter_count
+        if self.entitlement_sum and not self.for_entitlement_sum:
+            self.for_entitlement_sum = self.entitlement_sum
+        # Always keep aliases in sync with primary fields
+        self.voter_count = self.for_voter_count
+        self.entitlement_sum = self.for_entitlement_sum
+        return self
 
 
 class MotionTally(BaseModel):
@@ -472,6 +504,11 @@ class MotionVoterLists(BaseModel):
     abstained: list[VoterEntry]
     absent: list[VoterEntry]
     not_eligible: list[VoterEntry]
+    # Per-option voter lists split by For/Against/Abstained category
+    options_for: dict[str, list[VoterEntry]] = {}      # key: option_id str
+    options_against: dict[str, list[VoterEntry]] = {}   # key: option_id str
+    options_abstained: dict[str, list[VoterEntry]] = {} # key: option_id str
+    # Backward-compatible alias: options == options_for
     options: dict[str, list[VoterEntry]] = {}  # key: option_id str
 
 
@@ -486,6 +523,7 @@ class MotionDetail(BaseModel):
     is_visible: bool = True
     option_limit: int | None = None
     options: list[MotionOptionOut] = []
+    voting_closed_at: datetime | None = None
     tally: MotionTally
     voter_lists: MotionVoterLists
 
@@ -497,6 +535,7 @@ class EmailDeliveryInfo(BaseModel):
 
 class GeneralMeetingDetail(BaseModel):
     id: uuid.UUID
+    building_id: uuid.UUID | None = None
     building_name: str
     title: str
     status: str
@@ -596,3 +635,40 @@ class MotionReorderOut(BaseModel):
 class AdminLoginRequest(BaseModel):
     username: str
     password: str
+
+
+# ---------------------------------------------------------------------------
+# Admin vote entry schemas
+# ---------------------------------------------------------------------------
+
+
+class AdminMultiChoiceOptionChoice(BaseModel):
+    """Per-option For/Against/Abstain choice for admin vote entry (US-AVE2-01)."""
+
+    option_id: uuid.UUID
+    choice: str  # "for" | "against" | "abstained"
+
+    @field_validator("choice")
+    @classmethod
+    def choice_valid(cls, v: str) -> str:
+        if v not in ("for", "against", "abstained"):
+            raise ValueError("choice must be 'for', 'against', or 'abstained'")
+        return v
+
+
+class AdminVoteEntry(BaseModel):
+    lot_owner_id: uuid.UUID
+    votes: list[dict] = []  # [{motion_id: str, choice: str}]
+    # New shape (US-AVE2-01): per-option For/Against/Abstain
+    option_choices: list[AdminMultiChoiceOptionChoice] | None = None
+    # Legacy field: motion_id -> [option_ids] treated as all "for"
+    multi_choice_votes: list[dict] = []  # [{motion_id: str, option_ids?: [str], option_choices?: [...]}]
+
+
+class AdminVoteEntryRequest(BaseModel):
+    entries: list[AdminVoteEntry]
+
+
+class AdminVoteEntryResult(BaseModel):
+    submitted_count: int
+    skipped_count: int

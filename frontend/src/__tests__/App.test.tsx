@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Outlet } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import App from "../App";
 
@@ -27,7 +27,7 @@ vi.mock("../pages/vote/ConfirmationPage", () => ({
   ConfirmationPage: () => <div data-testid="confirmation-page" />,
 }));
 vi.mock("../components/vote/VoterShell", () => ({
-  VoterShell: () => <div data-testid="voter-shell" />,
+  VoterShell: () => <div data-testid="voter-shell"><Outlet /></div>,
 }));
 vi.mock("../routes/AdminRoutes", () => ({
   default: () => <div data-testid="admin-routes" />,
@@ -75,5 +75,24 @@ describe("App", () => {
     // the import paths resolve and the JSX is evaluated — covering those lines.
     const { container } = renderApp("/");
     expect(container).toBeTruthy();
+  });
+
+  it("redirects /vote/:meetingId to /vote/:meetingId/auth", async () => {
+    renderApp("/vote/abc123");
+    await waitFor(() => {
+      expect(screen.getByTestId("auth-page")).toBeInTheDocument();
+    });
+  });
+
+  // --- RR4-38: VoteMeetingRedirect useNavigate is called at top-level ---
+  it("RR4-38: VoteMeetingRedirect redirects without crashing (useNavigate at top level)", async () => {
+    // This test verifies that VoteMeetingRedirect does not conditionally call useNavigate.
+    // React's Rules of Hooks enforcement would throw if useNavigate() were inside a condition or callback.
+    // The successful render + redirect proves the hook is called correctly.
+    renderApp("/vote/test-meeting-id");
+    await waitFor(() => {
+      // Should redirect to auth page
+      expect(screen.getByTestId("auth-page")).toBeInTheDocument();
+    });
   });
 });

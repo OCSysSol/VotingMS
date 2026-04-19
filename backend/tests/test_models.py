@@ -178,16 +178,16 @@ class TestLotOwner:
         assert lo.lot_number == "1A"
         assert lo.unit_entitlement == 100
 
-    async def test_lot_owner_zero_entitlement(self, db_session: AsyncSession):
-        """unit_entitlement = 0 is the minimum valid value."""
-        b = make_building("Zero Entitlement Building")
+    async def test_lot_owner_minimum_entitlement(self, db_session: AsyncSession):
+        """unit_entitlement = 1 is the minimum valid value (RR3-37: must be > 0)."""
+        b = make_building("Min Entitlement Building")
         db_session.add(b)
         await db_session.flush()
 
-        lo = make_lot_owner(b, entitlement=0)
+        lo = make_lot_owner(b, entitlement=1)
         db_session.add(lo)
         await db_session.flush()
-        assert lo.unit_entitlement == 0
+        assert lo.unit_entitlement == 1
 
     async def test_lot_owner_large_entitlement(self, db_session: AsyncSession):
         b = make_building("Large Entitlement Bldg")
@@ -686,8 +686,9 @@ class TestMotion:
 
     # --- Boundary values ---
 
-    async def test_motion_display_order_zero(self, db_session: AsyncSession):
-        b = make_building("Zero Index Bldg")
+    async def test_motion_display_order_one_is_minimum(self, db_session: AsyncSession):
+        """RR3-37: display_order must be > 0; minimum valid value is 1."""
+        b = make_building("Min Order Bldg")
         db_session.add(b)
         await db_session.flush()
 
@@ -695,10 +696,10 @@ class TestMotion:
         db_session.add(agm)
         await db_session.flush()
 
-        m = Motion(general_meeting_id=agm.id, title="Preamble", display_order=0)
+        m = Motion(general_meeting_id=agm.id, title="First Motion", display_order=1)
         db_session.add(m)
         await db_session.flush()
-        assert m.display_order == 0
+        assert m.display_order == 1
 
     # --- motion_number uniqueness (partial unique index) ---
 
@@ -807,12 +808,13 @@ class TestGeneralMeetingLotWeight:
         assert weight.unit_entitlement_snapshot == 250
         assert weight.financial_position_snapshot == FinancialPositionSnapshot.normal
 
-    async def test_snapshot_zero_entitlement(self, db_session: AsyncSession):
-        b = make_building("Zero Snapshot Bldg")
+    async def test_snapshot_minimum_entitlement(self, db_session: AsyncSession):
+        """RR3-37: LotOwner unit_entitlement must be > 0; snapshot records the value at AGM creation."""
+        b = make_building("Min Snapshot Bldg")
         db_session.add(b)
         await db_session.flush()
 
-        lo = make_lot_owner(b, entitlement=0)
+        lo = make_lot_owner(b, entitlement=1)
         db_session.add(lo)
         await db_session.flush()
 
@@ -823,11 +825,11 @@ class TestGeneralMeetingLotWeight:
         weight = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
             lot_owner_id=lo.id,
-            unit_entitlement_snapshot=0,
+            unit_entitlement_snapshot=1,
         )
         db_session.add(weight)
         await db_session.flush()
-        assert weight.unit_entitlement_snapshot == 0
+        assert weight.unit_entitlement_snapshot == 1
 
     async def test_in_arrear_snapshot(self, db_session: AsyncSession):
         b = make_building("Arrear Snapshot Bldg")
