@@ -52,6 +52,7 @@ PRDs and design docs are organised by feature area. **Always update an existing 
 | `design-email-smtp.md` | Email delivery, SMTP configuration, meeting close email |
 | `design-branding-ui.md` | Multi-tenancy, branding, logo/favicon, layout, drag-and-drop |
 | `design-infrastructure.md` | Deployment, DB pool, query perf, bundle optimisation, testing strategy |
+| `design-multi-tenant.md` | Multi-tenant architecture — deployment-per-tenant model, provisioning script, Neon Auth admin auth migration |
 | `design-system.md` | Frontend design system — read before writing any UI (do not modify) |
 
 ---
