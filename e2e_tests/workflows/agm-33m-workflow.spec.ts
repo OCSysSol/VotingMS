@@ -1040,16 +1040,18 @@ test("33M.19: admin enters in-person votes for available lots", async ({ page })
   // Submit votes
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
 
-  // Confirm dialog
-  const confirmDlg = page.getByRole("dialog", { name: /Submit in-person votes/ });
-  await expect(confirmDlg).toBeVisible({ timeout: 10000 });
+  // Confirm dialog (aria-labelledby -> "Submit in-person votes?")
+  await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
 
-  // Success modal
-  const successDlg = page.getByRole("dialog", { name: /Votes submitted/ });
-  await expect(successDlg).toBeVisible({ timeout: 15000 });
-  await successDlg.getByRole("button", { name: "OK" }).click();
-  await expect(successDlg).not.toBeVisible({ timeout: 10000 });
+  // On success with no skips the panel closes; if skipped lots exist a "Done" inline button appears.
+  const voteGridDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const doneButton = page.getByRole("button", { name: "Done" });
+  const doneBtnVisible = await doneButton.isVisible().catch(() => false);
+  if (doneBtnVisible) {
+    await doneButton.click();
+  }
+  await expect(voteGridDialog).not.toBeVisible({ timeout: 15000 });
 });
 
 // ===========================================================================
@@ -1104,8 +1106,10 @@ test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ p
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
   await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByRole("dialog", { name: /Votes submitted/ })).toBeVisible({ timeout: 15000 });
-  await page.getByRole("dialog", { name: /Votes submitted/ }).getByRole("button", { name: "OK" }).click();
+  const vgDialog20 = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const doneBtn20 = page.getByRole("button", { name: "Done" });
+  if (await doneBtn20.isVisible().catch(() => false)) { await doneBtn20.click(); }
+  await expect(vgDialog20).not.toBeVisible({ timeout: 15000 });
 });
 
 // ===========================================================================
@@ -1175,8 +1179,10 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
   await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(page.getByRole("dialog", { name: /Votes submitted/ })).toBeVisible({ timeout: 15000 });
-  await page.getByRole("dialog", { name: /Votes submitted/ }).getByRole("button", { name: "OK" }).click();
+  const vgDialog21 = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const doneBtn21 = page.getByRole("button", { name: "Done" });
+  if (await doneBtn21.isVisible().catch(() => false)) { await doneBtn21.click(); }
+  await expect(vgDialog21).not.toBeVisible({ timeout: 15000 });
 
   // Verify M11 has voting_closed_at set
   const baseURL2 = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
