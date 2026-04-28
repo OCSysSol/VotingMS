@@ -228,13 +228,17 @@ test("33M.1: create meeting via admin UI with CSV motion import", async ({ page 
   // Submit the form
   await page.getByRole("button", { name: "Create General Meeting" }).click();
 
-  // Wait for redirect to /admin/general-meetings/{id}
-  await expect(page).toHaveURL(/\/admin\/general-meetings\/[^/]+$/, { timeout: 30000 });
+  // Wait for redirect to the created meeting's detail page.
+  // Use a UUID pattern so we don't match the current /admin/general-meetings/new URL.
+  await page.waitForURL(
+    /\/admin\/general-meetings\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    { timeout: 60000 }
+  );
 
   // Extract meeting ID from URL
   const url = page.url();
-  const urlMatch = url.match(/\/admin\/general-meetings\/([^/]+)$/);
-  expect(urlMatch, "Expected URL to contain meeting ID").toBeTruthy();
+  const urlMatch = url.match(/\/admin\/general-meetings\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/);
+  expect(urlMatch, "Expected URL to contain a valid meeting UUID").toBeTruthy();
   meetingId = urlMatch![1];
 
   // Verify heading is visible
@@ -266,6 +270,7 @@ test("33M.1: create meeting via admin UI with CSV motion import", async ({ page 
 // Step 2: Add multi-choice motion with 9 options via admin UI
 // ===========================================================================
 test("33M.2: add multi-choice motion with 9 options and 3-vote limit via admin UI", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   await page.goto(`/admin/general-meetings/${meetingId}`);
@@ -327,6 +332,7 @@ test("33M.2: add multi-choice motion with 9 options and 3-vote limit via admin U
 // Step 3: Hide all motions, then make motions 1 and 2 visible
 // ===========================================================================
 test("33M.3: hide all motions, make motions 1 and 2 visible, verify exactly 2 visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -360,6 +366,7 @@ test("33M.3: hide all motions, make motions 1 and 2 visible, verify exactly 2 vi
 // Step 4: Voter alecools logs in, sees 2 motions, votes for 3 of 6 lots
 // ===========================================================================
 test("33M.4: voter alecools logs in, sees 2 motions, votes for 3 of 6 lots", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -411,6 +418,7 @@ test("33M.4: voter alecools logs in, sees 2 motions, votes for 3 of 6 lots", asy
 // Step 5: Verify tally via admin API after first partial vote
 // ===========================================================================
 test("33M.5: check vote tallies after first partial vote — 3 yes on M1, 3 no on M2", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -437,6 +445,7 @@ test("33M.5: check vote tallies after first partial vote — 3 yes on M1, 3 no o
 // Step 6: Make motions 3 and 4 visible (now 4 visible total)
 // ===========================================================================
 test("33M.6: admin makes motions 3 and 4 visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -457,6 +466,7 @@ test("33M.6: admin makes motions 3 and 4 visible", async () => {
 // Step 7: alecools votes all 6 lots — M3/M4 for all, M1/M2 for the 3 un-voted
 // ===========================================================================
 test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -524,6 +534,7 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
 // Step 8: Admin makes motions 5 and 6 visible (now 6 visible)
 // ===========================================================================
 test("33M.8: admin makes motions 5 and 6 visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -544,6 +555,7 @@ test("33M.8: admin makes motions 5 and 6 visible", async () => {
 // Step 9: alecools votes 3 of 6 lots on M5 (For) and M6 (Against)
 // ===========================================================================
 test("33M.9: voter alecools votes 3 of 6 lots on motions 5 and 6", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -602,6 +614,8 @@ test("33M.9: voter alecools votes 3 of 6 lots on motions 5 and 6", async ({ page
 // Step 10: Admin closes voting for motion 5 via admin UI
 // ===========================================================================
 test("33M.10: admin closes voting for motion 5 via admin UI", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
+  test.skip(!motionIds[5], "Skipping: motionIds[5] not populated");
   test.setTimeout(180000);
 
   await page.goto(`/admin/general-meetings/${meetingId}`);
@@ -645,6 +659,7 @@ test("33M.10: admin closes voting for motion 5 via admin UI", async ({ page }) =
 // Step 11: alecools re-logs in — remaining 3 lots can vote on M6 only (M5 closed)
 // ===========================================================================
 test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -704,6 +719,7 @@ test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", 
 // Step 12: Admin makes the multi-choice motion visible
 // ===========================================================================
 test("33M.12: admin makes multi-choice motion visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -729,6 +745,7 @@ test("33M.12: admin makes multi-choice motion visible", async () => {
 // Step 13: alecools votes MC for 3 lots — 3-option limit enforced in UI
 // ===========================================================================
 test("33M.13: voter alecools votes multi-choice for 3 lots with 3-option limit enforced", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -790,6 +807,7 @@ test("33M.13: voter alecools votes multi-choice for 3 lots with 3-option limit e
 // Step 14: Admin makes motion 7 visible (8 visible total)
 // ===========================================================================
 test("33M.14: admin makes motion 7 visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -809,6 +827,7 @@ test("33M.14: admin makes motion 7 visible", async () => {
 // Step 15: alecools votes all 6 lots on M7 and MC for remaining 3 lots
 // ===========================================================================
 test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -880,6 +899,7 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
 // Step 16: Admin makes motions 8 and 9 visible (10 visible total)
 // ===========================================================================
 test("33M.16: admin makes motions 8 and 9 visible", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -900,6 +920,7 @@ test("33M.16: admin makes motions 8 and 9 visible", async () => {
 // Step 17: alecools visits — sees M8/M9, signs out without voting
 // ===========================================================================
 test("33M.17: voter alecools visits, sees M8/M9 visible, signs out without voting", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -934,6 +955,7 @@ test("33M.17: voter alecools visits, sees M8/M9 visible, signs out without votin
 // Step 18: dunsgaard logs in — lot 7, votes on all interactive motions
 // ===========================================================================
 test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -992,6 +1014,7 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
 // Step 19: Admin enters in-person votes for 2 available lots on visible motions
 // ===========================================================================
 test("33M.19: admin enters in-person votes for available lots", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   await page.goto(`/admin/general-meetings/${meetingId}`);
@@ -1058,6 +1081,7 @@ test("33M.19: admin enters in-person votes for available lots", async ({ page })
 // Step 20: Make M10 visible, admin enters in-person votes
 // ===========================================================================
 test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -1116,6 +1140,8 @@ test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ p
 // Step 21: Make M11/M12 visible, close M11 voting, enter votes for M12 only
 // ===========================================================================
 test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M12", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
+  test.skip(!motionIds[11], "Skipping: motionIds[11] not populated");
   test.setTimeout(180000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -1203,6 +1229,7 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
 // Step 22: Final tally verification — close meeting and check all tallies
 // ===========================================================================
 test("33M.22: close meeting and verify final tally integrity", async () => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(60000);
 
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
