@@ -537,8 +537,17 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
     const m4 = motions.find((m) => m.display_order === 4);
     expect(m3, "Motion 3 not found").toBeDefined();
     expect(m4, "Motion 4 not found").toBeDefined();
-    expect(m3!.tally.yes.voter_count, "Motion 3 should have 6 yes votes").toBe(6);
-    expect(m4!.tally.yes.voter_count, "Motion 4 should have 6 yes votes").toBe(6);
+    // All 6 lots voted: normal lots get "yes", in-arrear lots get "not_eligible" on general motions
+    expect(
+      m3!.tally.yes.voter_count + m3!.tally.not_eligible.voter_count,
+      "Motion 3: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m3!.tally.absent.voter_count, "Motion 3: no absent voters").toBe(0);
+    expect(
+      m4!.tally.yes.voter_count + m4!.tally.not_eligible.voter_count,
+      "Motion 4: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m4!.tally.absent.voter_count, "Motion 4: no absent voters").toBe(0);
   } finally {
     await api2.dispose();
   }
