@@ -1288,11 +1288,15 @@ test("33M.22: close meeting and verify final tally integrity", async () => {
     ).toBe(6);
     expect(m7!.tally.absent.voter_count, "Motion 7: no absent voters").toBe(0);
 
-    // M5: 3 yes votes from first batch, closed before remaining lots voted
+    // M5: 3 yes votes from first batch (indices 0-2, all normal lots), closed before remaining
+    // lots voted. Admin in-person vote entry (steps 33M.19+) runs after M5 is closed and
+    // records not_eligible for the in-arrear lot (at index 3/4/5) because the admin vote
+    // path iterates all visible motions regardless of voting_closed_at.
     const m5 = motionsBefore.find((m) => m.display_order === 5);
     expect(m5, "Motion 5 not found").toBeDefined();
     assertTally(m5!.tally, {
       yes: { voter_count: 3 },
+      not_eligible: { voter_count: 1 },
     });
     expect(m5!.voting_closed_at, "M5 should be closed").not.toBeNull();
 
