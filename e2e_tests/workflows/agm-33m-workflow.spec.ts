@@ -515,8 +515,17 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
   await motionCards.nth(2).getByRole("button", { name: "For" }).click();
   await motionCards.nth(3).getByRole("button", { name: "For" }).click();
 
-  // Submit
-  await submitBallot(page);
+  // Submit — handle MixedSelectionWarningDialog if it appears (3 lots already
+  // voted on M1/M2 in 33M.4, so selecting all 6 triggers the mixed-history warning)
+  await page.getByRole("button", { name: "Submit ballot" }).click();
+  const mixedDialog = page.getByRole("dialog", { name: "Mixed voting history" });
+  const mixedDialogVisible = await mixedDialog.isVisible().catch(() => false);
+  if (mixedDialogVisible) {
+    await mixedDialog.getByRole("button", { name: "Continue" }).click();
+    await expect(mixedDialog).not.toBeVisible({ timeout: 5000 });
+  }
+  await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10000 });
+  await page.getByRole("button", { name: "Submit ballot" }).last().click();
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
   await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
 
