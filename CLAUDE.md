@@ -195,6 +195,17 @@ cd backend && uv run bandit -r app/ -c pyproject.toml -ll
 cd frontend && npm run lint:security
 ```
 
+**When any file under `e2e_tests/` is added or modified:** run the affected spec locally against the dev server before pushing. This catches locator errors, missing dialog handlers, and interaction bugs in seconds rather than burning a full deploy cycle.
+
+```bash
+# Start backend + frontend dev servers first (see Commands section), then:
+PLAYWRIGHT_BASE_URL=http://localhost:5173 cd frontend && npx playwright test --project=user-workflow e2e_tests/workflows/agm-33m-workflow.spec.ts
+# Or for a specific test:
+PLAYWRIGHT_BASE_URL=http://localhost:5173 cd frontend && npx playwright test --project=user-workflow --grep "33M.7"
+```
+
+Local E2E against `localhost` cannot catch Neon cold-start 500s or CI-specific scroll/viewport issues, but it catches all application-logic and locator bugs before they reach CI.
+
 ### Branch CI / E2E / Post-merge CI / Preview E2E — monitoring (all automated)
 
 Poll with `gh run list --branch <branch> --workflow <workflow> --limit 1 --json status,conclusion`.
