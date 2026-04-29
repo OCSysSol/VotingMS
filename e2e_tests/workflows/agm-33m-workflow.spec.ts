@@ -306,7 +306,9 @@ test("33M.2: add multi-choice motion with 9 options and 3-vote limit via admin U
   // Add 7 more options (total 9)
   for (let i = 2; i < MC_OPTIONS.length; i++) {
     await page.getByRole("button", { name: "+ Add option" }).click();
-    await page.getByRole("textbox", { name: `Option ${i + 1}`, exact: true }).fill(MC_OPTIONS[i]);
+    const newInput = page.getByRole("textbox", { name: `Option ${i + 1}`, exact: true });
+    await expect(newInput).toBeVisible({ timeout: 5000 });
+    await newInput.fill(MC_OPTIONS[i]);
   }
 
   // Save the motion

@@ -85,6 +85,7 @@ export default defineConfig({
     // Run as a separate job to avoid blocking the faster workflow suite.
     {
       name: "user-workflow",
+      retries: 0, // module-level shared state cannot be recovered in a fresh retry worker
       testMatch: [/e2e_tests\/workflows\/agm-33m-workflow\.spec\.ts/],
       dependencies: process.env.CI ? [] : ["setup"],
       use: {
