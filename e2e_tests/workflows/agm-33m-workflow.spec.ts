@@ -707,9 +707,9 @@ test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", 
   // Exactly 3 lots are pending (the ones that haven't voted on M5/M6 yet)
   await expect(sidebar.getByText(/voting for 3 lots/i)).toBeVisible({ timeout: 15000 });
 
-  // M5 card (index 4) should show "Voting Closed"
+  // M5 card (index 4) should show "Motion Closed" (the voter-side MotionCard badge text)
   const m5Card = motionCards.nth(4);
-  await expect(m5Card.getByText(/Voting Closed/i)).toBeVisible({ timeout: 10000 });
+  await expect(m5Card.getByText(/Motion Closed/i)).toBeVisible({ timeout: 10000 });
 
   // M6 is interactive — vote Against
   const m6Card = motionCards.nth(5);
@@ -730,8 +730,10 @@ test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", 
       m5!.tally.yes.voter_count,
       "Motion 5 should still have only 3 yes votes"
     ).toBe(3);
+    // Include not_eligible: in-arrear lots get not_eligible on General motions (M6 is General)
     const m6TotalVoters =
-      m6!.tally.yes.voter_count + m6!.tally.no.voter_count + m6!.tally.abstained.voter_count;
+      m6!.tally.yes.voter_count + m6!.tally.no.voter_count +
+      m6!.tally.abstained.voter_count + m6!.tally.not_eligible.voter_count;
     expect(m6TotalVoters, "Motion 6 should have 6 total voters").toBe(6);
   } finally {
     await api2.dispose();
