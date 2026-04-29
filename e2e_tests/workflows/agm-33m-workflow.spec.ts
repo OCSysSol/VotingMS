@@ -306,7 +306,9 @@ test("33M.2: add multi-choice motion with 9 options and 3-vote limit via admin U
   // Add 7 more options (total 9)
   for (let i = 2; i < MC_OPTIONS.length; i++) {
     await page.getByRole("button", { name: "+ Add option" }).click();
-    await page.getByRole("textbox", { name: `Option ${i + 1}`, exact: true }).fill(MC_OPTIONS[i]);
+    const newInput = page.getByRole("textbox", { name: `Option ${i + 1}`, exact: true });
+    await expect(newInput).toBeVisible({ timeout: 5000 });
+    await newInput.fill(MC_OPTIONS[i]);
   }
 
   // Save the motion
@@ -494,7 +496,7 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
   await expect(sidebar).toBeVisible({ timeout: 10000 });
 
   // Select all lots (some may have been deselected from prev session)
-  await sidebar.getByRole("button", { name: "Select All" }).click();
+  await sidebar.getByRole("button", { name: "Select All", exact: true }).click();
   await expect(sidebar.getByText(/voting for 6 lots/i)).toBeVisible({ timeout: 15000 });
 
   // Vote on M1 (For) and M2 (Against) for lots that haven't voted yet
@@ -856,7 +858,7 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
 
   const sidebar = page.locator(".voting-layout__sidebar");
   await expect(sidebar).toBeVisible({ timeout: 10000 });
-  await sidebar.getByRole("button", { name: "Select All" }).click();
+  await sidebar.getByRole("button", { name: "Select All", exact: true }).click();
   await expect(sidebar.getByText(/voting for 6 lots/i)).toBeVisible({ timeout: 15000 });
 
   // Find M7 card and MC card
