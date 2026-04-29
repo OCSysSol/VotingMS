@@ -910,14 +910,18 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
   await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
 
-  // Verify M7 has 6 yes voters
+  // Verify M7 has 6 total votes (yes or not_eligible for in-arrear lots on general motions)
   const baseURL2 = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
   const api2 = await makeAdminApi(baseURL2);
   try {
     const motions = await getFullMotions(api2, meetingId);
     const m7 = motions.find((m) => m.display_order === 7);
     expect(m7, "Motion 7 not found").toBeDefined();
-    expect(m7!.tally.yes.voter_count, "Motion 7 should have 6 yes votes").toBe(6);
+    expect(
+      m7!.tally.yes.voter_count + m7!.tally.not_eligible.voter_count,
+      "Motion 7: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m7!.tally.absent.voter_count, "Motion 7: no absent voters").toBe(0);
   } finally {
     await api2.dispose();
   }
@@ -1266,19 +1270,23 @@ test("33M.22: close meeting and verify final tally integrity", async () => {
     // Verify key tally invariants before closing
     const motionsBefore = await getFullMotions(api, meetingId);
 
-    // M3: all 6 alecools lots voted For
+    // M3: all 6 alecools lots voted — normal lots record yes, in-arrear lots record not_eligible
     const m3 = motionsBefore.find((m) => m.display_order === 3);
     expect(m3, "Motion 3 not found").toBeDefined();
-    assertTally(m3!.tally, {
-      yes: { voter_count: 6 },
-    });
+    expect(
+      m3!.tally.yes.voter_count + m3!.tally.not_eligible.voter_count,
+      "Motion 3: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m3!.tally.absent.voter_count, "Motion 3: no absent voters").toBe(0);
 
-    // M7: all 6 alecools lots voted For
+    // M7: all 6 alecools lots voted — normal lots record yes, in-arrear lots record not_eligible
     const m7 = motionsBefore.find((m) => m.display_order === 7);
     expect(m7, "Motion 7 not found").toBeDefined();
-    assertTally(m7!.tally, {
-      yes: { voter_count: 6 },
-    });
+    expect(
+      m7!.tally.yes.voter_count + m7!.tally.not_eligible.voter_count,
+      "Motion 7: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m7!.tally.absent.voter_count, "Motion 7: no absent voters").toBe(0);
 
     // M5: 3 yes votes from first batch, closed before remaining lots voted
     const m5 = motionsBefore.find((m) => m.display_order === 5);
