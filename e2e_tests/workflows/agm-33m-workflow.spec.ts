@@ -871,6 +871,11 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
 
   await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
+  // Reload the voting page to ensure a fresh fetch of motions/meeting after auth
+  // navigation. Without this, React Query may serve stale state from a prior test
+  // step (e.g. 7 visible motions from 33M.13) rather than the current 8.
+  await page.goto(`/vote/${meetingId}/voting`);
+
   // 8 visible motions
   const motionCards = page.locator(".motion-card");
   await expect(motionCards).toHaveCount(8, { timeout: 20000 });
