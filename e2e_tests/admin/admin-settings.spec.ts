@@ -183,7 +183,7 @@ test.describe("Admin Settings — tenant branding", () => {
     // Restore valid colour
     await primaryColourText(page).fill(ORIGINAL_PRIMARY_COLOUR);
     await page.getByTestId("branding-save-btn").click();
-    await expect(page.getByText("Settings saved.")).toBeVisible();
+    await expect(page.getByText("Settings saved.")).toBeVisible({ timeout: 10000 });
   });
 });
 

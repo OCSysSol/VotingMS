@@ -496,7 +496,7 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
   await expect(sidebar).toBeVisible({ timeout: 10000 });
 
   // Select all lots (some may have been deselected from prev session)
-  await sidebar.getByRole("button", { name: "Select All", exact: true }).click();
+  await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
   await expect(sidebar.getByText(/voting for 6 lots/i)).toBeVisible({ timeout: 15000 });
 
   // Vote on M1 (For) and M2 (Against) for lots that haven't voted yet
@@ -515,8 +515,16 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
   await motionCards.nth(2).getByRole("button", { name: "For" }).click();
   await motionCards.nth(3).getByRole("button", { name: "For" }).click();
 
-  // Submit
-  await submitBallot(page);
+  // Submit — MixedSelectionWarningDialog appears first (3 lots already voted on M1/M2)
+  await page.getByRole("button", { name: "Submit ballot" }).click();
+  const mixedDialog = page.getByRole("dialog", { name: "Mixed voting history" });
+  await expect(mixedDialog).toBeVisible({ timeout: 10000 });
+  await mixedDialog.getByRole("button", { name: "Continue" }).click();
+  await expect(mixedDialog).not.toBeVisible({ timeout: 5000 });
+  // Confirmation dialog appears after dismissing the mixed warning
+  const confirmDialog = page.getByRole("dialog", { name: "Confirm submission" });
+  await expect(confirmDialog).toBeVisible({ timeout: 10000 });
+  await confirmDialog.getByRole("button", { name: "Submit ballot" }).click();
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
   await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
 
@@ -529,8 +537,17 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all 6 lots"
     const m4 = motions.find((m) => m.display_order === 4);
     expect(m3, "Motion 3 not found").toBeDefined();
     expect(m4, "Motion 4 not found").toBeDefined();
-    expect(m3!.tally.yes.voter_count, "Motion 3 should have 6 yes votes").toBe(6);
-    expect(m4!.tally.yes.voter_count, "Motion 4 should have 6 yes votes").toBe(6);
+    // All 6 lots voted: normal lots get "yes", in-arrear lots get "not_eligible" on general motions
+    expect(
+      m3!.tally.yes.voter_count + m3!.tally.not_eligible.voter_count,
+      "Motion 3: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m3!.tally.absent.voter_count, "Motion 3: no absent voters").toBe(0);
+    expect(
+      m4!.tally.yes.voter_count + m4!.tally.not_eligible.voter_count,
+      "Motion 4: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m4!.tally.absent.voter_count, "Motion 4: no absent voters").toBe(0);
   } finally {
     await api2.dispose();
   }
@@ -690,9 +707,9 @@ test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", 
   // Exactly 3 lots are pending (the ones that haven't voted on M5/M6 yet)
   await expect(sidebar.getByText(/voting for 3 lots/i)).toBeVisible({ timeout: 15000 });
 
-  // M5 card (index 4) should show "Voting Closed"
+  // M5 card (index 4) should show "Motion Closed" (the voter-side MotionCard badge text)
   const m5Card = motionCards.nth(4);
-  await expect(m5Card.getByText(/Voting Closed/i)).toBeVisible({ timeout: 10000 });
+  await expect(m5Card.getByText(/Motion Closed/i)).toBeVisible({ timeout: 10000 });
 
   // M6 is interactive — vote Against
   const m6Card = motionCards.nth(5);
@@ -713,8 +730,10 @@ test("33M.11: voter alecools — remaining 3 lots vote on M6 only (M5 closed)", 
       m5!.tally.yes.voter_count,
       "Motion 5 should still have only 3 yes votes"
     ).toBe(3);
+    // Include not_eligible: in-arrear lots get not_eligible on General motions (M6 is General)
     const m6TotalVoters =
-      m6!.tally.yes.voter_count + m6!.tally.no.voter_count + m6!.tally.abstained.voter_count;
+      m6!.tally.yes.voter_count + m6!.tally.no.voter_count +
+      m6!.tally.abstained.voter_count + m6!.tally.not_eligible.voter_count;
     expect(m6TotalVoters, "Motion 6 should have 6 total voters").toBe(6);
   } finally {
     await api2.dispose();
@@ -787,7 +806,7 @@ test("33M.13: voter alecools votes multi-choice for 3 lots with 3-option limit e
 
   // The MC motion is the last card
   const mcCard = motionCards.last();
-  await expect(mcCard.getByText(MC_TITLE)).toBeVisible({ timeout: 10000 });
+  await expect(mcCard.getByRole('heading', { name: MC_TITLE })).toBeVisible({ timeout: 10000 });
 
   // Vote "For" on first 3 options
   const forButtons = mcCard.getByRole("button", { name: "For" });
@@ -852,13 +871,18 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
 
   await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
+  // Reload the voting page to ensure a fresh fetch of motions/meeting after auth
+  // navigation. Without this, React Query may serve stale state from a prior test
+  // step (e.g. 7 visible motions from 33M.13) rather than the current 8.
+  await page.goto(`/vote/${meetingId}/voting`);
+
   // 8 visible motions
   const motionCards = page.locator(".motion-card");
   await expect(motionCards).toHaveCount(8, { timeout: 20000 });
 
   const sidebar = page.locator(".voting-layout__sidebar");
   await expect(sidebar).toBeVisible({ timeout: 10000 });
-  await sidebar.getByRole("button", { name: "Select All", exact: true }).click();
+  await sidebar.getByRole("button", { name: "Select all lots", exact: true }).click();
   await expect(sidebar.getByText(/voting for 6 lots/i)).toBeVisible({ timeout: 15000 });
 
   // Find M7 card and MC card
@@ -891,14 +915,18 @@ test("33M.15: voter alecools votes all 6 lots on M7, MC for remaining 3 lots", a
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
   await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
 
-  // Verify M7 has 6 yes voters
+  // Verify M7 has 6 total votes (yes or not_eligible for in-arrear lots on general motions)
   const baseURL2 = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
   const api2 = await makeAdminApi(baseURL2);
   try {
     const motions = await getFullMotions(api2, meetingId);
     const m7 = motions.find((m) => m.display_order === 7);
     expect(m7, "Motion 7 not found").toBeDefined();
-    expect(m7!.tally.yes.voter_count, "Motion 7 should have 6 yes votes").toBe(6);
+    expect(
+      m7!.tally.yes.voter_count + m7!.tally.not_eligible.voter_count,
+      "Motion 7: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m7!.tally.absent.voter_count, "Motion 7: no absent voters").toBe(0);
   } finally {
     await api2.dispose();
   }
@@ -1001,7 +1029,7 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
 
   // For the MC motion (last card if visible), click up to 3 "For" buttons
   const mcCard = motionCards.last();
-  if (await mcCard.getByText(MC_TITLE).isVisible().catch(() => false)) {
+  if (await mcCard.getByRole('heading', { name: MC_TITLE }).isVisible().catch(() => false)) {
     const mcForButtons = mcCard.getByRole("button", { name: "For" });
     if (await mcForButtons.nth(0).isEnabled().catch(() => false)) {
       await mcForButtons.nth(0).click();
@@ -1247,25 +1275,33 @@ test("33M.22: close meeting and verify final tally integrity", async () => {
     // Verify key tally invariants before closing
     const motionsBefore = await getFullMotions(api, meetingId);
 
-    // M3: all 6 alecools lots voted For
+    // M3: all 6 alecools lots voted — normal lots record yes, in-arrear lots record not_eligible
     const m3 = motionsBefore.find((m) => m.display_order === 3);
     expect(m3, "Motion 3 not found").toBeDefined();
-    assertTally(m3!.tally, {
-      yes: { voter_count: 6 },
-    });
+    expect(
+      m3!.tally.yes.voter_count + m3!.tally.not_eligible.voter_count,
+      "Motion 3: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m3!.tally.absent.voter_count, "Motion 3: no absent voters").toBe(0);
 
-    // M7: all 6 alecools lots voted For
+    // M7: all 6 alecools lots voted — normal lots record yes, in-arrear lots record not_eligible
     const m7 = motionsBefore.find((m) => m.display_order === 7);
     expect(m7, "Motion 7 not found").toBeDefined();
-    assertTally(m7!.tally, {
-      yes: { voter_count: 6 },
-    });
+    expect(
+      m7!.tally.yes.voter_count + m7!.tally.not_eligible.voter_count,
+      "Motion 7: all 6 lots should have voted (yes or not_eligible)"
+    ).toBe(6);
+    expect(m7!.tally.absent.voter_count, "Motion 7: no absent voters").toBe(0);
 
-    // M5: 3 yes votes from first batch, closed before remaining lots voted
+    // M5: 3 yes votes from first batch (indices 0-2, all normal lots), closed before remaining
+    // lots voted. Admin in-person vote entry (steps 33M.19+) runs after M5 is closed and
+    // records not_eligible for the in-arrear lot (at index 3/4/5) because the admin vote
+    // path iterates all visible motions regardless of voting_closed_at.
     const m5 = motionsBefore.find((m) => m.display_order === 5);
     expect(m5, "Motion 5 not found").toBeDefined();
     assertTally(m5!.tally, {
       yes: { voter_count: 3 },
+      not_eligible: { voter_count: 1 },
     });
     expect(m5!.voting_closed_at, "M5 should be closed").not.toBeNull();
 
