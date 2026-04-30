@@ -46,29 +46,55 @@ function formatEntitlementPct(sum: number, total: number): string {
   return `${sum} (${pct.toFixed(1)}%)`;
 }
 
-const CATEGORY_LABELS: Record<string, string> = {
-  yes: "For",
-  no: "Against",
-  abstained: "Abstained",
-  absent: "Absent",
-  not_eligible: "Not eligible",
-};
+const CATEGORY_LABELS = new Map([
+  ["yes", "For"],
+  ["no", "Against"],
+  ["abstained", "Abstained"],
+  ["absent", "Absent"],
+  ["not_eligible", "Not eligible"],
+]);
 
-const CATEGORY_COLORS: Record<string, string> = {
-  yes: "var(--green)",
-  no: "var(--red)",
-  abstained: "var(--text-muted)",
-  absent: "var(--text-muted)",
-  not_eligible: "var(--text-muted)",
-};
+const CATEGORY_COLORS = new Map([
+  ["yes", "var(--green)"],
+  ["no", "var(--red)"],
+  ["abstained", "var(--text-muted)"],
+  ["absent", "var(--text-muted)"],
+  ["not_eligible", "var(--text-muted)"],
+]);
 
-const CHOICE_BG_COLORS: Record<string, string> = {
-  yes: "var(--green-bg)",
-  no: "var(--red-bg)",
-  abstained: "#F0EFEE",
-  absent: "#F0EFEE",
-  not_eligible: "#F0EFEE",
-};
+const CHOICE_BG_COLORS = new Map([
+  ["yes", "var(--green-bg)"],
+  ["no", "var(--red-bg)"],
+  ["abstained", "#F0EFEE"],
+  ["absent", "#F0EFEE"],
+  ["not_eligible", "#F0EFEE"],
+]);
+
+function getVoterList(
+  lists: MotionDetail["voter_lists"],
+  cat: "yes" | "no" | "abstained" | "absent" | "not_eligible"
+): MotionDetail["voter_lists"]["yes"] {
+  switch (cat) {
+    case "yes": return lists.yes;
+    case "no": return lists.no;
+    case "abstained": return lists.abstained;
+    case "absent": return lists.absent;
+    case "not_eligible": return lists.not_eligible;
+  }
+}
+
+function getTallyCategory(
+  tally: MotionDetail["tally"],
+  cat: "yes" | "no" | "abstained" | "absent" | "not_eligible"
+): MotionDetail["tally"]["yes"] {
+  switch (cat) {
+    case "yes": return tally.yes;
+    case "no": return tally.no;
+    case "abstained": return tally.abstained;
+    case "absent": return tally.absent;
+    case "not_eligible": return tally.not_eligible;
+  }
+}
 
 interface MultiChoiceOptionRowsProps {
   optTally: OptionTallyEntry;
@@ -136,21 +162,21 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
           <td colSpan={3} style={{ padding: 0, borderTop: "1px solid var(--border-subtle)" }}>
             {(() => {
               type OptionChoice = "for" | "against" | "abstained";
-              const OPTION_CHOICE_LABELS: Record<OptionChoice, string> = {
-                for: "For",
-                against: "Against",
-                abstained: "Abstained",
-              };
-              const OPTION_CHOICE_COLORS: Record<OptionChoice, string> = {
-                for: "var(--green)",
-                against: "var(--red)",
-                abstained: "var(--text-muted)",
-              };
-              const OPTION_CHOICE_BG: Record<OptionChoice, string> = {
-                for: "var(--green-bg)",
-                against: "var(--red-bg)",
-                abstained: "#F0EFEE",
-              };
+              const OPTION_CHOICE_LABELS = new Map<OptionChoice, string>([
+                ["for", "For"],
+                ["against", "Against"],
+                ["abstained", "Abstained"],
+              ]);
+              const OPTION_CHOICE_COLORS = new Map<OptionChoice, string>([
+                ["for", "var(--green)"],
+                ["against", "var(--red)"],
+                ["abstained", "var(--text-muted)"],
+              ]);
+              const OPTION_CHOICE_BG = new Map<OptionChoice, string>([
+                ["for", "var(--green-bg)"],
+                ["against", "var(--red-bg)"],
+                ["abstained", "#F0EFEE"],
+              ]);
               const rows: Array<{ choice: OptionChoice; voter: typeof forVoters[number] }> = [
                 ...forVoters.map((v) => ({ choice: "for" as const, voter: v })),
                 ...againstVoters.map((v) => ({ choice: "against" as const, voter: v })),
@@ -205,10 +231,10 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
                               letterSpacing: "0.07em",
                               padding: "3px 8px",
                               borderRadius: "100px",
-                              color: OPTION_CHOICE_COLORS[choice],
-                              background: OPTION_CHOICE_BG[choice],
+                              color: OPTION_CHOICE_COLORS.get(choice) ?? "",
+                              background: OPTION_CHOICE_BG.get(choice) ?? "",
                             }}>
-                              {OPTION_CHOICE_LABELS[choice]}
+                              {OPTION_CHOICE_LABELS.get(choice) ?? ""}
                             </span>
                           </td>
                         </tr>
@@ -230,7 +256,7 @@ function BinaryVoterList({ motion }: { motion: MotionDetail }) {
   const categories = ["yes", "no", "abstained", "absent", "not_eligible"] as const;
   const rows: Array<{ cat: typeof categories[number]; voter: MotionDetail["voter_lists"]["yes"][number] }> = [];
   for (const cat of categories) {
-    for (const v of motion.voter_lists[cat]) {
+    for (const v of getVoterList(motion.voter_lists, cat)) {
       rows.push({ cat, voter: v });
     }
   }
@@ -284,10 +310,10 @@ function BinaryVoterList({ motion }: { motion: MotionDetail }) {
                     letterSpacing: "0.07em",
                     padding: "3px 8px",
                     borderRadius: "100px",
-                    color: CATEGORY_COLORS[cat],
-                    background: CHOICE_BG_COLORS[cat],
+                    color: CATEGORY_COLORS.get(cat) ?? "",
+                    background: CHOICE_BG_COLORS.get(cat) ?? "",
                   }}>
-                    {CATEGORY_LABELS[cat]}
+                    {CATEGORY_LABELS.get(cat) ?? ""}
                   </span>
                 </td>
               </tr>
@@ -361,8 +387,8 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
 
       // Absent and not_eligible rows — Option cell is empty
       for (const cat of ["absent", "not_eligible"] as const) {
-        const label = CATEGORY_LABELS[cat];
-        for (const v of motion.voter_lists[cat]) {
+        const label = CATEGORY_LABELS.get(cat) ?? "";
+        for (const v of getVoterList(motion.voter_lists, cat)) {
           rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(buildEmailCell(v))},${""},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Admin" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
       }
@@ -370,8 +396,8 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
       rows.push("Lot Number,Owner Name,Voter Email,Vote Choice,Entitlement (UOE),Submitted By,Submitted At");
 
       for (const cat of ["yes", "no", "abstained", "absent", "not_eligible"] as const) {
-        const label = CATEGORY_LABELS[cat];
-        for (const v of motion.voter_lists[cat]) {
+        const label = CATEGORY_LABELS.get(cat) ?? "";
+        for (const v of getVoterList(motion.voter_lists, cat)) {
           rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(buildEmailCell(v))},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Admin" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
       }
@@ -425,18 +451,18 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
         }
         // Abstained / absent / not_eligible rows
         for (const cat of ["abstained", "absent", "not_eligible"] as const) {
-          for (const v of motion.voter_lists[cat]) {
+          for (const v of getVoterList(motion.voter_lists, cat)) {
             const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
-            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
+            rows.push(`"${motionLabel}","${CATEGORY_LABELS.get(cat) ?? ""}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
         }
       } else {
         for (const cat of ["yes", "no", "abstained", "absent", "not_eligible"] as const) {
-          for (const v of motion.voter_lists[cat]) {
+          for (const v of getVoterList(motion.voter_lists, cat)) {
             const emailCell = buildEmailCell(v);
             const submittedBy = v.submitted_by_admin ? "Admin" : "Voter";
-            rows.push(`"${motionLabel}","${CATEGORY_LABELS[cat]}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
+            rows.push(`"${motionLabel}","${CATEGORY_LABELS.get(cat) ?? ""}","${v.lot_number}",${v.entitlement},"${emailCell.replace(/"/g, '""')}","${submittedBy}"`);
           }
         }
       }
@@ -591,15 +617,15 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
                       <tr key={cat}>
                         <td>
                           <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: CATEGORY_COLORS[cat], flexShrink: 0 }} />
-                            {CATEGORY_LABELS[cat]}
+                            <span style={{ width: 8, height: 8, borderRadius: "50%", background: CATEGORY_COLORS.get(cat) ?? "", flexShrink: 0 }} />
+                            {CATEGORY_LABELS.get(cat) ?? ""}
                           </span>
                         </td>
                         <td style={{ fontFamily: "'Overpass Mono', monospace" }}>
-                          {motion.tally[cat].voter_count}
+                          {getTallyCategory(motion.tally, cat).voter_count}
                         </td>
                         <td style={{ fontFamily: "'Overpass Mono', monospace" }}>
-                          {formatEntitlementPct(motion.tally[cat].entitlement_sum, totalEntitlement)}
+                          {formatEntitlementPct(getTallyCategory(motion.tally, cat).entitlement_sum, totalEntitlement)}
                         </td>
                       </tr>
                     ))}
@@ -629,17 +655,17 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
                               width: 8,
                               height: 8,
                               borderRadius: "50%",
-                              background: CATEGORY_COLORS[cat],
+                              background: CATEGORY_COLORS.get(cat) ?? "",
                               flexShrink: 0,
                             }} />
-                            {CATEGORY_LABELS[cat]}
+                            {CATEGORY_LABELS.get(cat) ?? ""}
                           </span>
                         </td>
                         <td style={{ fontFamily: "'Overpass Mono', monospace" }}>
-                          {motion.tally[cat].voter_count}
+                          {getTallyCategory(motion.tally, cat).voter_count}
                         </td>
                         <td style={{ fontFamily: "'Overpass Mono', monospace" }}>
-                          {formatEntitlementPct(motion.tally[cat].entitlement_sum, totalEntitlement)}
+                          {formatEntitlementPct(getTallyCategory(motion.tally, cat).entitlement_sum, totalEntitlement)}
                         </td>
                       </tr>
                     );
