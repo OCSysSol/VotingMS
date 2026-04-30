@@ -633,6 +633,30 @@ This document covers admin portal authentication, the admin in-person vote entry
 
 ---
 
+### US-DL-01: Per-motion vote results download
+
+**Status:** Draft
+
+**Description:** As a meeting admin reviewing results, I want to download the vote data for a single motion as a CSV file so I can inspect or archive individual motion outcomes without exporting the full meeting report.
+
+**Acceptance Criteria:**
+
+- [ ] Each motion card in the Results Report section has a "Download CSV" button in its header row
+- [ ] The button is disabled (and marked `aria-disabled="true"`) when the motion has zero voter records across all categories (no For, Against, Abstained, Absent, or Not eligible rows)
+- [ ] Clicking an enabled button triggers a browser download with no page navigation or loading state (client-side generation from already-fetched data)
+- [ ] The downloaded filename follows the pattern `<motion_number>-<motion_title_slug>_results.csv` (e.g. `1-elect-chairperson_results.csv`); if `motion_number` is absent, `display_order` is used instead
+- [ ] For binary motions, the CSV contains one row per voter with columns: `Lot Number`, `Owner Name`, `Voter Email`, `Vote Choice`, `Entitlement (UOE)`, `Submitted By`, `Submitted At`
+- [ ] For multi-choice motions, the CSV contains one row per voter per option-vote with columns: `Lot Number`, `Owner Name`, `Voter Email`, `Option`, `Vote Choice`, `Entitlement (UOE)`, `Submitted By`, `Submitted At`
+- [ ] `Owner Name` is the display name from `voter_name` if available, empty string otherwise
+- [ ] `Vote Choice` values are human-readable: `For`, `Against`, `Abstained`, `Absent`, `Not eligible`
+- [ ] `Submitted By` is `Admin` when `submitted_by_admin = true`, `Voter` otherwise
+- [ ] `Submitted At` is the ballot submission timestamp in ISO 8601 format (UTC)
+- [ ] The button uses `.btn.btn--admin` style with a download icon (`↓`) prefix
+- [ ] All tests pass at 100% coverage
+- [ ] Typecheck/lint passes
+
+---
+
 ## Non-Goals
 
 - No admin vote entry for meetings that are already closed
