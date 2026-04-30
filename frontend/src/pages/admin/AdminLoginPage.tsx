@@ -1,31 +1,85 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { authClient } from "../../lib/auth-client";
 import { useBranding } from "../../context/BrandingContext";
 
+type View = "login" | "reset";
+
 export default function AdminLoginPage() {
   const navigate = useNavigate();
   const { config } = useBranding();
+
+  // Login form state
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  // Forgot password state
+  const [view, setView] = useState<View>("login");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState(false);
+
+  const resetEmailRef = useRef<HTMLInputElement>(null);
+
+  // Move focus to the reset email input when the reset view appears
+  useEffect(() => {
+    if (view === "reset") {
+      resetEmailRef.current?.focus();
+    }
+  }, [view]);
+
+  function showResetView() {
+    setResetEmail(email);
+    setResetError(null);
+    setResetSuccess(false);
+    setView("reset");
+  }
+
+  function showLoginView() {
+    setLoginError(null);
+    setView("login");
+  }
+
+  async function handleLoginSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
-    setLoading(true);
+    setLoginError(null);
+    setLoginLoading(true);
     try {
       const result = await authClient.signIn.email({ email, password });
       if (result.error) {
-        setError("Invalid email or password.");
+        setLoginError("Invalid email or password.");
       } else {
         navigate("/admin", { replace: true });
       }
     } catch {
-      setError("Invalid email or password.");
+      setLoginError("Invalid email or password.");
     } finally {
-      setLoading(false);
+      setLoginLoading(false);
+    }
+  }
+
+  async function handleResetSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setResetError(null);
+    setResetSuccess(false);
+    setResetLoading(true);
+    try {
+      const result = await authClient.forgetPassword({
+        email: resetEmail,
+        redirectTo: window.location.origin + "/admin/login",
+      });
+      if (result.error) {
+        setResetError(result.error.message ?? "Failed to send reset link.");
+      } else {
+        setResetSuccess(true);
+      }
+    } catch {
+      setResetError("Failed to send reset link. Please try again.");
+    } finally {
+      setResetLoading(false);
     }
   }
 
@@ -42,51 +96,110 @@ export default function AdminLoginPage() {
           <p className="admin-login-card__subtitle">Sign in to manage buildings and General Meetings</p>
         </div>
 
-        <form onSubmit={(e) => { void handleSubmit(e); }} className="admin-login-card__form">
-          {error && (
-            <p className="admin-login-card__error" role="alert">
-              {error}
-            </p>
-          )}
+        {view === "login" ? (
+          <form onSubmit={(e) => { void handleLoginSubmit(e); }} className="admin-login-card__form">
+            {loginError && (
+              <p className="admin-login-card__error" role="alert">
+                {loginError}
+              </p>
+            )}
 
-          <div className="field">
-            <label htmlFor="email" className="field__label">
-              Email
-            </label>
-            <input
-              id="email"
-              type="email"
-              className="field__input"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              required
-            />
-          </div>
+            <div className="field">
+              <label htmlFor="email" className="field__label">
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                className="field__input"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+            </div>
 
-          <div className="field">
-            <label htmlFor="password" className="field__label">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              className="field__input"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
-          </div>
+            <div className="field">
+              <label htmlFor="password" className="field__label">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                className="field__input"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </div>
 
-          <button
-            type="submit"
-            className="btn btn--primary btn--full"
-            disabled={loading}
-          >
-            {loading ? "Signing in…" : "Sign in"}
-          </button>
-        </form>
+            <button
+              type="submit"
+              className="btn btn--primary btn--full"
+              disabled={loginLoading}
+            >
+              {loginLoading ? "Signing in…" : "Sign in"}
+            </button>
+
+            <button
+              type="button"
+              className="btn btn--ghost admin-login-forgot"
+              onClick={showResetView}
+            >
+              Forgot password?
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={(e) => { void handleResetSubmit(e); }} className="admin-login-card__form">
+            {resetSuccess ? (
+              <p className="admin-login-card__success" role="status">
+                If that email is registered, a reset link has been sent.
+              </p>
+            ) : (
+              <>
+                {resetError && (
+                  <p className="admin-login-card__error" role="alert">
+                    {resetError}
+                  </p>
+                )}
+
+                <div className="field">
+                  <label htmlFor="reset-email" className="field__label">
+                    Email
+                  </label>
+                  <input
+                    id="reset-email"
+                    ref={resetEmailRef}
+                    type="email"
+                    className="field__input"
+                    value={resetEmail}
+                    onChange={(e) => setResetEmail(e.target.value)}
+                    autoComplete="email"
+                    required
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="btn btn--primary btn--full"
+                  disabled={resetLoading}
+                >
+                  {resetLoading ? "Sending…" : "Send reset link"}
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              className="btn btn--ghost admin-login-back-to-login"
+              onClick={showLoginView}
+            >
+              ← Back to login
+            </button>
+          </form>
+        )}
+
         <button
           type="button"
           className="btn btn--ghost admin-login-back"

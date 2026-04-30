@@ -7,9 +7,10 @@ import { BrandingContext, DEFAULT_CONFIG } from "../../../context/BrandingContex
 import type { TenantConfig } from "../../../api/config";
 
 // Use vi.hoisted() so mock functions are available inside the hoisted vi.mock() factories.
-const { mockNavigate, mockSignInEmail } = vi.hoisted(() => ({
+const { mockNavigate, mockSignInEmail, mockForgetPassword } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockSignInEmail: vi.fn(),
+  mockForgetPassword: vi.fn(),
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -26,6 +27,7 @@ vi.mock("../../../lib/auth-client", () => ({
     signIn: {
       email: mockSignInEmail,
     },
+    forgetPassword: mockForgetPassword,
   },
 }));
 
@@ -43,6 +45,7 @@ describe("AdminLoginPage", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
     mockSignInEmail.mockClear();
+    mockForgetPassword.mockClear();
   });
 
   // --- Happy path ---
@@ -185,5 +188,184 @@ describe("AdminLoginPage", () => {
     renderPage();
     await user.click(screen.getByRole("button", { name: "← Back to home" }));
     expect(mockNavigate).toHaveBeenCalledWith("/");
+  });
+
+  // --- Forgot password ---
+
+  it("renders the Forgot password? button on the login view", () => {
+    renderPage();
+    expect(screen.getByRole("button", { name: "Forgot password?" })).toBeInTheDocument();
+  });
+
+  it("clicking Forgot password? shows the reset view and hides the login form fields", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    // Reset view is visible
+    expect(screen.getByRole("button", { name: "Send reset link" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "← Back to login" })).toBeInTheDocument();
+    // Login-specific elements are gone
+    expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Sign in" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Forgot password?" })).not.toBeInTheDocument();
+  });
+
+  it("clicking Back to login from the reset view returns to the login form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    await user.click(screen.getByRole("button", { name: "← Back to login" }));
+    // Login fields are back
+    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Password")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  });
+
+  it("pre-fills the reset email field with the email typed on the login form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByLabelText("Email"), "someone@example.com");
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const resetEmailInput = screen.getByLabelText("Email") as HTMLInputElement;
+    expect(resetEmailInput.value).toBe("someone@example.com");
+  });
+
+  it("submitting the reset form calls authClient.forgetPassword with correct args", async () => {
+    mockForgetPassword.mockResolvedValueOnce({ data: {}, error: null });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => {
+      expect(mockForgetPassword).toHaveBeenCalledWith({
+        email: "admin@example.com",
+        redirectTo: window.location.origin + "/admin/login",
+      });
+    });
+  });
+
+  it("shows confirmation message on successful reset request", async () => {
+    mockForgetPassword.mockResolvedValueOnce({ data: {}, error: null });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toBeInTheDocument();
+    });
+    expect(screen.getByText("If that email is registered, a reset link has been sent.")).toBeInTheDocument();
+    // Send reset link form is no longer visible
+    expect(screen.queryByRole("button", { name: "Send reset link" })).not.toBeInTheDocument();
+  });
+
+  it("shows error message when forgetPassword returns an error", async () => {
+    mockForgetPassword.mockResolvedValueOnce({
+      data: null,
+      error: { message: "Too many requests." },
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Too many requests.")).toBeInTheDocument();
+  });
+
+  it("shows fallback error message when forgetPassword returns an error without message", async () => {
+    mockForgetPassword.mockResolvedValueOnce({
+      data: null,
+      error: {},
+    });
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Failed to send reset link.")).toBeInTheDocument();
+  });
+
+  it("shows error message when forgetPassword throws", async () => {
+    mockForgetPassword.mockRejectedValueOnce(new Error("Network error"));
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Failed to send reset link. Please try again.")).toBeInTheDocument();
+  });
+
+  it("shows Sending… while the reset call is pending and hides it after", async () => {
+    let resolve!: (value: { data: unknown; error: null }) => void;
+    mockForgetPassword.mockImplementationOnce(
+      () => new Promise((res) => { resolve = res; })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    // While pending: button shows Sending… and success has NOT appeared
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeInTheDocument();
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    // Complete the call
+    resolve({ data: {}, error: null });
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toBeInTheDocument();
+    });
+  });
+
+  it("disables Send reset link button while loading", async () => {
+    let resolve!: (value: { data: unknown; error: null }) => void;
+    mockForgetPassword.mockImplementationOnce(
+      () => new Promise((res) => { resolve = res; })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    const emailInput = screen.getByLabelText("Email");
+    await user.clear(emailInput);
+    await user.type(emailInput, "admin@example.com");
+    await user.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    resolve({ data: {}, error: null });
+  });
+
+  it("Back to login clears any previous login error when returning", async () => {
+    // Show a login error first
+    mockSignInEmail.mockResolvedValueOnce({ data: null, error: { message: "bad" } });
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByLabelText("Email"), "admin@example.com");
+    await user.type(screen.getByLabelText("Password"), "wrong");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+    // Navigate to reset view and back
+    await user.click(screen.getByRole("button", { name: "Forgot password?" }));
+    await user.click(screen.getByRole("button", { name: "← Back to login" }));
+    // Login error is cleared
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });
