@@ -2,9 +2,15 @@ import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, testSmtpConfig } from "../../api/config";
 import type { TenantConfig } from "../../api/config";
+import { listAdminUsers, inviteAdminUser, removeAdminUser } from "../../api/users";
+import type { AdminUser } from "../../api/users";
+import { authClient } from "../../lib/auth-client";
+
+type SettingsTab = "ui-theme" | "email-server" | "user-management";
 
 export default function SettingsPage() {
   const queryClient = useQueryClient();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("ui-theme");
 
   const [appName, setAppName] = useState("");
   const [logoUrl, setLogoUrl] = useState("");
@@ -39,6 +45,21 @@ export default function SettingsPage() {
   const [showTestEmailModal, setShowTestEmailModal] = useState(false);
   const [testEmailRecipient, setTestEmailRecipient] = useState("");
 
+  // User management state
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersError, setUsersError] = useState("");
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isInviting, setIsInviting] = useState(false);
+  const [inviteSuccess, setInviteSuccess] = useState("");
+  const [inviteError, setInviteError] = useState("");
+  const [removeConfirmUser, setRemoveConfirmUser] = useState<AdminUser | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
+  const [removeSuccess, setRemoveSuccess] = useState("");
+  const [removeError, setRemoveError] = useState("");
+
   useEffect(() => {
     Promise.all([getAdminConfig(), getSmtpConfig()])
       .then(([config, smtp]) => {
@@ -63,6 +84,28 @@ export default function SettingsPage() {
         setIsLoading(false);
       });
   }, []);
+
+  // Load users when User Management tab is first activated
+  useEffect(() => {
+    if (activeTab !== "user-management") return;
+    setUsersLoading(true);
+    setUsersError("");
+    Promise.all([
+      listAdminUsers(),
+      authClient.getSession(),
+    ])
+      .then(([data, session]) => {
+        setUsers(data.users);
+        const userId = (session as { data?: { user?: { id?: string } } } | null)?.data?.user?.id ?? null;
+        setCurrentUserId(userId);
+      })
+      .catch(() => {
+        setUsersError("Failed to load users.");
+      })
+      .finally(() => {
+        setUsersLoading(false);
+      });
+  }, [activeTab]);
 
   async function handleLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -179,6 +222,55 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleInviteSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setInviteError("");
+    setInviteSuccess("");
+    setIsInviting(true);
+    try {
+      const newUser = await inviteAdminUser(inviteEmail);
+      setUsers((prev) => [...prev, newUser]);
+      setInviteSuccess(`Invite sent to ${inviteEmail}`);
+      setInviteEmail("");
+      setShowInviteForm(false);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send invite.";
+      if (message.includes("409") || message.includes("already exists")) {
+        setInviteError("A user with that email already exists.");
+      } else {
+        setInviteError(message);
+      }
+    } finally {
+      setIsInviting(false);
+    }
+  }
+
+  async function handleRemoveConfirm() {
+    // removeConfirmUser is always set before this function is called — the
+    // button that triggers it is only rendered inside `{removeConfirmUser && …}`.
+    const userToRemove = removeConfirmUser!;
+    setRemoveError("");
+    setRemoveSuccess("");
+    setIsRemoving(true);
+    setRemoveConfirmUser(null);
+    try {
+      await removeAdminUser(userToRemove.id);
+      setUsers((prev) => prev.filter((u) => u.id !== userToRemove.id));
+      setRemoveSuccess("User removed.");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to remove user.";
+      if (message.includes("409") || message.includes("last admin")) {
+        setRemoveError("Cannot remove the last admin user.");
+      } else if (message.includes("403") || message.includes("yourself")) {
+        setRemoveError("Cannot remove yourself.");
+      } else {
+        setRemoveError(message);
+      }
+    } finally {
+      setIsRemoving(false);
+    }
+  }
+
   // type="color" requires exactly #rrggbb. If the text input holds a partial
   // or invalid hex, fall back to the default so the picker remains functional.
   const COLOUR_RE = /^#[0-9a-fA-F]{6}$/;
@@ -194,280 +286,497 @@ export default function SettingsPage() {
         <h1>Settings</h1>
       </div>
 
-      <div className="admin-card">
-        <div className="admin-card__header">
-          <p className="admin-card__title">Tenant Branding</p>
-        </div>
-        <div className="admin-card__body">
-          <form onSubmit={(e) => { void handleSubmit(e); }} className="admin-form">
-            <div className="field">
-              <label className="field__label" htmlFor="app-name">App name</label>
-              <input
-                id="app-name"
-                className="field__input"
-                type="text"
-                value={appName}
-                onChange={(e) => setAppName(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="logo-url">Logo URL</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  id="logo-url"
-                  className="field__input"
-                  type="text"
-                  value={logoUrl}
-                  onChange={(e) => setLogoUrl(e.target.value)}
-                  placeholder="https://example.com/logo.png"
-                  style={{ flex: 1 }}
-                />
-                <label htmlFor="logo-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
-                  {isUploading ? "Uploading…" : "Upload"}
-                </label>
-                <input
-                  id="logo-file"
-                  type="file"
-                  aria-label="Upload logo image"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
-                  onChange={(e) => { void handleLogoFileChange(e); }}
-                  disabled={isUploading}
-                  data-testid="logo-file-input"
-                  style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
-                />
-              </div>
-              {uploadError && <span className="field__error">{uploadError}</span>}
-              {uploadLogoSuccess && (
-                <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
-                  Logo uploaded successfully
-                </p>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="favicon-url">Favicon URL</label>
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                <input
-                  id="favicon-url"
-                  className="field__input"
-                  type="text"
-                  value={faviconUrl ?? ""}
-                  onChange={(e) => setFaviconUrl(e.target.value || null)}
-                  placeholder="https://example.com/favicon.ico"
-                  style={{ flex: 1 }}
-                />
-                <label htmlFor="favicon-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
-                  {isUploadingFavicon ? "Uploading…" : "Upload"}
-                </label>
-                <input
-                  id="favicon-file"
-                  type="file"
-                  aria-label="Upload favicon image"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon"
-                  onChange={(e) => { void handleFaviconFileChange(e); }}
-                  disabled={isUploadingFavicon}
-                  data-testid="favicon-file-input"
-                  style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
-                />
-              </div>
-              {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
-              {uploadFaviconSuccess && (
-                <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
-                  Favicon uploaded successfully
-                </p>
-              )}
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="primary-colour-text">Primary colour</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input
-                  id="primary-colour-picker"
-                  type="color"
-                  value={pickerValue}
-                  onChange={(e) => setPrimaryColour(e.target.value)}
-                  aria-label="Primary colour picker"
-                  style={{ width: 40, height: 36, padding: 0, border: "1px solid var(--border)", borderRadius: "var(--r-md)", cursor: "pointer" }}
-                />
-                <input
-                  id="primary-colour-text"
-                  className="field__input"
-                  type="text"
-                  value={primaryColour}
-                  onChange={(e) => setPrimaryColour(e.target.value)}
-                  placeholder="#005f73"
-                  style={{ flex: 1 }}
-                />
-              </div>
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="support-email">Support email</label>
-              <input
-                id="support-email"
-                className="field__input"
-                type="email"
-                value={supportEmail}
-                onChange={(e) => setSupportEmail(e.target.value)}
-                placeholder="support@example.com"
-              />
-            </div>
-
-            {saveSuccess && (
-              <p style={{ color: "var(--green)", marginBottom: 12 }}>Settings saved.</p>
-            )}
-            {saveError && (
-              <p className="field__error" style={{ marginBottom: 12 }}>{saveError}</p>
-            )}
-            {(uploadLogoSuccess || uploadFaviconSuccess) && (
-              <p
-                role="status"
-                style={{
-                  color: "var(--amber)",
-                  background: "var(--amber-bg)",
-                  border: "1px solid #F6C190",
-                  borderRadius: "var(--r-md)",
-                  padding: "8px 12px",
-                  fontSize: "0.875rem",
-                  marginBottom: 12,
-                }}
-              >
-                Save settings to apply the changes
-              </p>
-            )}
-
-            <button
-              type="submit"
-              className="btn btn--primary"
-              disabled={isSaving}
-              data-testid="branding-save-btn"
-            >
-              {isSaving ? "Saving…" : "Save"}
-            </button>
-          </form>
-        </div>
+      {/* Tab navigation */}
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        style={{ display: "flex", gap: 0, borderBottom: "2px solid var(--border)", marginBottom: 24 }}
+      >
+        <button
+          role="tab"
+          aria-selected={activeTab === "ui-theme"}
+          aria-controls="tab-panel-ui-theme"
+          id="tab-ui-theme"
+          type="button"
+          onClick={() => setActiveTab("ui-theme")}
+          style={{
+            padding: "10px 20px",
+            background: "none",
+            border: "none",
+            borderBottom: activeTab === "ui-theme" ? "3px solid var(--navy)" : "3px solid transparent",
+            fontWeight: activeTab === "ui-theme" ? 700 : 400,
+            color: activeTab === "ui-theme" ? "var(--navy)" : "var(--text-secondary)",
+            cursor: "pointer",
+            marginBottom: -2,
+            fontSize: "0.9rem",
+          }}
+        >
+          UI &amp; Theme
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "email-server"}
+          aria-controls="tab-panel-email-server"
+          id="tab-email-server"
+          type="button"
+          onClick={() => setActiveTab("email-server")}
+          style={{
+            padding: "10px 20px",
+            background: "none",
+            border: "none",
+            borderBottom: activeTab === "email-server" ? "3px solid var(--navy)" : "3px solid transparent",
+            fontWeight: activeTab === "email-server" ? 700 : 400,
+            color: activeTab === "email-server" ? "var(--navy)" : "var(--text-secondary)",
+            cursor: "pointer",
+            marginBottom: -2,
+            fontSize: "0.9rem",
+          }}
+        >
+          Email Server
+        </button>
+        <button
+          role="tab"
+          aria-selected={activeTab === "user-management"}
+          aria-controls="tab-panel-user-management"
+          id="tab-user-management"
+          type="button"
+          onClick={() => setActiveTab("user-management")}
+          style={{
+            padding: "10px 20px",
+            background: "none",
+            border: "none",
+            borderBottom: activeTab === "user-management" ? "3px solid var(--navy)" : "3px solid transparent",
+            fontWeight: activeTab === "user-management" ? 700 : 400,
+            color: activeTab === "user-management" ? "var(--navy)" : "var(--text-secondary)",
+            cursor: "pointer",
+            marginBottom: -2,
+            fontSize: "0.9rem",
+          }}
+        >
+          User Management
+        </button>
       </div>
 
-      <div className="admin-card">
-        <div className="admin-card__header">
-          <p className="admin-card__title">Mail Server</p>
+      {/* UI & Theme tab */}
+      {activeTab === "ui-theme" && (
+        <div
+          role="tabpanel"
+          id="tab-panel-ui-theme"
+          aria-labelledby="tab-ui-theme"
+        >
+          <div className="admin-card">
+            <div className="admin-card__header">
+              <p className="admin-card__title">Tenant Branding</p>
+            </div>
+            <div className="admin-card__body">
+              <form onSubmit={(e) => { void handleSubmit(e); }} className="admin-form">
+                <div className="field">
+                  <label className="field__label" htmlFor="app-name">App name</label>
+                  <input
+                    id="app-name"
+                    className="field__input"
+                    type="text"
+                    value={appName}
+                    onChange={(e) => setAppName(e.target.value)}
+                    required
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="logo-url">Logo URL</label>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      id="logo-url"
+                      className="field__input"
+                      type="text"
+                      value={logoUrl}
+                      onChange={(e) => setLogoUrl(e.target.value)}
+                      placeholder="https://example.com/logo.png"
+                      style={{ flex: 1 }}
+                    />
+                    <label htmlFor="logo-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
+                      {isUploading ? "Uploading…" : "Upload"}
+                    </label>
+                    <input
+                      id="logo-file"
+                      type="file"
+                      aria-label="Upload logo image"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
+                      onChange={(e) => { void handleLogoFileChange(e); }}
+                      disabled={isUploading}
+                      data-testid="logo-file-input"
+                      style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
+                    />
+                  </div>
+                  {uploadError && <span className="field__error">{uploadError}</span>}
+                  {uploadLogoSuccess && (
+                    <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
+                      Logo uploaded successfully
+                    </p>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="favicon-url">Favicon URL</label>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      id="favicon-url"
+                      className="field__input"
+                      type="text"
+                      value={faviconUrl ?? ""}
+                      onChange={(e) => setFaviconUrl(e.target.value || null)}
+                      placeholder="https://example.com/favicon.ico"
+                      style={{ flex: 1 }}
+                    />
+                    <label htmlFor="favicon-file" className="btn btn--secondary" style={{ whiteSpace: "nowrap" }}>
+                      {isUploadingFavicon ? "Uploading…" : "Upload"}
+                    </label>
+                    <input
+                      id="favicon-file"
+                      type="file"
+                      aria-label="Upload favicon image"
+                      accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/x-icon"
+                      onChange={(e) => { void handleFaviconFileChange(e); }}
+                      disabled={isUploadingFavicon}
+                      data-testid="favicon-file-input"
+                      style={{ position: "absolute", opacity: 0, width: "1px", height: "1px" }}
+                    />
+                  </div>
+                  {uploadFaviconError && <span className="field__error">{uploadFaviconError}</span>}
+                  {uploadFaviconSuccess && (
+                    <p role="status" style={{ color: "var(--green)", fontSize: "0.875rem", marginTop: 4 }}>
+                      Favicon uploaded successfully
+                    </p>
+                  )}
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="primary-colour-text">Primary colour</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <input
+                      id="primary-colour-picker"
+                      type="color"
+                      value={pickerValue}
+                      onChange={(e) => setPrimaryColour(e.target.value)}
+                      aria-label="Primary colour picker"
+                      style={{ width: 40, height: 36, padding: 0, border: "1px solid var(--border)", borderRadius: "var(--r-md)", cursor: "pointer" }}
+                    />
+                    <input
+                      id="primary-colour-text"
+                      className="field__input"
+                      type="text"
+                      value={primaryColour}
+                      onChange={(e) => setPrimaryColour(e.target.value)}
+                      placeholder="#005f73"
+                      style={{ flex: 1 }}
+                    />
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="support-email">Support email</label>
+                  <input
+                    id="support-email"
+                    className="field__input"
+                    type="email"
+                    value={supportEmail}
+                    onChange={(e) => setSupportEmail(e.target.value)}
+                    placeholder="support@example.com"
+                  />
+                </div>
+
+                {saveSuccess && (
+                  <p style={{ color: "var(--green)", marginBottom: 12 }}>Settings saved.</p>
+                )}
+                {saveError && (
+                  <p className="field__error" style={{ marginBottom: 12 }}>{saveError}</p>
+                )}
+                {(uploadLogoSuccess || uploadFaviconSuccess) && (
+                  <p
+                    role="status"
+                    style={{
+                      color: "var(--amber)",
+                      background: "var(--amber-bg)",
+                      border: "1px solid #F6C190",
+                      borderRadius: "var(--r-md)",
+                      padding: "8px 12px",
+                      fontSize: "0.875rem",
+                      marginBottom: 12,
+                    }}
+                  >
+                    Save settings to apply the changes
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={isSaving}
+                  data-testid="branding-save-btn"
+                >
+                  {isSaving ? "Saving…" : "Save"}
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
-        <div className="admin-card__body">
-          {isSmtpUnconfigured && (
-            <div className="warning-banner" role="alert">
-              ⚠️ Mail server is not configured — emails will not be sent until SMTP settings are saved.
-            </div>
-          )}
-          <form onSubmit={(e) => { void handleSmtpSubmit(e); }} className="admin-form">
-            <div className="field">
-              <label className="field__label" htmlFor="smtp-host">Host</label>
-              <input
-                id="smtp-host"
-                className="field__input"
-                type="text"
-                value={smtpHost}
-                onChange={(e) => setSmtpHost(e.target.value)}
-                required
-                placeholder="smtp.example.com"
-              />
-            </div>
+      )}
 
-            <div className="field">
-              <label className="field__label" htmlFor="smtp-port">Port</label>
-              <input
-                id="smtp-port"
-                className="field__input"
-                type="number"
-                min={1}
-                max={65535}
-                value={smtpPort}
-                onChange={(e) => setSmtpPort(Number(e.target.value))}
-                required
-              />
+      {/* Email Server tab */}
+      {activeTab === "email-server" && (
+        <div
+          role="tabpanel"
+          id="tab-panel-email-server"
+          aria-labelledby="tab-email-server"
+        >
+          <div className="admin-card">
+            <div className="admin-card__header">
+              <p className="admin-card__title">Mail Server</p>
             </div>
+            <div className="admin-card__body">
+              {isSmtpUnconfigured && (
+                <div className="warning-banner" role="alert">
+                  ⚠️ Mail server is not configured — emails will not be sent until SMTP settings are saved.
+                </div>
+              )}
+              <form onSubmit={(e) => { void handleSmtpSubmit(e); }} className="admin-form">
+                <div className="field">
+                  <label className="field__label" htmlFor="smtp-host">Host</label>
+                  <input
+                    id="smtp-host"
+                    className="field__input"
+                    type="text"
+                    value={smtpHost}
+                    onChange={(e) => setSmtpHost(e.target.value)}
+                    required
+                    placeholder="smtp.example.com"
+                  />
+                </div>
 
-            <div className="field">
-              <label className="field__label" htmlFor="smtp-username">Username</label>
-              <input
-                id="smtp-username"
-                className="field__input"
-                type="text"
-                value={smtpUsername}
-                onChange={(e) => setSmtpUsername(e.target.value)}
-                required
-                placeholder="user@example.com"
-              />
+                <div className="field">
+                  <label className="field__label" htmlFor="smtp-port">Port</label>
+                  <input
+                    id="smtp-port"
+                    className="field__input"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={smtpPort}
+                    onChange={(e) => setSmtpPort(Number(e.target.value))}
+                    required
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="smtp-username">Username</label>
+                  <input
+                    id="smtp-username"
+                    className="field__input"
+                    type="text"
+                    value={smtpUsername}
+                    onChange={(e) => setSmtpUsername(e.target.value)}
+                    required
+                    placeholder="user@example.com"
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="smtp-from-email">From email address</label>
+                  <input
+                    id="smtp-from-email"
+                    className="field__input"
+                    type="email"
+                    value={smtpFromEmail}
+                    onChange={(e) => setSmtpFromEmail(e.target.value)}
+                    required
+                    placeholder="noreply@example.com"
+                  />
+                </div>
+
+                <div className="field">
+                  <label className="field__label" htmlFor="smtp-password">Password</label>
+                  <input
+                    id="smtp-password"
+                    className="field__input"
+                    type="password"
+                    value={smtpPassword}
+                    onChange={(e) => setSmtpPassword(e.target.value)}
+                    placeholder={smtpPasswordIsSet ? "Enter new password to change" : "Enter password"}
+                    autoComplete="new-password"
+                  />
+                </div>
+
+                {smtpSaveSuccess && (
+                  <p style={{ color: "var(--green)", marginBottom: 12 }}>SMTP settings saved.</p>
+                )}
+                {smtpSaveError && (
+                  <p className="field__error" style={{ marginBottom: 12 }}>{smtpSaveError}</p>
+                )}
+
+                {smtpTestResult && (
+                  <p
+                    style={{
+                      color: smtpTestResult.ok ? "var(--green)" : "var(--red)",
+                      marginBottom: 12,
+                    }}
+                    role="status"
+                  >
+                    {smtpTestResult.message}
+                  </p>
+                )}
+
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="submit"
+                    className="btn btn--primary"
+                    data-testid="smtp-save-btn"
+                    disabled={isSmtpSaving}
+                  >
+                    {isSmtpSaving ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    disabled={isTestingSmtp || isSmtpUnconfigured}
+                    onClick={() => { setSmtpTestResult(null); setShowTestEmailModal(true); }}
+                  >
+                    {isTestingSmtp ? "Sending…" : "Send test email"}
+                  </button>
+                </div>
+              </form>
             </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="smtp-from-email">From email address</label>
-              <input
-                id="smtp-from-email"
-                className="field__input"
-                type="email"
-                value={smtpFromEmail}
-                onChange={(e) => setSmtpFromEmail(e.target.value)}
-                required
-                placeholder="noreply@example.com"
-              />
-            </div>
-
-            <div className="field">
-              <label className="field__label" htmlFor="smtp-password">Password</label>
-              <input
-                id="smtp-password"
-                className="field__input"
-                type="password"
-                value={smtpPassword}
-                onChange={(e) => setSmtpPassword(e.target.value)}
-                placeholder={smtpPasswordIsSet ? "Enter new password to change" : "Enter password"}
-                autoComplete="new-password"
-              />
-            </div>
-
-            {smtpSaveSuccess && (
-              <p style={{ color: "var(--green)", marginBottom: 12 }}>SMTP settings saved.</p>
-            )}
-            {smtpSaveError && (
-              <p className="field__error" style={{ marginBottom: 12 }}>{smtpSaveError}</p>
-            )}
-
-            {smtpTestResult && (
-              <p
-                style={{
-                  color: smtpTestResult.ok ? "var(--green)" : "var(--red)",
-                  marginBottom: 12,
-                }}
-                role="status"
-              >
-                {smtpTestResult.message}
-              </p>
-            )}
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="submit"
-                className="btn btn--primary"
-                data-testid="smtp-save-btn"
-                disabled={isSmtpSaving}
-              >
-                {isSmtpSaving ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                disabled={isTestingSmtp || isSmtpUnconfigured}
-                onClick={() => { setSmtpTestResult(null); setShowTestEmailModal(true); }}
-              >
-                {isTestingSmtp ? "Sending…" : "Send test email"}
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
-      </div>
+      )}
 
+      {/* User Management tab */}
+      {activeTab === "user-management" && (
+        <div
+          role="tabpanel"
+          id="tab-panel-user-management"
+          aria-labelledby="tab-user-management"
+        >
+          <div className="admin-card">
+            <div className="admin-card__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <p className="admin-card__title">Admin Users</p>
+              {!showInviteForm && (
+                <button
+                  type="button"
+                  className="btn btn--primary"
+                  onClick={() => { setShowInviteForm(true); setInviteError(""); setInviteSuccess(""); }}
+                >
+                  Invite admin
+                </button>
+              )}
+            </div>
+            <div className="admin-card__body">
+              {showInviteForm && (
+                <form onSubmit={(e) => { void handleInviteSubmit(e); }} className="admin-form" style={{ marginBottom: 24 }}>
+                  <div className="field">
+                    <label className="field__label" htmlFor="invite-email">Email address</label>
+                    <input
+                      id="invite-email"
+                      className="field__input"
+                      type="email"
+                      value={inviteEmail}
+                      onChange={(e) => setInviteEmail(e.target.value)}
+                      placeholder="newadmin@example.com"
+                      required
+                      autoFocus
+                    />
+                  </div>
+                  {inviteError && (
+                    <p className="field__error" style={{ marginBottom: 12 }}>{inviteError}</p>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button
+                      type="submit"
+                      className="btn btn--primary"
+                      disabled={isInviting}
+                    >
+                      {isInviting ? "Sending…" : "Send invite"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => { setShowInviteForm(false); setInviteEmail(""); setInviteError(""); }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              )}
+
+              {inviteSuccess && (
+                <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{inviteSuccess}</p>
+              )}
+
+              {removeSuccess && (
+                <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{removeSuccess}</p>
+              )}
+
+              {removeError && (
+                <p className="state-message state-message--error">{removeError}</p>
+              )}
+
+              {usersLoading && (
+                <p className="state-message">Loading users…</p>
+              )}
+
+              {usersError && !usersLoading && (
+                <p className="state-message state-message--error">Failed to load users.</p>
+              )}
+
+              {!usersLoading && !usersError && users.length === 0 && (
+                <p className="state-message">No admin users found.</p>
+              )}
+
+              {!usersLoading && !usersError && users.length > 0 && (
+                <div className="admin-table-wrapper">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Email</th>
+                        <th>Created</th>
+                        <th></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {users.map((user) => (
+                        <tr key={user.id}>
+                          <td>
+                            {user.email}
+                            {user.id === currentUserId && (
+                              <span style={{ color: "var(--text-muted)", marginLeft: 6, fontSize: "0.85em" }}>(you)</span>
+                            )}
+                          </td>
+                          <td>
+                            {new Date(user.created_at).toLocaleDateString("en-AU")}
+                          </td>
+                          <td>
+                            {user.id !== currentUserId && (
+                              <button
+                                type="button"
+                                className="btn btn--danger"
+                                onClick={() => { setRemoveConfirmUser(user); setRemoveError(""); setRemoveSuccess(""); }}
+                                disabled={isRemoving}
+                              >
+                                Remove
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Test email modal */}
       {showTestEmailModal && (
         <div
           className="dialog-overlay"
@@ -508,6 +817,58 @@ export default function SettingsPage() {
                 onClick={() => { void handleSmtpTest(); }}
               >
                 Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remove user confirmation modal */}
+      {removeConfirmUser && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="remove-user-dialog-title"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff",
+              borderRadius: "var(--r-md)",
+              padding: 32,
+              minWidth: 360,
+              maxWidth: 480,
+              width: "100%",
+              boxShadow: "var(--shadow-lg)",
+            }}
+          >
+            <h2 id="remove-user-dialog-title" style={{ marginTop: 0, marginBottom: 16 }}>Remove user?</h2>
+            <p style={{ marginBottom: 24 }}>
+              Remove <strong>{removeConfirmUser.email}</strong>? They will lose admin access immediately.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => setRemoveConfirmUser(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--danger"
+                disabled={isRemoving}
+                onClick={() => { void handleRemoveConfirm(); }}
+              >
+                Remove
               </button>
             </div>
           </div>

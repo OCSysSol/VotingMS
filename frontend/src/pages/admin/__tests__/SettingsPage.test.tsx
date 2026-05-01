@@ -1,16 +1,29 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import SettingsPage from "../SettingsPage";
-import { resetConfigFixture } from "../../../../tests/msw/handlers";
+import { resetConfigFixture, resetAdminUsersFixture, CURRENT_USER_ID, ADMIN_USER_CURRENT, ADMIN_USER_OTHER } from "../../../../tests/msw/handlers";
 import * as configApi from "../../../api/config";
+import * as usersApi from "../../../api/users";
 import { vi } from "vitest";
+import { authClient } from "../../../lib/auth-client";
 
 const BASE = "http://localhost";
+
+// Mock authClient so getSession returns a predictable current user.
+// NOTE: vi.mock is hoisted before imports, so we cannot use imported constants here.
+// The literal "current-admin-id" must match CURRENT_USER_ID exported from handlers.ts.
+vi.mock("../../../lib/auth-client", () => ({
+  authClient: {
+    getSession: vi.fn().mockResolvedValue({
+      data: { user: { id: "current-admin-id" } },
+    }),
+  },
+}));
 
 function renderPage() {
   const qc = new QueryClient({
@@ -28,6 +41,7 @@ function renderPage() {
 describe("SettingsPage", () => {
   beforeEach(() => {
     resetConfigFixture();
+    resetAdminUsersFixture();
   });
 
   // --- Happy path ---
@@ -37,7 +51,22 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Loading settings…")).toBeInTheDocument();
   });
 
-  it("renders form fields after config loads", async () => {
+  it("renders tab navigation after config loads", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "UI & Theme" })).toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument();
+  });
+
+  it("UI & Theme tab is active by default", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "UI & Theme" })).toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "UI & Theme" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "Email Server" })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "User Management" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("renders form fields after config loads on UI & Theme tab", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
     expect(screen.getByLabelText("Logo URL")).toBeInTheDocument();
@@ -62,7 +91,7 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument());
   });
 
-  it("shows Save button after loading", async () => {
+  it("shows Save button after loading on UI & Theme tab", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
   });
@@ -651,11 +680,68 @@ describe("SettingsPage", () => {
     expect(screen.queryByText(/HTTP 502/)).not.toBeInTheDocument();
   });
 
+  // --- Tab switching ---
+
+  it("clicking Email Server tab shows SMTP form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    await waitFor(() => expect(screen.getByText("Mail Server")).toBeInTheDocument());
+    expect(screen.getByLabelText("Host")).toBeInTheDocument();
+  });
+
+  it("clicking User Management tab shows users section", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText("Admin Users")).toBeInTheDocument());
+  });
+
+  it("Email Server tab becomes active after click", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    expect(screen.getByRole("tab", { name: "Email Server" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: "UI & Theme" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("User Management tab becomes active after click", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    expect(screen.getByRole("tab", { name: "User Management" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("branding form is hidden when Email Server tab is active", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    expect(screen.queryByLabelText("App name")).not.toBeInTheDocument();
+  });
+
+  it("clicking UI & Theme tab from Email Server tab restores branding form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    expect(screen.queryByLabelText("App name")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "UI & Theme" }));
+    await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
+    expect(screen.getByRole("tab", { name: "UI & Theme" })).toHaveAttribute("aria-selected", "true");
+  });
+
   // --- Mail Server (SMTP) section ---
 
   it("updates SMTP port field on user input", async () => {
     const user = userEvent.setup();
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Port")).toBeInTheDocument());
     const portInput = screen.getByLabelText("Port");
     await user.clear(portInput);
@@ -663,8 +749,11 @@ describe("SettingsPage", () => {
     expect(portInput).toHaveValue(465);
   });
 
-  it("renders Mail Server section after loading", async () => {
+  it("renders Mail Server section after switching to Email Server tab", async () => {
+    const user = userEvent.setup();
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByText("Mail Server")).toBeInTheDocument());
     expect(screen.getByLabelText("Host")).toBeInTheDocument();
     expect(screen.getByLabelText("Port")).toBeInTheDocument();
@@ -674,6 +763,7 @@ describe("SettingsPage", () => {
   });
 
   it("shows unconfigured notice when SMTP is not set up", async () => {
+    const user = userEvent.setup();
     server.use(
       http.get(`${BASE}/api/admin/config/smtp`, () =>
         HttpResponse.json({
@@ -686,12 +776,15 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() =>
       expect(screen.getByText(/Mail server is not configured/)).toBeInTheDocument()
     );
   });
 
   it("does not show unconfigured notice when SMTP is configured", async () => {
+    const user = userEvent.setup();
     server.use(
       http.get(`${BASE}/api/admin/config/smtp`, () =>
         HttpResponse.json({
@@ -704,6 +797,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByText("Mail Server")).toBeInTheDocument());
     expect(screen.queryByText(/Mail server is not configured/)).not.toBeInTheDocument();
   });
@@ -731,6 +826,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Host")).toBeInTheDocument());
 
     await user.clear(screen.getByLabelText("Host"));
@@ -741,9 +838,7 @@ describe("SettingsPage", () => {
     await user.type(screen.getByLabelText("From email address"), "from@example.com");
     await user.type(screen.getByLabelText("Password"), "secret");
 
-    const saveBtns = screen.getAllByRole("button", { name: "Save" });
-    // SMTP save button is the second Save button
-    await user.click(saveBtns[1]);
+    await user.click(screen.getByTestId("smtp-save-btn"));
 
     await waitFor(() => expect(screen.getByText("SMTP settings saved.")).toBeInTheDocument());
   });
@@ -765,13 +860,15 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
-    const saveBtns = screen.getAllByRole("button", { name: "Save" });
-    await user.click(saveBtns[1]);
+    await user.click(screen.getByTestId("smtp-save-btn"));
     await waitFor(() => expect(screen.getByText(/HTTP 422|Validation error/)).toBeInTheDocument());
   });
 
   it("shows fallback error when SMTP save throws non-Error", async () => {
+    const user = userEvent.setup();
     server.use(
       http.get(`${BASE}/api/admin/config/smtp`, () =>
         HttpResponse.json({
@@ -785,9 +882,10 @@ describe("SettingsPage", () => {
     );
     vi.spyOn(configApi, "updateSmtpConfig").mockRejectedValueOnce("smtp string error");
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
-    const saveBtns = screen.getAllByRole("button", { name: "Save" });
-    await userEvent.setup().click(saveBtns[1]);
+    await user.click(screen.getByTestId("smtp-save-btn"));
     await waitFor(() => expect(screen.getByText("Failed to save SMTP settings.")).toBeInTheDocument());
   });
 
@@ -805,6 +903,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -830,6 +930,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -852,6 +954,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -876,6 +980,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -900,6 +1006,8 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -924,6 +1032,8 @@ describe("SettingsPage", () => {
     vi.spyOn(configApi, "testSmtpConfig").mockRejectedValueOnce("smtp plain error");
     const user = userEvent.setup();
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -956,11 +1066,12 @@ describe("SettingsPage", () => {
       })
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
-    const saveBtns = screen.getAllByRole("button", { name: "Save" });
-    await user.click(saveBtns[1]);
+    await user.click(screen.getByTestId("smtp-save-btn"));
     expect(screen.getByRole("button", { name: "Saving…" })).toBeDisabled();
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Save" }).length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("smtp-save-btn")).not.toBeDisabled());
   });
 
   it("Send test email shows Sending state while in-flight", async () => {
@@ -981,6 +1092,8 @@ describe("SettingsPage", () => {
     );
     const user = userEvent.setup();
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Send test email" })).not.toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Send test email" }));
     await waitFor(() => expect(screen.getByLabelText("Recipient email")).toBeInTheDocument());
@@ -1005,13 +1118,348 @@ describe("SettingsPage", () => {
       )
     );
     renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
     await waitFor(() => expect(screen.getByLabelText("Host")).toHaveValue("smtp.example.com"));
-    const saveBtns = screen.getAllByRole("button", { name: "Save" });
-    await user.click(saveBtns[1]);
+    await user.click(screen.getByTestId("smtp-save-btn"));
     await waitFor(() => expect(screen.getByText("SMTP settings saved.")).toBeInTheDocument());
     act(() => vi.advanceTimersByTime(3100));
     await waitFor(() => expect(screen.queryByText("SMTP settings saved.")).not.toBeInTheDocument());
     vi.useRealTimers();
   });
 
+  // --- User Management tab ---
+
+  it("shows loading state while fetching users", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/users`, async () => {
+        await new Promise((r) => setTimeout(r, 100));
+        return HttpResponse.json({ users: [] });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    expect(screen.getByText("Loading users…")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Loading users…")).not.toBeInTheDocument());
+  });
+
+  it("renders user table with email and created date after loading", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeInTheDocument());
+    expect(screen.getByText(ADMIN_USER_OTHER.email)).toBeInTheDocument();
+    // Check created date is formatted
+    const expectedDate = new Date(ADMIN_USER_CURRENT.created_at).toLocaleDateString("en-AU");
+    expect(screen.getByText(expectedDate)).toBeInTheDocument();
+  });
+
+  it("shows (you) marker on current user row", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeInTheDocument());
+    expect(screen.getByText("(you)")).toBeInTheDocument();
+  });
+
+  it("hides Remove button for current user row", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeInTheDocument());
+    // Only one Remove button (for the other user), not two
+    const removeBtns = screen.getAllByRole("button", { name: "Remove" });
+    expect(removeBtns).toHaveLength(1);
+  });
+
+  it("shows Remove button for other user rows", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_OTHER.email)).toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument();
+  });
+
+  it("shows empty state when no users returned", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/users`, () => HttpResponse.json({ users: [] }))
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText("No admin users found.")).toBeInTheDocument());
+  });
+
+  it("shows error state when users fetch fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/users`, () =>
+        HttpResponse.json({ detail: "Not configured" }, { status: 503 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText("Failed to load users.")).toBeInTheDocument());
+  });
+
+  it("shows Invite admin button on User Management tab", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+  });
+
+  it("clicking Invite admin shows inline form", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    expect(screen.getByLabelText("Email address")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send invite" })).toBeInTheDocument();
+  });
+
+  it("Cancel collapses invite form without calling API", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(usersApi, "inviteAdminUser");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("invite flow: submitting valid email shows success and new user in table", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "newuser@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await waitFor(() => expect(screen.getByText(/Invite sent to newuser@example.com/)).toBeInTheDocument());
+    // New user should appear in table
+    expect(screen.getByText("newuser@example.com")).toBeInTheDocument();
+    // Form is hidden after success
+    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
+  });
+
+  it("invite flow: 409 duplicate shows inline error", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "duplicate@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await waitFor(() =>
+      expect(screen.getByText("A user with that email already exists.")).toBeInTheDocument()
+    );
+  });
+
+  it("invite flow: send invite button is disabled while in flight", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${BASE}/api/admin/users/invite`, async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({ id: "new-id", email: "slow@example.com", created_at: new Date().toISOString() }, { status: 201 });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "slow@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
+    await waitFor(() => expect(screen.getByText(/Invite sent to slow@example.com/)).toBeInTheDocument());
+  });
+
+  it("invite flow: fallback error for non-Error thrown value", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(usersApi, "inviteAdminUser").mockRejectedValueOnce("plain string error");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "test@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await waitFor(() => expect(screen.getByText("Failed to send invite.")).toBeInTheDocument());
+  });
+
+  it("remove flow: clicking Remove shows confirmation dialog", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    expect(dialog).toBeInTheDocument();
+    // The dialog body mentions the email in a <strong> tag
+    expect(dialog.querySelector("strong")?.textContent).toBe(ADMIN_USER_OTHER.email);
+  });
+
+  it("remove flow: Cancel in confirmation closes dialog", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    // Cancel is inside the dialog
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Remove user?" })).not.toBeInTheDocument();
+  });
+
+  it("remove flow: confirming removes user row and shows success", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    // Confirm removal using the dialog's danger button
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByText("User removed.")).toBeInTheDocument());
+    expect(screen.queryByText(ADMIN_USER_OTHER.email)).not.toBeInTheDocument();
+  });
+
+  it("remove flow: 409 last admin shows inline error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.delete(`${BASE}/api/admin/users/:userId`, () =>
+        HttpResponse.json({ detail: "Cannot remove the last admin user." }, { status: 409 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(screen.getByText("Cannot remove the last admin user.")).toBeInTheDocument()
+    );
+  });
+
+  it("remove flow: 403 self-removal shows inline error", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.delete(`${BASE}/api/admin/users/:userId`, () =>
+        HttpResponse.json({ detail: "Cannot remove yourself." }, { status: 403 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() =>
+      expect(screen.getByText("Cannot remove yourself.")).toBeInTheDocument()
+    );
+  });
+
+  it("remove flow: UI has NOT transitioned while async removal is pending, and HAS transitioned after it completes", async () => {
+    // This test asserts the async UI transition: while removal is in-flight the
+    // Remove button is disabled and the success message has NOT appeared; after
+    // the request completes the user row is gone and the success message shows.
+    const user = userEvent.setup();
+    server.use(
+      http.delete(`${BASE}/api/admin/users/:userId`, async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return new HttpResponse(null, { status: 204 });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    // Immediately after confirm: dialog is gone, but success message has NOT appeared yet
+    expect(screen.queryByRole("dialog", { name: "Remove user?" })).not.toBeInTheDocument();
+    expect(screen.queryByText("User removed.")).not.toBeInTheDocument();
+    // After the request completes, success message appears and user row is gone
+    await waitFor(() => expect(screen.getByText("User removed.")).toBeInTheDocument());
+    expect(screen.queryByText(ADMIN_USER_OTHER.email)).not.toBeInTheDocument();
+  });
+
+  it("remove flow: fallback error for non-Error thrown value", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(usersApi, "removeAdminUser").mockRejectedValueOnce("plain string error");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByText("Failed to remove user.")).toBeInTheDocument());
+  });
+
+  it("shows all users as non-current when session returns null user", async () => {
+    // Exercises the `?? null` branch on line 99 — session has no user id
+    vi.mocked(authClient.getSession).mockResolvedValueOnce(null as never);
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeInTheDocument());
+    // With no current user id, no "(you)" marker should be shown
+    expect(screen.queryByText("(you)")).not.toBeInTheDocument();
+    // Both users should show Remove buttons
+    expect(screen.getAllByRole("button", { name: "Remove" })).toHaveLength(2);
+  });
+
+  it("multi-step: invite then remove full sequence", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    // Navigate to User Management
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+
+    // Step 1: Invite a user
+    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await user.type(screen.getByLabelText("Email address"), "sequence@example.com");
+    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await waitFor(() => expect(screen.getByText(/Invite sent to sequence@example.com/)).toBeInTheDocument());
+    expect(screen.getByText("sequence@example.com")).toBeInTheDocument();
+
+    // Step 2: Remove the newly invited user
+    // The new user row has a Remove button (it's not the current user)
+    // Find Remove button for the newly added user row by querying all Remove buttons
+    const removeBtns = screen.getAllByRole("button", { name: "Remove" });
+    // Click the last Remove button which belongs to the newly added user
+    await user.click(removeBtns[removeBtns.length - 1]);
+    const dialog = screen.getByRole("dialog", { name: "Remove user?" });
+    await user.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByText("User removed.")).toBeInTheDocument());
+    expect(screen.queryByText("sequence@example.com")).not.toBeInTheDocument();
+  });
 });

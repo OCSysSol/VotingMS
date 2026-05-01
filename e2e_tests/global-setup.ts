@@ -34,6 +34,8 @@ const E2E_TESTS_DIR = process.env.GITHUB_WORKSPACE
   ? path.join(process.env.GITHUB_WORKSPACE, "e2e_tests")
   : __dirname;
 
+// ADMIN_USERNAME must be a valid email address (Better Auth requires email-based auth).
+// Falls back to a local-dev default. In CI this is set from the ADMIN_USERNAME GitHub secret.
 const ADMIN_EMAIL = process.env.ADMIN_USERNAME ?? "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin";
 
@@ -156,6 +158,40 @@ export default async function globalSetup(_config: FullConfig) {
   // project tests (smoke, voting-flow) that don't need an admin session but
   // still need to bypass Vercel Deployment Protection on preview URLs.
   await context.storageState({ path: path.join(authDir, "public.json") });
+
+  // ── Provision admin user (idempotent) ──────────────────────────────────────
+  // Each Neon branch gets its own Better Auth instance with an empty user table.
+  // Before the first E2E run on a fresh branch, the admin user does not exist,
+  // so sign-in would fail with INVALID_EMAIL_OR_PASSWORD.
+  //
+  // POST /api/admin/auth/provision is a TESTING_MODE-gated server-side endpoint
+  // that creates the admin user directly in Neon Auth via a server-to-server
+  // sign-up call (bypassing the auth proxy blocklist that prevents external
+  // callers from self-registering).  The endpoint is idempotent — if the user
+  // already exists the upstream 4xx is silently ignored and 204 is returned.
+  //
+  // The bypass header is included because Vercel Deployment Protection is active.
+  {
+    const provisionHeaders: HeadersInit = {
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    };
+    if (BYPASS_TOKEN) provisionHeaders["x-vercel-protection-bypass"] = BYPASS_TOKEN;
+    try {
+      const provisionRes = await fetch(`${baseURL}/api/admin/auth/provision`, {
+        method: "POST",
+        headers: provisionHeaders,
+        body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" }),
+      });
+      if (!provisionRes.ok && provisionRes.status !== 204) {
+        // 4xx/5xx from the provision endpoint itself (not the upstream auth) is unexpected.
+        // Log but do not throw — the sign-in below will surface any real auth failure.
+        console.warn(`[global-setup] provision endpoint returned ${provisionRes.status}`);
+      }
+    } catch {
+      // Network errors during provisioning are non-fatal — sign-in will surface any real failure.
+    }
+  }
 
   await page.goto("/admin/login", { waitUntil: "domcontentloaded" });
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
