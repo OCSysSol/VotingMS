@@ -424,12 +424,12 @@ async def test_invite_admin_user_happy_path():
     create_call_kwargs = mock_client.post.call_args_list[0].kwargs
     assert create_call_kwargs["json"]["name"] == "admin"
 
-    # The reset call must send Origin header (required by Neon Auth) and must NOT
-    # send redirectTo (Neon Auth rejects any explicit redirectTo that is not in its
-    # registered trusted origins — omitting it lets Neon Auth use the origin instead).
+    # The reset call must send Origin header (required by Neon Auth) and redirectTo
+    # pointing to /admin/login on the same origin — matching the auth_proxy.py pattern
+    # so the invite email links back to the correct deployment's admin login page.
     reset_call_kwargs = mock_client.post.call_args_list[1].kwargs
     assert reset_call_kwargs["headers"].get("Origin") == "https://app.example.com"
-    assert "redirectTo" not in reset_call_kwargs.get("json", {})
+    assert reset_call_kwargs["json"]["redirectTo"] == "https://app.example.com/admin/login"
     assert reset_call_kwargs["json"]["email"] == "admin@example.com"
 
 
