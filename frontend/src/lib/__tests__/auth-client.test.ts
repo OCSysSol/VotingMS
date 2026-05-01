@@ -12,16 +12,17 @@ vi.mock("better-auth/react", () => ({
 }));
 
 describe("auth-client", () => {
-  it("calls createAuthClient once with baseURL set to /api/auth", async () => {
-    // Import the module under test after mocks are in place.
+  it("calls createAuthClient once with baseURL derived from window.location.origin", async () => {
+    // jsdom sets window.location.origin to "http://localhost:3000" in this
+    // project's test environment.  The module under test reads
+    // window.location.origin at load time, so this assertion verifies the SSR
+    // guard takes the browser branch and builds a correct absolute URL rather
+    // than leaving it as a relative path.
     const { authClient } = await import("../auth-client");
 
-    // createAuthClient is called at module load time.  All auth requests must
-    // go through the FastAPI proxy at /api/auth so paths are same-origin and
-    // the proxy can translate SDK path names to Neon Auth endpoint names.
     expect(mockCreateAuthClient).toHaveBeenCalledOnce();
     const [callArg] = mockCreateAuthClient.mock.calls[0] as [{ baseURL: unknown }][];
-    expect(callArg).toHaveProperty("baseURL", "/api/auth");
+    expect(callArg).toHaveProperty("baseURL", `${window.location.origin}/api/auth`);
     expect(authClient).toBeDefined();
   });
 

@@ -242,7 +242,6 @@ describe("AdminLoginPage", () => {
     await waitFor(() => {
       expect(mockForgetPassword).toHaveBeenCalledWith({
         email: "admin@example.com",
-        redirectTo: window.location.origin + "/admin/login",
       });
     });
   });

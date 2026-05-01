@@ -69,7 +69,6 @@ export default function AdminLoginPage() {
     try {
       const result = await authClient.forgetPassword({
         email: resetEmail,
-        redirectTo: window.location.origin + "/admin/login",
       });
       if (result.error) {
         setResetError(result.error.message ?? "Failed to send reset link.");
