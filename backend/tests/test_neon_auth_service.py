@@ -501,6 +501,78 @@ async def test_invite_admin_user_duplicate_422_raises():
 
 
 @pytest.mark.asyncio
+async def test_invite_admin_user_duplicate_400_user_already_exists_raises():
+    """invite_admin_user raises NeonAuthDuplicateUserError when Neon returns HTTP 400
+    with error code USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL.
+
+    The current Neon Auth management API returns 400 (not 409/422) for duplicates.
+    """
+    create_resp = _mock_response(
+        400, {"code": "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL", "message": "User already exists."}
+    )
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(return_value=create_resp)
+
+    with _patch_settings(), patch(
+        "app.services.neon_auth_service.httpx.AsyncClient", return_value=mock_client
+    ), patch(
+        "app.services.neon_auth_service._resolve_branch_id",
+        AsyncMock(return_value="test-branch-id"),
+    ):
+        with pytest.raises(NeonAuthDuplicateUserError):
+            await invite_admin_user("existing@example.com", "https://app.example.com")
+
+
+@pytest.mark.asyncio
+async def test_invite_admin_user_400_non_duplicate_code_raises_service_error():
+    """invite_admin_user raises NeonAuthServiceError when Neon returns HTTP 400
+    with an error code that is NOT USER_ALREADY_EXISTS (e.g. malformed payload).
+    """
+    create_resp = _mock_response(400, {"code": "INVALID_REQUEST", "message": "Bad payload"})
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(return_value=create_resp)
+
+    with _patch_settings(), patch(
+        "app.services.neon_auth_service.httpx.AsyncClient", return_value=mock_client
+    ), patch(
+        "app.services.neon_auth_service._resolve_branch_id",
+        AsyncMock(return_value="test-branch-id"),
+    ):
+        with pytest.raises(NeonAuthServiceError):
+            await invite_admin_user("test@example.com", "https://app.example.com")
+
+
+@pytest.mark.asyncio
+async def test_invite_admin_user_400_json_parse_error_raises_service_error():
+    """invite_admin_user raises NeonAuthServiceError when Neon returns HTTP 400
+    and the response body cannot be parsed as JSON.
+    """
+    create_resp = MagicMock()
+    create_resp.status_code = 400
+    create_resp.json.side_effect = Exception("not valid json")
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(return_value=create_resp)
+
+    with _patch_settings(), patch(
+        "app.services.neon_auth_service.httpx.AsyncClient", return_value=mock_client
+    ), patch(
+        "app.services.neon_auth_service._resolve_branch_id",
+        AsyncMock(return_value="test-branch-id"),
+    ):
+        with pytest.raises(NeonAuthServiceError):
+            await invite_admin_user("test@example.com", "https://app.example.com")
+
+
+@pytest.mark.asyncio
 async def test_invite_admin_user_create_non_2xx_raises_service_error():
     """invite_admin_user raises NeonAuthServiceError on non-2xx create response."""
     create_resp = _mock_response(500)

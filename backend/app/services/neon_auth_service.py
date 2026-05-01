@@ -267,6 +267,21 @@ async def invite_admin_user(email: str, redirect_origin: str) -> AdminUserOut:
         # but some versions return 422 (Unprocessable Entity) for the same condition.
         # Both are treated as "user already exists" to prevent a 502 bubble-up.
         raise NeonAuthDuplicateUserError(f"User with email {email} already exists")
+    if resp.status_code == 400:
+        # Current Neon Auth management API versions return HTTP 400 for duplicate
+        # users with error code "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL".  Check the
+        # body so we only treat the known duplicate code as a duplicate — any other
+        # 400 (e.g. malformed payload) is re-raised as a service error.
+        try:
+            error_code = resp.json().get("code", "")
+        except Exception:
+            error_code = ""
+        if "USER_ALREADY_EXISTS" in error_code:
+            raise NeonAuthDuplicateUserError(f"User with email {email} already exists")
+        logger.error("neon_create_user_failed", status=resp.status_code)
+        raise NeonAuthServiceError(
+            f"Neon Auth returned {resp.status_code} creating user"
+        )
     if resp.status_code not in (200, 201):
         logger.error("neon_create_user_failed", status=resp.status_code)
         raise NeonAuthServiceError(
