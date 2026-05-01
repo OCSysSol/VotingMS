@@ -29,10 +29,11 @@ integration.  The result is cached for the lifetime of the Lambda instance.
 from __future__ import annotations
 
 import secrets
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import Column, MetaData, String, Table, cast, select as sa_select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -40,6 +41,21 @@ from app.logging_config import get_logger
 from app.schemas.admin import AdminUserOut
 
 logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# neon_auth.user table definition (SQLAlchemy Core reflection)
+# ---------------------------------------------------------------------------
+# neon_auth."user" is managed by Neon Auth (Better Auth) — it is not part of
+# the application's SQLAlchemy ORM.  We define it as a Core Table so queries
+# are expressed without raw SQL strings.
+_neon_auth_metadata = MetaData(schema="neon_auth")
+_neon_auth_user_table = Table(
+    "user",
+    _neon_auth_metadata,
+    Column("id", String),
+    Column("email", String),
+    Column("createdAt", String),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -190,24 +206,23 @@ async def list_admin_users(db: AsyncSession) -> list[AdminUserOut]:
 
     Raises NeonAuthServiceError on any database error.
     """
+    t = _neon_auth_user_table
+    stmt = sa_select(
+        cast(t.c.id, String).label("id"),
+        t.c.email,
+        t.c["createdAt"],
+    ).order_by(t.c["createdAt"])
     try:
-        # neon_auth."user" is a schema managed by Neon Auth (Better Auth), not by
-        # SQLAlchemy ORM models — there is no SQLAlchemy model for it, and defining
-        # one would couple the app to Neon Auth's internal schema.
-        result = await db.execute(
-            text(  # nosemgrep: raw-sql-requires-comment
-                'SELECT id::text, email, "createdAt" FROM neon_auth."user" ORDER BY "createdAt"'
-            )
-        )
-        rows = result.fetchall()
+        result = await db.execute(stmt)
+        rows = result.mappings().all()
     except Exception as exc:
         logger.error("neon_list_users_db_failed", error=str(exc))
         raise NeonAuthServiceError("Failed to list admin users from database") from exc
     return [
         AdminUserOut(
-            id=row.id,
-            email=row.email,
-            created_at=row.createdAt,
+            id=row["id"],
+            email=row["email"],
+            created_at=row["createdAt"],
         )
         for row in rows
     ]
@@ -288,10 +303,13 @@ async def invite_admin_user(email: str, redirect_origin: str) -> AdminUserOut:
             f"Password reset email failed with status {reset_resp.status_code}"
         )
 
+    # The Neon Auth management API POST /auth/users response only contains {"id": "..."}.
+    # The email is already known (it was the input parameter) and createdAt is not
+    # returned by the API, so we use the current UTC time as an approximation.
     return AdminUserOut(
         id=user_data["id"],
-        email=user_data["email"],
-        created_at=user_data["createdAt"],
+        email=email,
+        created_at=datetime.now(timezone.utc),
     )
 
 

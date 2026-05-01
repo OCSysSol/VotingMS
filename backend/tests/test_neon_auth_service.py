@@ -29,13 +29,10 @@ import app.services.neon_auth_service as _svc_module
 # Helpers
 # ---------------------------------------------------------------------------
 
+# The Neon Auth management API POST /auth/users response only contains {"id": "..."}.
+# email, name, createdAt, etc. are NOT returned by the API.
 _NEON_USER_PAYLOAD = {
     "id": "user-abc",
-    "email": "admin@example.com",
-    "name": "Admin",
-    "emailVerified": True,
-    "createdAt": "2026-01-01T00:00:00.000Z",
-    "updatedAt": "2026-01-01T00:00:00.000Z",
 }
 
 _CONFIGURED_SETTINGS = {
@@ -315,18 +312,24 @@ async def test_resolve_branch_id_branches_api_non_200_raises():
 
 
 def _make_row(id: str, email: str, created_at: datetime):
-    """Build a mock SQLAlchemy row with the columns returned by list_admin_users."""
-    row = MagicMock()
-    row.id = id
-    row.email = email
-    row.createdAt = created_at
-    return row
+    """Build a mock mapping row with the columns returned by list_admin_users.
+
+    The implementation uses result.mappings().all(), so each row must support
+    dict-style access with string keys ("id", "email", "createdAt").
+    """
+    return {"id": id, "email": email, "createdAt": created_at}
 
 
 def _make_mock_db(rows):
-    """Return an AsyncMock that mimics an AsyncSession for list_admin_users."""
+    """Return an AsyncMock that mimics an AsyncSession for list_admin_users.
+
+    The implementation calls result.mappings().all(), so we chain the mocks
+    accordingly: execute() → mappings() → all().
+    """
+    mock_mappings = MagicMock()
+    mock_mappings.all.return_value = rows
     mock_result = MagicMock()
-    mock_result.fetchall.return_value = rows
+    mock_result.mappings.return_value = mock_mappings
     mock_db = AsyncMock()
     mock_db.execute = AsyncMock(return_value=mock_result)
     return mock_db
@@ -410,7 +413,10 @@ async def test_invite_admin_user_happy_path():
         result = await invite_admin_user("admin@example.com", "https://app.example.com")
 
     assert result.id == "user-abc"
+    # email comes from the input parameter — the API only returns {"id": "..."}
     assert result.email == "admin@example.com"
+    # created_at is set to now() since the API does not return it
+    assert isinstance(result.created_at, datetime)
     # Random password must not be present in the returned value
     assert not hasattr(result, "password")
 

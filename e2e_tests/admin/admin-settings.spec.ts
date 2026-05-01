@@ -428,21 +428,19 @@ test.describe("Admin Settings — User Management tab", () => {
       page.getByRole("button", { name: "Send invite" }).click(),
     ]);
 
-    if (inviteResponse.status() === 201) {
-      // New user created — store ID for afterAll cleanup
-      const body = await inviteResponse.json() as { id: string; email: string };
-      invitedUserId = body.id;
+    // INVITE_EMAIL uses Date.now() so it is always unique per run.
+    // Any non-201 response is a genuine failure — assert 201 directly.
+    expect(inviteResponse.status()).toBe(201);
 
-      // Success message appears with the invited email
-      await expect(page.getByRole("status")).toHaveText(`Invite sent to ${INVITE_EMAIL}`, { timeout: 10000 });
+    // Store ID for afterAll cleanup
+    const body = await inviteResponse.json() as { id: string; email: string };
+    invitedUserId = body.id;
 
-      // The invited email is also added to the users table
-      await expect(page.locator(".admin-table").getByText(INVITE_EMAIL)).toBeVisible();
-    } else {
-      // 409: user already exists from a previous partial run — assert the inline error
-      expect(inviteResponse.status()).toBe(409);
-      await expect(page.getByText("A user with that email already exists.")).toBeVisible({ timeout: 10000 });
-    }
+    // Success message appears with the invited email
+    await expect(page.getByRole("status")).toHaveText(`Invite sent to ${INVITE_EMAIL}`, { timeout: 10000 });
+
+    // The invited email is also added to the users table
+    await expect(page.locator(".admin-table").getByText(INVITE_EMAIL)).toBeVisible();
   });
 
   // --- Last-admin removal guard ---
