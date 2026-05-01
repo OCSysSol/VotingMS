@@ -52,15 +52,20 @@ jobs:
       - name: Derive stable branch alias URL
         id: branch-url
         run: |
-          # github.event.deployment_status.environment_url is the per-deployment URL
-          # (e.g. internal-r0kg4uo86-ocss.vercel.app) — it changes every push and
-          # is not in Neon Auth's trusted_origins list.
-          # The stable branch alias (internal-vms-git-<slug>-ocss.vercel.app) is
-          # registered in trusted_origins and does not change between pushes.
-          BRANCH="${{ github.event.deployment.ref }}"
+          # github.event.deployment.ref is the commit SHA for Vercel deployments.
+          # The actual branch name is in github.event.deployment.payload.branch.
+          BRANCH="${{ github.event.deployment.payload.branch }}"
+          if [ -z "$BRANCH" ]; then
+            # Fallback: use ref only if it doesn't look like a 40-char SHA
+            REF="${{ github.event.deployment.ref }}"
+            if ! echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
+              BRANCH="$REF"
+            fi
+          fi
           SLUG=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-\|-$//g' | cut -c1-63)
           BRANCH_URL="https://internal-vms-git-${SLUG}-ocss.vercel.app"
           echo "branch_url=$BRANCH_URL" >> "$GITHUB_OUTPUT"
+          echo "Branch: $BRANCH"
           echo "Branch alias URL: $BRANCH_URL"
 
       - name: Validate test URL
