@@ -2,10 +2,13 @@ import { test, expect } from "../fixtures";
 import { ADMIN_AUTH_PATH } from "../workflows/helpers";
 
 /**
- * E2E tests for the Admin Settings (tenant branding) page.
+ * E2E tests for the Admin Settings page (tenant branding, email server, user management).
  *
  * These tests run against the deployed preview URL. They always restore the
  * original app_name after mutating it so the suite is idempotent.
+ *
+ * The Settings page has three tabs: "UI & Theme", "Email Server", "User Management".
+ * Each test clicks the relevant tab before interacting with tab-specific fields.
  */
 
 const ORIGINAL_APP_NAME = "AGM Voting";
@@ -17,6 +20,21 @@ const ORIGINAL_PRIMARY_COLOUR = "#005f73";
 // directly to avoid Playwright strict-mode violations.
 const primaryColourText = (page: import("@playwright/test").Page) =>
   page.locator("#primary-colour-text");
+
+/** Click the "UI & Theme" tab on the Settings page to activate the branding panel. */
+const clickUiThemeTab = async (page: import("@playwright/test").Page) => {
+  await page.getByRole("tab", { name: "UI & Theme" }).click();
+};
+
+/** Click the "Email Server" tab on the Settings page to activate the SMTP panel. */
+const clickEmailServerTab = async (page: import("@playwright/test").Page) => {
+  await page.getByRole("tab", { name: "Email Server" }).click();
+};
+
+/** Click the "User Management" tab on the Settings page to activate the users panel. */
+const clickUserManagementTab = async (page: import("@playwright/test").Page) => {
+  await page.getByRole("tab", { name: "User Management" }).click();
+};
 
 test.describe("Admin Settings — tenant branding", () => {
   // --- Navigation ---
@@ -30,6 +48,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("settings page renders all form fields including logo upload", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     await expect(page.getByLabel("Logo URL")).toBeVisible();
     await expect(page.getByLabel("Upload logo image")).toBeVisible();
@@ -39,6 +58,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("settings page shows Save button", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByTestId("branding-save-btn")).toBeVisible();
   });
 
@@ -48,6 +68,7 @@ test.describe("Admin Settings — tenant branding", () => {
     const testAppName = `E2E Settings ${Date.now()}`;
 
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
 
     // Update app name and save
@@ -67,6 +88,7 @@ test.describe("Admin Settings — tenant branding", () => {
     const testAppName = `E2E Branding ${Date.now()}`;
 
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
 
     // Capture the current logo URL so we can restore it at the end.
@@ -117,6 +139,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("success message disappears after a few seconds", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     await page.getByTestId("branding-save-btn").click();
     await expect(page.getByText("Settings saved.")).toBeVisible();
@@ -126,6 +149,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("form is pre-populated with current config from server", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     // App name field should be populated (not blank)
     const appNameValue = await page.getByLabel("App name").inputValue();
@@ -139,6 +163,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("favicon link tag is present in document head", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     // The <link rel="icon"> element must exist for JS to update it
     const faviconHref = await page.evaluate(() => {
@@ -150,6 +175,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("favicon href reflects logo_url from config after load", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     // After BrandingContext loads, favicon should be set to logo_url or /favicon.ico
     const faviconHref = await page.evaluate(() => {
@@ -164,6 +190,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("saving with empty app name does not show success", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
     await page.getByLabel("App name").fill("");
     await page.getByTestId("branding-save-btn").click();
@@ -173,6 +200,7 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("saving with invalid hex colour shows error", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(primaryColourText(page)).toBeVisible();
     await primaryColourText(page).fill("notacolour");
     await page.getByTestId("branding-save-btn").click();
@@ -190,12 +218,14 @@ test.describe("Admin Settings — tenant branding", () => {
 test.describe("Admin Settings — favicon upload", () => {
   test("favicon URL field and upload button are present on the settings page", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("Favicon URL")).toBeVisible();
     await expect(page.getByLabel("Upload favicon image")).toBeVisible();
   });
 
   test("favicon URL field accepts text input", async ({ page }) => {
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("Favicon URL")).toBeVisible();
     const input = page.getByLabel("Favicon URL");
     await input.fill("https://example.com/fav.ico");
@@ -238,6 +268,7 @@ test.describe("Admin Settings — login page logo reflects branding", () => {
 
     // Step 1: Set a custom logo URL via the settings page
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("Logo URL")).toBeVisible({ timeout: 10000 });
     await page.getByLabel("Logo URL").fill(TEST_LOGO_URL);
     await page.getByTestId("branding-save-btn").click();
@@ -275,6 +306,7 @@ test.describe("Admin Settings — login page logo reflects branding", () => {
 
     // Step 1: Clear logo URL
     await page.goto("/admin/settings");
+    await clickUiThemeTab(page);
     await expect(page.getByLabel("Logo URL")).toBeVisible({ timeout: 10000 });
     await page.getByLabel("Logo URL").fill("");
     await page.getByTestId("branding-save-btn").click();
