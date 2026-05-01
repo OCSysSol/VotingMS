@@ -34,7 +34,7 @@ const E2E_TESTS_DIR = process.env.GITHUB_WORKSPACE
   ? path.join(process.env.GITHUB_WORKSPACE, "e2e_tests")
   : __dirname;
 
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME ?? "admin";
+const ADMIN_EMAIL = process.env.ADMIN_USERNAME ?? "admin@example.com";
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "admin";
 
 // ── Branch-name suffix ─────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ export default async function globalSetup(_config: FullConfig) {
   //   - 200 → Lambda warm, proceed
   //   - Loop runs for up to 3 minutes (18 attempts × 10s)
   if (BYPASS_TOKEN) {
-    const loginUrl = `${baseURL}/api/admin/auth/login`;
+    const loginUrl = `${baseURL}/api/auth/sign-in/email`;
     const healthUrl = `${baseURL}/api/health`;
     const maxAttempts = 18; // up to 3 minutes
 
@@ -123,7 +123,7 @@ export default async function globalSetup(_config: FullConfig) {
                 "Content-Type": "application/json",
                 "x-vercel-protection-bypass": BYPASS_TOKEN,
               },
-              body: JSON.stringify({ username: ADMIN_USERNAME, password: ADMIN_PASSWORD }),
+              body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
               signal: controller.signal,
             });
           } finally {
@@ -141,7 +141,7 @@ export default async function globalSetup(_config: FullConfig) {
         if (res.status >= 400 && res.status < 500) {
           throw new Error(
             `Lambda warmup login returned ${res.status} — credentials problem, not a cold start. ` +
-            `Check ADMIN_USERNAME / ADMIN_PASSWORD env vars.`
+            `Check ADMIN_USERNAME (email) / ADMIN_PASSWORD env vars.`
           );
         }
         // 5xx — Lambda still cold, wait and retry
@@ -214,7 +214,7 @@ export default async function globalSetup(_config: FullConfig) {
   await context.storageState({ path: path.join(authDir, "public.json") });
 
   await page.goto("/admin/login", { waitUntil: "domcontentloaded" });
-  await page.getByLabel("Username").fill(ADMIN_USERNAME);
+  await page.getByLabel("Email").fill(ADMIN_EMAIL);
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   try {
