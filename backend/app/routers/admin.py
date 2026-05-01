@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import aiosmtplib
+import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
@@ -1213,3 +1214,53 @@ async def debug_db_health() -> dict:
         "checked_out": pool.checkedout(),
         "overflow": pool.overflow(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Test-only admin provisioning endpoint
+# ---------------------------------------------------------------------------
+
+
+class _ProvisionAdminRequest(BaseModel):
+    email: str
+    password: str
+    name: str = "Admin"
+
+
+@router.post("/auth/provision", status_code=204)
+async def provision_admin_user(body: _ProvisionAdminRequest) -> None:
+    """Create an admin user in Neon Auth directly (server-to-server).
+
+    This endpoint is only available when TESTING_MODE=true.  It is used by the
+    E2E global-setup to seed the admin account on fresh Neon branch deployments
+    where no admin user yet exists.
+
+    It calls Neon Auth's sign-up endpoint internally (server-to-server) so the
+    resulting account is usable for sign-in/email — unlike the management API
+    which creates users whose passwords cannot be used for session-based auth.
+
+    Idempotent: if the user already exists the upstream 4xx is silently ignored
+    and 204 is still returned so global-setup can call this unconditionally.
+    """
+    _require_debug_access()
+
+    from app.config import settings as _s
+    if not _s.neon_auth_base_url:
+        raise HTTPException(status_code=503, detail="Auth service not configured")
+
+    url = f"{_s.neon_auth_base_url.rstrip('/')}/sign-up/email"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            json={"email": body.email, "password": body.password, "name": body.name},
+            timeout=15.0,
+        )
+
+    # 200/201 = created; any 4xx = user already exists or validation error — both
+    # are safe to ignore so the endpoint remains idempotent.
+    # Anything else (5xx, unexpected codes) is a real upstream error.
+    is_success = resp.status_code in (200, 201)
+    is_client_error = 400 <= resp.status_code < 500
+    if not is_success and not is_client_error:
+        logger.error("provision_admin_user_upstream_error", status=resp.status_code)
+        raise HTTPException(status_code=502, detail="Upstream auth error")

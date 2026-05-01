@@ -491,6 +491,71 @@ class TestAuthProxyRedirectToInjection:
 
 
 # ---------------------------------------------------------------------------
+# Blocked paths — self-registration prevention
+# ---------------------------------------------------------------------------
+
+
+class TestAuthProxyBlockedPaths:
+    """proxy_auth returns 404 for sign-up/* paths to prevent self-registration."""
+
+    async def test_sign_up_email_returns_404(self):
+        """proxy_auth returns 404 for sign-up/email — self-registration is blocked."""
+        request = _make_request(method="POST", body=b'{"email":"a@b.com","password":"secret"}')
+
+        with patch("app.routers.auth_proxy.settings") as ms:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-up/email", request=request)
+
+        assert response.status_code == 404
+
+    async def test_sign_up_bare_returns_404(self):
+        """proxy_auth returns 404 for the bare 'sign-up' path."""
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-up", request=request)
+
+        assert response.status_code == 404
+
+    async def test_sign_up_subpath_returns_404(self):
+        """proxy_auth returns 404 for any sign-up/* subpath."""
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-up/magic-link", request=request)
+
+        assert response.status_code == 404
+
+    async def test_blocked_path_does_not_reach_upstream(self):
+        """proxy_auth does not call httpx when the path is blocked."""
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            await proxy_auth(path="sign-up/email", request=request)
+
+        mock_client.request.assert_not_called()
+
+    async def test_sign_in_is_not_blocked(self):
+        """proxy_auth does NOT block sign-in/email — only sign-up/* is blocked."""
+        upstream = _make_upstream_response(content=b'{"token":"t"}', status_code=200)
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST", body=b'{"email":"a@b.com","password":"p"}')
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-in/email", request=request)
+
+        assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
 # State / precondition errors
 # ---------------------------------------------------------------------------
 

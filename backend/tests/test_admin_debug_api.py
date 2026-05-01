@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
@@ -391,3 +391,208 @@ class TestListLotOwnersBatch:
         assert len(data) == 1
         assert data[0]["emails"] == []
         assert data[0]["proxy_email"] is None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/auth/provision
+# ---------------------------------------------------------------------------
+
+
+def _make_httpx_mock(status_code: int = 200, content: bytes = b"{}") -> MagicMock:
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    return mock_client
+
+
+class TestProvisionAdminUser:
+    """POST /api/admin/auth/provision — test-only admin user seeding endpoint."""
+
+    # --- Happy path ---
+
+    async def test_returns_204_when_upstream_returns_201(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """204 is returned when Neon Auth creates the user (201)."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=201)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                response = await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123", "name": "Admin"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 204
+
+    async def test_returns_204_when_upstream_returns_200(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """204 is returned when Neon Auth returns 200."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=200)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                response = await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 204
+
+    async def test_idempotent_when_user_already_exists(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """204 is returned even when upstream returns 409 (user already exists)."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=409)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                response = await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 204
+
+    async def test_idempotent_on_any_4xx(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """204 is returned for any upstream 4xx (validation error, etc.)."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=422)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                response = await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 204
+
+    async def test_calls_upstream_sign_up_email_endpoint(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """provision_admin_user calls neon_auth_base_url/sign-up/email."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=201)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123", "name": "Admin"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        call_kwargs = mock_client.post.call_args
+        assert call_kwargs.args[0] == "https://auth.example.com/sign-up/email"
+        assert call_kwargs.kwargs["json"]["email"] == "admin@test.com"
+        assert call_kwargs.kwargs["json"]["name"] == "Admin"
+
+    async def test_strips_trailing_slash_from_base_url(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """provision_admin_user strips a trailing slash from neon_auth_base_url."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=201)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com/"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        call_url = mock_client.post.call_args.args[0]
+        assert call_url == "https://auth.example.com/sign-up/email"
+
+    # --- State / precondition errors ---
+
+    async def test_returns_404_when_testing_mode_disabled(self, client: AsyncClient):
+        """provision endpoint returns 404 when testing_mode=False."""
+        from app.config import settings as _cfg_settings
+        original = _cfg_settings.testing_mode
+        _cfg_settings.testing_mode = False
+        try:
+            response = await client.post(
+                "/api/admin/auth/provision",
+                json={"email": "admin@test.com", "password": "secret123"},
+            )
+            assert response.status_code == 404
+        finally:
+            _cfg_settings.testing_mode = original
+
+    async def test_returns_503_when_neon_auth_base_url_not_configured(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """provision endpoint returns 503 when neon_auth_base_url is empty."""
+        from app.config import settings as _cfg_settings
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = ""
+        try:
+            response = await client.post(
+                "/api/admin/auth/provision",
+                json={"email": "admin@test.com", "password": "secret123"},
+            )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 503
+
+    async def test_returns_502_on_upstream_5xx(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """502 is returned when upstream returns a 5xx (not a 4xx)."""
+        from app.config import settings as _cfg_settings
+        mock_client = _make_httpx_mock(status_code=500)
+        original_url = _cfg_settings.neon_auth_base_url
+        _cfg_settings.neon_auth_base_url = "https://auth.example.com"
+        try:
+            with patch("app.routers.admin.httpx.AsyncClient", return_value=mock_client):
+                response = await client.post(
+                    "/api/admin/auth/provision",
+                    json={"email": "admin@test.com", "password": "secret123"},
+                )
+        finally:
+            _cfg_settings.neon_auth_base_url = original_url
+        assert response.status_code == 502
+
+    # --- Input validation ---
+
+    async def test_missing_email_returns_422(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """422 is returned when email field is missing."""
+        response = await client.post(
+            "/api/admin/auth/provision",
+            json={"password": "secret123"},
+        )
+        assert response.status_code == 422
+
+    async def test_missing_password_returns_422(
+        self, client: AsyncClient, enable_testing_mode
+    ):
+        """422 is returned when password field is missing."""
+        response = await client.post(
+            "/api/admin/auth/provision",
+            json={"email": "admin@test.com"},
+        )
+        assert response.status_code == 422

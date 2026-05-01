@@ -164,23 +164,30 @@ export default async function globalSetup(_config: FullConfig) {
   // Before the first E2E run on a fresh branch, the admin user does not exist,
   // so sign-in would fail with INVALID_EMAIL_OR_PASSWORD.
   //
-  // Register the admin user via POST /api/auth/sign-up/email (proxied through
-  // the deployed app to the correct branch's auth instance).  If the user
-  // already exists, sign-up returns a non-2xx status which we ignore silently.
-  // Either way, the subsequent sign-in uses the same credentials.
+  // POST /api/admin/auth/provision is a TESTING_MODE-gated server-side endpoint
+  // that creates the admin user directly in Neon Auth via a server-to-server
+  // sign-up call (bypassing the auth proxy blocklist that prevents external
+  // callers from self-registering).  The endpoint is idempotent — if the user
+  // already exists the upstream 4xx is silently ignored and 204 is returned.
   //
   // The bypass header is included because Vercel Deployment Protection is active.
   {
-    const signUpHeaders: HeadersInit = { "Content-Type": "application/json" };
-    if (BYPASS_TOKEN) signUpHeaders["x-vercel-protection-bypass"] = BYPASS_TOKEN;
+    const provisionHeaders: HeadersInit = {
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+    };
+    if (BYPASS_TOKEN) provisionHeaders["x-vercel-protection-bypass"] = BYPASS_TOKEN;
     try {
-      await fetch(`${baseURL}/api/auth/sign-up/email`, {
+      const provisionRes = await fetch(`${baseURL}/api/admin/auth/provision`, {
         method: "POST",
-        headers: signUpHeaders,
+        headers: provisionHeaders,
         body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" }),
       });
-      // Response status is not checked: 200 = created, 4xx/5xx = already exists or disabled.
-      // Either outcome allows the sign-in below to proceed.
+      if (!provisionRes.ok && provisionRes.status !== 204) {
+        // 4xx/5xx from the provision endpoint itself (not the upstream auth) is unexpected.
+        // Log but do not throw — the sign-in below will surface any real auth failure.
+        console.warn(`[global-setup] provision endpoint returned ${provisionRes.status}`);
+      }
     } catch {
       // Network errors during provisioning are non-fatal — sign-in will surface any real failure.
     }

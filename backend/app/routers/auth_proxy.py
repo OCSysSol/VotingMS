@@ -34,6 +34,12 @@ PATH_ALIASES: dict[str, str] = {
     "forget-password": "request-password-reset",
 }
 
+# Paths that must never be forwarded to the upstream auth service.
+# This app uses invite-only admin auth — self-registration is not permitted.
+# Any path starting with "sign-up/" is also blocked by the startswith check
+# in proxy_auth() so subpaths like "sign-up/email" are covered automatically.
+_BLOCKED_PATH_PREFIXES: tuple[str, ...] = ("sign-up",)
+
 # Only forward headers that are meaningful to the auth service.
 # Using an allowlist avoids accidentally forwarding Vercel-injected headers
 # (x-forwarded-host, x-forwarded-for, x-vercel-*, etc.) that cause
@@ -80,6 +86,10 @@ async def proxy_auth(path: str, request: Request) -> Response:
     """
     if not settings.neon_auth_base_url:
         return Response(content="Auth service not configured", status_code=503)
+
+    # Block self-registration paths — this app uses invite-only admin auth.
+    if any(path == prefix or path.startswith(prefix + "/") for prefix in _BLOCKED_PATH_PREFIXES):
+        return Response(status_code=404)
 
     path = PATH_ALIASES.get(path, path)
     target_url = f"{settings.neon_auth_base_url}/{path}"
