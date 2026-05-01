@@ -12,6 +12,7 @@ Auth's actual endpoint is ``request-password-reset``.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -19,6 +20,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from app.config import settings
+
+# Neon Auth is serverless; cold starts can cause transient non-200s on get-session.
+# Retry this path to avoid redirecting the user to the login page mid-session.
+_GET_SESSION_PATH = "get-session"
+_PROXY_GET_SESSION_MAX_RETRIES = 3
+_PROXY_GET_SESSION_RETRY_DELAY = 1.0  # seconds
 
 router = APIRouter()
 
@@ -109,16 +116,25 @@ async def proxy_auth(path: str, request: Request) -> Response:
             except (json.JSONDecodeError, Exception):
                 pass  # forward as-is if body is not valid JSON
 
-    async with httpx.AsyncClient() as client:
-        resp = await client.request(
-            method=request.method,
-            url=target_url,
-            headers=headers,
-            content=body,
-            params=dict(request.query_params),
-            follow_redirects=False,
-            timeout=30,
-        )
+    max_retries = _PROXY_GET_SESSION_MAX_RETRIES if path == _GET_SESSION_PATH else 0
+    resp = None
+    for attempt in range(max_retries + 1):
+        if attempt > 0:
+            await asyncio.sleep(_PROXY_GET_SESSION_RETRY_DELAY)
+        async with httpx.AsyncClient() as client:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                headers=headers,
+                content=body,
+                params=dict(request.query_params),
+                follow_redirects=False,
+                timeout=30,
+            )
+        if path != _GET_SESSION_PATH or resp.status_code == 200:
+            break
+
+    assert resp is not None  # loop always executes at least once
 
     # Forward response headers except transfer-encoding (incompatible with
     # buffered Response — httpx already decoded any chunked transfer encoding).

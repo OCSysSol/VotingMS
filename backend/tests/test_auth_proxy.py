@@ -635,3 +635,72 @@ class TestAuthProxyIntegration:
                 response = await client.get("/api/auth/get-session")
 
         assert response.status_code == 503
+
+
+# ---------------------------------------------------------------------------
+# Retry logic for get-session (Neon Auth cold-start handling)
+# ---------------------------------------------------------------------------
+
+
+class TestAuthProxyGetSessionRetry:
+    """proxy_auth retries get-session on non-200 to handle Neon Auth cold starts."""
+
+    async def test_get_session_retries_on_non_200_then_returns_200(self):
+        """get-session: two 401s then 200 → proxy returns 200 (retried twice)."""
+        fail = _make_upstream_response(content=b'{}', status_code=401)
+        success = _make_upstream_response(content=b'{"user":{"id":"u1"}}', status_code=200)
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(side_effect=[fail, fail, success])
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        request = _make_request(method="GET")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.asyncio.sleep", new=AsyncMock()):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            response = await proxy_auth(path="get-session", request=request)
+
+        assert response.status_code == 200
+        assert mock_client.request.call_count == 3
+
+    async def test_get_session_returns_last_non_200_after_all_retries_exhausted(self):
+        """get-session: all retries return 401 → proxy returns 401 (no masking)."""
+        fail = _make_upstream_response(content=b'{}', status_code=401)
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=fail)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        request = _make_request(method="GET")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.asyncio.sleep", new=AsyncMock()):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            response = await proxy_auth(path="get-session", request=request)
+
+        assert response.status_code == 401
+        # 1 initial + 3 retries = 4 attempts
+        assert mock_client.request.call_count == 4
+
+    async def test_non_get_session_path_does_not_retry(self):
+        """Non-get-session paths (e.g. sign-in/email) are not retried on non-200."""
+        fail = _make_upstream_response(content=b'{"error":"bad creds"}', status_code=401)
+        mock_client = AsyncMock()
+        mock_client.request = AsyncMock(return_value=fail)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        request = _make_request(method="POST", body=b'{"email":"a@b.com","password":"wrong"}')
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.asyncio.sleep", new=AsyncMock()) as mock_sleep:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            response = await proxy_auth(path="sign-in/email", request=request)
+
+        assert response.status_code == 401
+        assert mock_client.request.call_count == 1
+        mock_sleep.assert_not_called()
