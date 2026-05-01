@@ -51,12 +51,16 @@ jobs:
 
       - name: Derive stable branch alias URL
         id: branch-url
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          # github.event.deployment.ref is the commit SHA for Vercel deployments.
-          # The actual branch name is in github.event.deployment.payload.branch.
-          BRANCH="${{ github.event.deployment.payload.branch }}"
+          # Vercel sets deployment.ref to the commit SHA, not the branch name.
+          # Use the GitHub API to find which branch this commit is the HEAD of.
+          SHA="${{ github.event.deployment.sha }}"
+          BRANCH=$(gh api "/repos/${{ github.repository }}/commits/${SHA}/branches-where-head" \
+            --jq '.[0].name // empty' 2>/dev/null || echo "")
           if [ -z "$BRANCH" ]; then
-            # Fallback: use ref only if it doesn't look like a 40-char SHA
+            # Fallback: if .ref isn't a SHA it may be a branch name
             REF="${{ github.event.deployment.ref }}"
             if ! echo "$REF" | grep -qE '^[0-9a-f]{40}$'; then
               BRANCH="$REF"
