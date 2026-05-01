@@ -7,12 +7,18 @@ get_client_ip: extracts the real client IP from X-Forwarded-For (Vercel proxy).
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
 from fastapi import HTTPException, Request
 
 from app.config import settings
+
+# Neon Auth is serverless; cold starts can cause transient 401s on /get-session.
+# Retry up to this many times with a short delay before propagating the error.
+_GET_SESSION_MAX_RETRIES = 3
+_GET_SESSION_RETRY_DELAY = 1.0  # seconds
 
 
 def get_client_ip(request: Request) -> str:
@@ -46,12 +52,16 @@ async def require_admin(request: Request) -> BetterAuthUser:
     The only way to validate them from a separate backend is to forward the
     cookie to the Better Auth service and receive the session payload back.
 
+    Retries up to _GET_SESSION_MAX_RETRIES times on non-200 responses to handle
+    Neon Auth cold starts (the service is serverless and may return transient errors
+    during Lambda initialization).
+
     Raises 401 if:
     - No session_token cookie is present in the request
-    - The Neon Auth service returns a non-200 response
+    - The Neon Auth service returns a non-200 response after all retries
     - The response body has no user object
 
-    Raises 503 if the Neon Auth service is unreachable.
+    Raises 503 if the Neon Auth service is unreachable after all retries.
     """
     # Neon Auth may use different cookie name prefixes depending on the environment
     # (__Secure-neon-auth.session_token on HTTPS, better-auth.session_token on HTTP).
@@ -69,25 +79,32 @@ async def require_admin(request: Request) -> BetterAuthUser:
 
     headers: dict[str, str] = {"cookie": raw_cookie}
 
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(
-                f"{neon_auth_base_url}/get-session",
-                headers=headers,
-                timeout=5.0,
+    last_error: Exception | None = None
+    for attempt in range(_GET_SESSION_MAX_RETRIES + 1):
+        if attempt > 0:
+            await asyncio.sleep(_GET_SESSION_RETRY_DELAY)
+        async with httpx.AsyncClient() as client:
+            try:
+                resp = await client.get(
+                    f"{neon_auth_base_url}/get-session",
+                    headers=headers,
+                    timeout=5.0,
+                )
+            except httpx.RequestError as exc:
+                last_error = exc
+                continue
+
+        if resp.status_code == 200:
+            data = resp.json()
+            if not data or not data.get("user"):
+                raise HTTPException(status_code=401, detail="Authentication required")
+            user = data["user"]
+            return BetterAuthUser(
+                email=user["email"],
+                user_id=user["id"],
             )
-        except httpx.RequestError:
-            raise HTTPException(status_code=503, detail="Auth service unavailable")
+        # Non-200: retry (handles Neon Auth cold starts)
 
-    if resp.status_code != 200:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    data = resp.json()
-    if not data or not data.get("user"):
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    user = data["user"]
-    return BetterAuthUser(
-        email=user["email"],
-        user_id=user["id"],
-    )
+    if last_error is not None:
+        raise HTTPException(status_code=503, detail="Auth service unavailable")
+    raise HTTPException(status_code=401, detail="Authentication required")

@@ -236,7 +236,7 @@ class TestRequireAdmin:
         assert exc_info.value.status_code == 401
 
     async def test_non_200_response_raises_401(self):
-        """Neon Auth returns 401 → our dependency raises 401."""
+        """Neon Auth returns 401 on all retries → our dependency raises 401."""
         from fastapi import HTTPException
 
         request = _make_request_with_cookie("better-auth.session_token=expired-token")
@@ -253,10 +253,38 @@ class TestRequireAdmin:
 
             with patch("app.dependencies.settings") as mock_settings:
                 mock_settings.neon_auth_base_url = "https://auth.example.com"
-                with pytest.raises(HTTPException) as exc_info:
-                    await require_admin(request)
+                with patch("app.dependencies.asyncio.sleep", new=AsyncMock()):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await require_admin(request)
 
         assert exc_info.value.status_code == 401
+
+    async def test_retries_on_non_200_then_succeeds(self):
+        """Neon Auth returns 401 twice then 200 → dependency succeeds (cold-start retry)."""
+        request = _make_request_with_cookie("better-auth.session_token=valid-token")
+
+        fail_response = MagicMock()
+        fail_response.status_code = 401
+
+        success_response = MagicMock()
+        success_response.status_code = 200
+        success_response.json.return_value = {"user": {"id": "u1", "email": "admin@example.com"}}
+
+        with patch("app.dependencies.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(side_effect=[fail_response, fail_response, success_response])
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            with patch("app.dependencies.settings") as mock_settings:
+                mock_settings.neon_auth_base_url = "https://auth.example.com"
+                with patch("app.dependencies.asyncio.sleep", new=AsyncMock()):
+                    result = await require_admin(request)
+
+        assert isinstance(result, BetterAuthUser)
+        assert result.email == "admin@example.com"
+        assert mock_client.get.call_count == 3
 
     async def test_null_user_in_response_raises_401(self):
         """Neon Auth returns 200 but user is null → 401."""
@@ -307,7 +335,7 @@ class TestRequireAdmin:
         assert exc_info.value.status_code == 401
 
     async def test_network_error_raises_503(self):
-        """Network error calling Neon Auth → 503."""
+        """Network error on all retries calling Neon Auth → 503."""
         import httpx
         from fastapi import HTTPException
 
@@ -322,8 +350,9 @@ class TestRequireAdmin:
 
             with patch("app.dependencies.settings") as mock_settings:
                 mock_settings.neon_auth_base_url = "https://auth.example.com"
-                with pytest.raises(HTTPException) as exc_info:
-                    await require_admin(request)
+                with patch("app.dependencies.asyncio.sleep", new=AsyncMock()):
+                    with pytest.raises(HTTPException) as exc_info:
+                        await require_admin(request)
 
         assert exc_info.value.status_code == 503
         assert exc_info.value.detail == "Auth service unavailable"
@@ -375,14 +404,15 @@ class TestRequireAdmin:
 
             with patch("app.dependencies.settings") as mock_settings:
                 mock_settings.neon_auth_base_url = "https://auth.example.com"
-                async with AsyncClient(
-                    transport=ASGITransport(app=app_instance), base_url="http://test"
-                ) as c:
-                    response = await c.get(
-                        "/api/admin/buildings",
-                        cookies={"better-auth.session_token": "invalid-token"},
-                        headers={"X-Requested-With": "XMLHttpRequest"},
-                    )
+                with patch("app.dependencies.asyncio.sleep", new=AsyncMock()):
+                    async with AsyncClient(
+                        transport=ASGITransport(app=app_instance), base_url="http://test"
+                    ) as c:
+                        response = await c.get(
+                            "/api/admin/buildings",
+                            cookies={"better-auth.session_token": "invalid-token"},
+                            headers={"X-Requested-With": "XMLHttpRequest"},
+                        )
 
         assert response.status_code == 401
 
