@@ -247,7 +247,10 @@ async def invite_admin_user(email: str, redirect_origin: str) -> AdminUserOut:
     # Discard temp_password immediately — do not log or store it.
     del temp_password
 
-    if resp.status_code == 409:
+    if resp.status_code in (409, 422):
+        # Neon Auth management API returns 409 for duplicate users in most cases,
+        # but some versions return 422 (Unprocessable Entity) for the same condition.
+        # Both are treated as "user already exists" to prevent a 502 bubble-up.
         raise NeonAuthDuplicateUserError(f"User with email {email} already exists")
     if resp.status_code not in (200, 201):
         logger.error("neon_create_user_failed", status=resp.status_code)

@@ -462,6 +462,31 @@ async def test_invite_admin_user_duplicate_raises():
 
 
 @pytest.mark.asyncio
+async def test_invite_admin_user_duplicate_422_raises():
+    """invite_admin_user raises NeonAuthDuplicateUserError when Neon returns 422.
+
+    Some Neon Auth versions return 422 (Unprocessable Entity) instead of 409
+    when the email already exists.  Both must map to NeonAuthDuplicateUserError
+    so the router can return 409 rather than 502.
+    """
+    create_resp = _mock_response(422)
+
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    mock_client.post = AsyncMock(return_value=create_resp)
+
+    with _patch_settings(), patch(
+        "app.services.neon_auth_service.httpx.AsyncClient", return_value=mock_client
+    ), patch(
+        "app.services.neon_auth_service._resolve_branch_id",
+        AsyncMock(return_value="test-branch-id"),
+    ):
+        with pytest.raises(NeonAuthDuplicateUserError):
+            await invite_admin_user("existing@example.com", "https://app.example.com")
+
+
+@pytest.mark.asyncio
 async def test_invite_admin_user_create_non_2xx_raises_service_error():
     """invite_admin_user raises NeonAuthServiceError on non-2xx create response."""
     create_resp = _mock_response(500)
