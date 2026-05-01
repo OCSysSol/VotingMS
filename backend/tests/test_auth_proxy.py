@@ -210,9 +210,9 @@ class TestAuthProxyHappyPath:
         assert forwarded.get("cookie") == "session=abc123"
 
         # Vercel-injected and other non-allowlisted headers must be absent
+        # (origin is re-injected by the proxy from x-forwarded-*, not forwarded raw)
         assert "host" not in forwarded_lower
         assert "content-length" not in forwarded_lower
-        assert "origin" not in forwarded_lower
         assert "referer" not in forwarded_lower
         assert "x-forwarded-host" not in forwarded_lower
         assert "x-forwarded-for" not in forwarded_lower
@@ -220,13 +220,30 @@ class TestAuthProxyHappyPath:
         assert "x-vercel-deployment-url" not in forwarded_lower
         assert "x-custom-header" not in forwarded_lower
 
-    async def test_proxy_never_injects_origin_header(self):
-        """proxy_auth never injects an Origin header regardless of settings.
+    async def test_proxy_injects_origin_derived_from_forwarded_headers(self):
+        """proxy_auth injects Origin derived from x-forwarded-proto/host for Neon Auth validation."""
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(
+            method="POST",
+            headers=[
+                ("content-type", "application/json"),
+                ("x-forwarded-proto", "https"),
+                ("x-forwarded-host", "internal-vms-git-feat-ocss.vercel.app"),
+            ],
+        )
 
-        Neon Auth validates sessions via the signed session cookie, not via Origin.
-        Injecting the origin was removed to simplify configuration and eliminate
-        the ALLOWED_ORIGIN env var requirement.
-        """
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            await proxy_auth(path="sign-in/email", request=request)
+
+        forwarded = mock_client.request.call_args.kwargs["headers"]
+        assert forwarded.get("origin") == "https://internal-vms-git-feat-ocss.vercel.app"
+
+    async def test_proxy_injects_origin_from_allowed_origin_fallback_when_no_forwarded_headers(self):
+        """proxy_auth falls back to settings.allowed_origin for origin injection in local dev."""
         upstream = _make_upstream_response()
         mock_client = _make_httpx_client(upstream)
         request = _make_request(method="POST", headers=[("content-type", "application/json")])
@@ -234,7 +251,22 @@ class TestAuthProxyHappyPath:
         with patch("app.routers.auth_proxy.settings") as ms, \
              patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
             ms.neon_auth_base_url = "https://auth.example.com"
-            ms.allowed_origin = "https://preview.example.com"
+            ms.allowed_origin = "http://localhost:5173"
+            await proxy_auth(path="sign-in/email", request=request)
+
+        forwarded = mock_client.request.call_args.kwargs["headers"]
+        assert forwarded.get("origin") == "http://localhost:5173"
+
+    async def test_proxy_does_not_inject_origin_when_no_origin_available(self):
+        """proxy_auth does not inject Origin when neither forwarded headers nor allowed_origin are set."""
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST", headers=[("content-type", "application/json")])
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
             await proxy_auth(path="sign-in/email", request=request)
 
         forwarded = mock_client.request.call_args.kwargs["headers"]

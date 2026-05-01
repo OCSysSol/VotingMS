@@ -44,7 +44,7 @@ _FORWARD_HEADERS = frozenset({
 
 
 def _derive_origin(request: Request) -> str:
-    """Return the origin of the incoming request for use in redirectTo URLs.
+    """Return the browser-facing origin of the incoming request.
 
     On Vercel, x-forwarded-proto and x-forwarded-host carry the browser-facing
     scheme and hostname.  Falls back to settings.allowed_origin for local dev
@@ -79,20 +79,26 @@ async def proxy_auth(path: str, request: Request) -> Response:
 
     # Only forward headers in the allowlist — this blocks Vercel-injected headers
     # (x-forwarded-host, x-forwarded-for, x-real-ip, x-vercel-*, host, origin,
-    # referer, content-length, etc.) that cause Neon Auth to reject the request
-    # with INVALID_HOSTNAME.
+    # referer, content-length, etc.) that would otherwise reach Neon Auth verbatim.
     headers = {
         k: v
         for k, v in request.headers.items()
         if k.lower() in _FORWARD_HEADERS
     }
 
+    # Inject the browser-facing origin so Neon Auth can validate it against
+    # trusted_origins. The browser sends the Vercel deployment URL as Origin but
+    # Vercel strips/rewrites it before reaching the Lambda — deriving it from
+    # x-forwarded-proto/x-forwarded-host gives the real value.
+    origin = _derive_origin(request)
+    if origin:
+        headers["origin"] = origin
+
     body = await request.body()
 
     # For password-reset requests, inject redirectTo so the reset email link
     # points back to the correct deployment's admin login page.
     if path == "request-password-reset":
-        origin = _derive_origin(request)
         if origin:
             try:
                 payload = json.loads(body)
