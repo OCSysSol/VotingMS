@@ -291,19 +291,20 @@ async def invite_admin_user(email: str, redirect_origin: str) -> AdminUserOut:
     user_data = resp.json()
 
     # Trigger password-reset email so the invitee can set their password.
-    # Neon Auth requires the Origin header (used to validate trusted origins) and
-    # rejects an explicit redirectTo unless it matches a registered trusted origin.
-    # Omit redirectTo and pass Origin instead — Neon Auth will use the origin as the
-    # redirect base, which is already registered as a trusted origin by the
-    # Neon-Vercel integration for each deployed preview URL.
+    # Pass both the Origin header (required by Neon Auth for trusted-origin validation)
+    # and redirectTo so the reset link in the email points back to the correct app URL.
+    # redirectTo must match a registered trusted origin — using the same
+    # /admin/login path that auth_proxy.py uses for user-initiated password resets
+    # ensures consistency and satisfies Neon Auth's origin check.
     neon_auth_base_url = settings.neon_auth_base_url.rstrip("/")
     reset_url = f"{neon_auth_base_url}/request-password-reset"
+    redirect_to = f"{redirect_origin}/admin/login"
 
     async with httpx.AsyncClient() as client:
         reset_resp = await client.post(
             reset_url,
             headers={"Content-Type": "application/json", "Origin": redirect_origin},
-            json={"email": email},
+            json={"email": email, "redirectTo": redirect_to},
             timeout=15.0,
         )
 

@@ -198,6 +198,7 @@ async def list_admin_users(
 
 @router.post("/users/invite", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
 async def invite_admin_user(
+    request: Request,
     data: AdminUserInviteRequest,
     current_user: BetterAuthUser = Depends(require_admin),
 ) -> AdminUserOut:
@@ -210,7 +211,8 @@ async def invite_admin_user(
     """
     admin_invite_limiter.check("admin")
 
-    redirect_origin = settings.allowed_origin.rstrip("/")
+    from app.routers.auth_proxy import _derive_origin  # noqa: PLC0415
+    redirect_origin = _derive_origin(request)
 
     try:
         user = await neon_auth_service.invite_admin_user(str(data.email), redirect_origin)
