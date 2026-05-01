@@ -16,6 +16,7 @@ import type {
 } from "../../src/api/admin";
 import type { GeneralMeetingSummaryData } from "../../src/api/public";
 import type { TenantConfig, SmtpConfig, SmtpStatus } from "../../src/api/config";
+import type { AdminUser, AdminUserListResponse } from "../../src/api/users";
 
 const BASE = "http://localhost";
 
@@ -61,6 +62,34 @@ export function resetConfigFixture() {
   };
   resetSmtpConfigFixture();
   resetSmtpStatusFixture();
+}
+
+// ---------------------------------------------------------------------------
+// Admin user management fixtures
+// ---------------------------------------------------------------------------
+
+export const CURRENT_USER_ID = "current-admin-id";
+
+export const ADMIN_USER_CURRENT: AdminUser = {
+  id: CURRENT_USER_ID,
+  email: "current-admin@example.com",
+  created_at: "2026-01-01T00:00:00.000Z",
+};
+
+export const ADMIN_USER_OTHER: AdminUser = {
+  id: "other-admin-id",
+  email: "other-admin@example.com",
+  created_at: "2026-02-01T00:00:00.000Z",
+};
+
+export let adminUsersFixture: AdminUserListResponse = {
+  users: [ADMIN_USER_CURRENT, ADMIN_USER_OTHER],
+};
+
+export function resetAdminUsersFixture() {
+  adminUsersFixture = {
+    users: [ADMIN_USER_CURRENT, ADMIN_USER_OTHER],
+  };
 }
 
 export const ADMIN_BUILDINGS: Building[] = [
@@ -1489,5 +1518,40 @@ export const handlers = [
       return HttpResponse.json(agmAuthSummaryFixture);
     }
     return HttpResponse.json(agmSummaryFixture);
+  }),
+
+  // ---------------------------------------------------------------------------
+  // Admin user management
+  // ---------------------------------------------------------------------------
+
+  http.get(`${BASE}/api/admin/users`, () =>
+    HttpResponse.json(adminUsersFixture)
+  ),
+
+  http.post(`${BASE}/api/admin/users/invite`, async ({ request }) => {
+    const body = await request.json() as { email: string };
+    if (body.email === "duplicate@example.com") {
+      return HttpResponse.json(
+        { detail: "A user with that email already exists." },
+        { status: 409 }
+      );
+    }
+    const newUser: AdminUser = {
+      id: "new-user-id",
+      email: body.email,
+      created_at: new Date().toISOString(),
+    };
+    return HttpResponse.json(newUser, { status: 201 });
+  }),
+
+  http.delete(`${BASE}/api/admin/users/:userId`, ({ params }) => {
+    const userId = params.userId as string;
+    if (userId === "last-admin-id") {
+      return HttpResponse.json(
+        { detail: "Cannot remove the last admin user." },
+        { status: 409 }
+      );
+    }
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

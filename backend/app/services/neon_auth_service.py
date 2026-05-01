@@ -1,0 +1,182 @@
+"""
+Neon Auth management API service for admin user management.
+
+This module is the only place in the codebase that calls the Neon Auth management API.
+It handles listing, creating, and deleting admin users via server-side API key auth.
+
+The Neon Auth management API base URL is:
+  https://console.neon.tech/api/v2/projects/{project_id}/branches/{branch_id}/auth
+
+The NEON_API_KEY is a server-side secret. It is never returned in any API response,
+never logged, and never sent to the frontend.
+"""
+from __future__ import annotations
+
+import secrets
+
+import httpx
+
+from app.config import settings
+from app.logging_config import get_logger
+from app.schemas.admin import AdminUserOut
+
+logger = get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Custom exception hierarchy
+# ---------------------------------------------------------------------------
+
+
+class NeonAuthNotConfiguredError(Exception):
+    """Raised when NEON_API_KEY, NEON_PROJECT_ID, or NEON_BRANCH_ID are absent."""
+
+
+class NeonAuthDuplicateUserError(Exception):
+    """Raised when the email already exists in Neon Auth (409 from management API)."""
+
+
+class NeonAuthUserNotFoundError(Exception):
+    """Raised when the target user does not exist (404 from management API)."""
+
+
+class NeonAuthServiceError(Exception):
+    """Raised on any other non-2xx response from the Neon management API."""
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _check_configured() -> None:
+    """Raise NeonAuthNotConfiguredError if any required setting is absent."""
+    if not settings.neon_api_key or not settings.neon_project_id or not settings.neon_branch_id:
+        raise NeonAuthNotConfiguredError("User management not configured")
+
+
+def _management_base_url() -> str:
+    return (
+        f"https://console.neon.tech/api/v2/projects/{settings.neon_project_id}"
+        f"/branches/{settings.neon_branch_id}/auth"
+    )
+
+
+def _auth_headers() -> dict[str, str]:
+    return {"Authorization": f"Bearer {settings.neon_api_key}"}
+
+
+# ---------------------------------------------------------------------------
+# Service functions
+# ---------------------------------------------------------------------------
+
+
+async def list_admin_users() -> list[AdminUserOut]:
+    """Fetch all users from the Neon Auth management API.
+
+    Raises NeonAuthNotConfiguredError if neon_api_key/project_id/branch_id are absent.
+    Raises NeonAuthServiceError on non-200 response from Neon.
+    """
+    _check_configured()
+    url = f"{_management_base_url()}/users"
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url, headers=_auth_headers(), timeout=15.0)
+    if resp.status_code != 200:
+        logger.error("neon_list_users_failed", status=resp.status_code)
+        raise NeonAuthServiceError(
+            f"Neon Auth returned {resp.status_code} listing users"
+        )
+    data = resp.json()
+    users = data.get("users", [])
+    return [
+        AdminUserOut(
+            id=u["id"],
+            email=u["email"],
+            created_at=u["createdAt"],
+        )
+        for u in users
+    ]
+
+
+async def invite_admin_user(email: str, redirect_origin: str) -> AdminUserOut:
+    """Create a user in Neon Auth and trigger a password-reset email.
+
+    Steps:
+      1. POST /users to create the account with a random discarded password.
+      2. POST {neon_auth_base_url}/request-password-reset to send the setup email.
+
+    Raises NeonAuthNotConfiguredError if config is absent.
+    Raises NeonAuthDuplicateUserError if the email already exists (Neon returns 409).
+    Raises NeonAuthServiceError on other non-2xx responses.
+    """
+    _check_configured()
+
+    # Generate a cryptographically random password — discarded immediately after use.
+    # The invitee sets their own password via the password-reset email.
+    temp_password = secrets.token_urlsafe(32)  # nosemgrep: no-hardcoded-secrets -- random temporary credential, discarded immediately after API call
+
+    url = f"{_management_base_url()}/users"
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            url,
+            headers={**_auth_headers(), "Content-Type": "application/json"},
+            json={"email": email, "name": "", "password": temp_password},
+            timeout=15.0,
+        )
+
+    # Discard temp_password immediately — do not log or store it.
+    del temp_password
+
+    if resp.status_code == 409:
+        raise NeonAuthDuplicateUserError(f"User with email {email} already exists")
+    if resp.status_code not in (200, 201):
+        logger.error("neon_create_user_failed", status=resp.status_code)
+        raise NeonAuthServiceError(
+            f"Neon Auth returned {resp.status_code} creating user"
+        )
+
+    user_data = resp.json()
+
+    # Trigger password-reset email so the invitee can set their password.
+    neon_auth_base_url = settings.neon_auth_base_url.rstrip("/")
+    reset_url = f"{neon_auth_base_url}/request-password-reset"
+    redirect_to = f"{redirect_origin}/admin/login"
+
+    async with httpx.AsyncClient() as client:
+        reset_resp = await client.post(
+            reset_url,
+            json={"email": email, "redirectTo": redirect_to},
+            timeout=15.0,
+        )
+
+    if reset_resp.status_code not in (200, 201):
+        logger.error("neon_password_reset_failed", status=reset_resp.status_code, email=email)
+        raise NeonAuthServiceError(
+            f"Password reset email failed with status {reset_resp.status_code}"
+        )
+
+    return AdminUserOut(
+        id=user_data["id"],
+        email=user_data["email"],
+        created_at=user_data["createdAt"],
+    )
+
+
+async def remove_admin_user(user_id: str) -> None:
+    """Delete a user from Neon Auth.
+
+    Raises NeonAuthNotConfiguredError if config is absent.
+    Raises NeonAuthUserNotFoundError if the user does not exist (Neon returns 404).
+    Raises NeonAuthServiceError on other non-2xx responses.
+    """
+    _check_configured()
+    url = f"{_management_base_url()}/users/{user_id}"
+    async with httpx.AsyncClient() as client:
+        resp = await client.delete(url, headers=_auth_headers(), timeout=15.0)
+    if resp.status_code == 404:
+        raise NeonAuthUserNotFoundError(f"User {user_id} not found")
+    if resp.status_code not in (200, 204):
+        logger.error("neon_delete_user_failed", status=resp.status_code, user_id=user_id)
+        raise NeonAuthServiceError(
+            f"Neon Auth returned {resp.status_code} deleting user {user_id}"
+        )

@@ -70,6 +70,13 @@ class Settings(BaseSettings):
     testing_mode: bool = False
     email_override: str = ""
     environment: str = "development"
+    # Neon Auth management API settings for admin user management.
+    # All three default to empty string. When any is empty, user management
+    # endpoints return 503 so local dev still works without Neon credentials.
+    neon_api_key: str = ""  # nosemgrep: no-hardcoded-secrets -- Pydantic Settings field default; real value supplied via NEON_API_KEY env var in all deployed environments
+    neon_project_id: str = ""
+    neon_branch_id: str = ""
+
     # Production guard for the ballot-reset endpoint (RR5-01).
     # Must be explicitly set to True via ENABLE_BALLOT_RESET env var to enable the endpoint.
     # Defaults to False so the endpoint is blocked in all deployed environments unless opted in.

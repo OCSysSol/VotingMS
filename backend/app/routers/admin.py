@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import engine, get_db
 from app.logging_config import get_logger
 from app.models import EmailDelivery, GeneralMeeting, get_effective_status
@@ -24,6 +25,9 @@ from app.schemas.admin import (
     AddEmailRequest,
     AddOwnerEmailRequest,
     UpdateOwnerEmailRequest,
+    AdminUserInviteRequest,
+    AdminUserListOut,
+    AdminUserOut,
     GeneralMeetingBallotResetOut,
     GeneralMeetingCloseOut,
     GeneralMeetingCreate,
@@ -60,7 +64,14 @@ from app.services import admin_service
 from app.services import config_service
 from app.services import smtp_config_service
 from app.services import blob_service
-from app.rate_limiter import admin_import_limiter, admin_close_limiter
+from app.services import neon_auth_service
+from app.services.neon_auth_service import (
+    NeonAuthDuplicateUserError,
+    NeonAuthNotConfiguredError,
+    NeonAuthServiceError,
+    NeonAuthUserNotFoundError,
+)
+from app.rate_limiter import admin_import_limiter, admin_close_limiter, admin_invite_limiter
 
 router = APIRouter(tags=["admin"], dependencies=[Depends(require_admin)])
 logger = get_logger(__name__)
@@ -156,6 +167,94 @@ def _detect_file_format(file: UploadFile) -> str:
         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
         detail="File must be a CSV or Excel file",
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin user management
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users", response_model=AdminUserListOut)
+async def list_admin_users(
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> AdminUserListOut:
+    """List all admin users via the Neon Auth management API.
+
+    Returns 503 if Neon Auth management is not configured (NEON_API_KEY absent).
+    """
+    try:
+        users = await neon_auth_service.list_admin_users()
+    except NeonAuthNotConfiguredError:
+        raise HTTPException(status_code=503, detail="User management not configured")
+    except NeonAuthServiceError as exc:
+        logger.error("list_admin_users_error", error=str(exc))
+        raise HTTPException(status_code=502, detail="User management service error")
+    return AdminUserListOut(users=users)
+
+
+@router.post("/users/invite", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
+async def invite_admin_user(
+    data: AdminUserInviteRequest,
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> AdminUserOut:
+    """Create a new admin user and trigger a password-reset email.
+
+    Rate limited to 10 calls per 10 minutes per admin session.
+    Returns 409 if the email is already registered.
+    Returns 422 if the email is not a valid email address (Pydantic validation).
+    Returns 503 if Neon Auth management is not configured.
+    """
+    admin_invite_limiter.check("admin")
+
+    redirect_origin = settings.allowed_origin.rstrip("/")
+
+    try:
+        user = await neon_auth_service.invite_admin_user(str(data.email), redirect_origin)
+    except NeonAuthNotConfiguredError:
+        raise HTTPException(status_code=503, detail="User management not configured")
+    except NeonAuthDuplicateUserError:
+        raise HTTPException(status_code=409, detail="A user with that email already exists.")
+    except NeonAuthServiceError as exc:
+        logger.error("invite_admin_user_error", error=str(exc))
+        raise HTTPException(status_code=502, detail="User management service error")
+    return user
+
+
+@router.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_admin_user(
+    user_id: str,
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> None:
+    """Remove an admin user.
+
+    Returns 403 if attempting to remove the current user (self-removal guard).
+    Returns 409 if this is the last admin user.
+    Returns 404 if the user does not exist.
+    Returns 503 if Neon Auth management is not configured.
+    """
+    if user_id == current_user.user_id:
+        raise HTTPException(status_code=403, detail="Cannot remove yourself.")
+
+    try:
+        users = await neon_auth_service.list_admin_users()
+    except NeonAuthNotConfiguredError:
+        raise HTTPException(status_code=503, detail="User management not configured")
+    except NeonAuthServiceError as exc:
+        logger.error("remove_admin_user_list_error", error=str(exc))
+        raise HTTPException(status_code=502, detail="User management service error")
+
+    if len(users) <= 1:
+        raise HTTPException(status_code=409, detail="Cannot remove the last admin user.")
+
+    try:
+        await neon_auth_service.remove_admin_user(user_id)
+    except NeonAuthNotConfiguredError:
+        raise HTTPException(status_code=503, detail="User management not configured")
+    except NeonAuthUserNotFoundError:
+        raise HTTPException(status_code=404, detail="User not found.")
+    except NeonAuthServiceError as exc:
+        logger.error("remove_admin_user_error", error=str(exc), user_id=user_id)
+        raise HTTPException(status_code=502, detail="User management service error")
 
 
 # ---------------------------------------------------------------------------

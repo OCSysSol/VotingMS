@@ -105,3 +105,7 @@ admin_import_limiter = RateLimiter(max_requests=20, window_seconds=60)
 # Raised from 10 to 30 so parallel E2E jobs sharing the "admin" key do not
 # saturate the bucket during concurrent beforeAll/afterAll close-meeting calls.
 admin_close_limiter = RateLimiter(max_requests=30, window_seconds=60)
+
+# Admin invite: 10 calls per 10 minutes per admin session.
+# Prevents abuse of the password-reset email flow as a spam vector.
+admin_invite_limiter = RateLimiter(max_requests=10, window_seconds=600)

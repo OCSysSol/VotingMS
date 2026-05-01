@@ -7,13 +7,32 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, computed_field, field_validator, model_validator
+from pydantic import BaseModel, EmailStr, Field, computed_field, field_validator, model_validator
 
 from app.models.motion import MotionType
 from app.schemas.shared import MotionOptionOut
 
 # Re-export so existing callers that import MotionOptionOut from admin keep working.
 __all__ = ["MotionOptionOut"]
+
+
+# ---------------------------------------------------------------------------
+# Admin user management schemas
+# ---------------------------------------------------------------------------
+
+
+class AdminUserOut(BaseModel):
+    id: str
+    email: str
+    created_at: datetime
+
+
+class AdminUserListOut(BaseModel):
+    users: list[AdminUserOut]
+
+
+class AdminUserInviteRequest(BaseModel):
+    email: EmailStr
 
 
 # ---------------------------------------------------------------------------
