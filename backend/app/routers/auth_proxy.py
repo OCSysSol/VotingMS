@@ -12,6 +12,8 @@ Auth's actual endpoint is ``request-password-reset``.
 """
 from __future__ import annotations
 
+import json
+
 import httpx
 from fastapi import APIRouter, Request
 from fastapi.responses import Response
@@ -55,6 +57,19 @@ async def proxy_auth(path: str, request: Request) -> Response:
     }
 
     body = await request.body()
+
+    # For password-reset requests, inject redirectTo so the reset email link
+    # points back to the correct deployment's admin login page.  This avoids
+    # the need to configure per-branch trusted origins in Neon Auth.
+    if path == "request-password-reset" and settings.allowed_origin:
+        try:
+            payload = json.loads(body)
+            payload["redirectTo"] = f"{settings.allowed_origin}/admin/login"
+            body = json.dumps(payload).encode()
+            headers["content-type"] = "application/json"
+            headers.pop("content-length", None)  # httpx sets this automatically
+        except (json.JSONDecodeError, Exception):
+            pass  # forward as-is if body is not valid JSON
 
     async with httpx.AsyncClient() as client:
         resp = await client.request(

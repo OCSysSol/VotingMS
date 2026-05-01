@@ -258,6 +258,91 @@ class TestAuthProxyHappyPath:
 
 
 # ---------------------------------------------------------------------------
+# redirectTo injection for request-password-reset
+# ---------------------------------------------------------------------------
+
+
+class TestAuthProxyRedirectToInjection:
+    async def test_injects_redirect_to_when_allowed_origin_is_set(self):
+        """proxy_auth injects redirectTo into the forwarded body for request-password-reset."""
+        import json as _json
+
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(
+            method="POST",
+            body=b'{"email":"admin@example.com"}',
+            headers=[("content-type", "application/json")],
+        )
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = "https://preview.example.com"
+            await proxy_auth(path="forget-password", request=request)
+
+        forwarded_body = _json.loads(mock_client.request.call_args.kwargs["content"])
+        assert forwarded_body["redirectTo"] == "https://preview.example.com/admin/login"
+        assert forwarded_body["email"] == "admin@example.com"
+
+    async def test_does_not_inject_redirect_to_when_allowed_origin_is_empty(self):
+        """proxy_auth forwards body unchanged when allowed_origin is empty."""
+        import json as _json
+
+        original_body = b'{"email":"admin@example.com"}'
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST", body=original_body)
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            await proxy_auth(path="forget-password", request=request)
+
+        forwarded_body = mock_client.request.call_args.kwargs["content"]
+        parsed = _json.loads(forwarded_body)
+        assert "redirectTo" not in parsed
+
+    async def test_forwards_body_unchanged_when_body_is_not_valid_json(self):
+        """proxy_auth forwards the body unchanged if it is not valid JSON (no crash)."""
+        non_json_body = b"not-valid-json"
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST", body=non_json_body)
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = "https://preview.example.com"
+            # Must not raise; body should be forwarded as-is
+            response = await proxy_auth(path="forget-password", request=request)
+
+        assert response.status_code == 200
+        forwarded_body = mock_client.request.call_args.kwargs["content"]
+        assert forwarded_body == non_json_body
+
+    async def test_does_not_modify_body_for_other_paths(self):
+        """proxy_auth does not inject redirectTo for non-password-reset paths."""
+        import json as _json
+
+        original_body = b'{"email":"admin@example.com","password":"secret"}'
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST", body=original_body)
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = "https://preview.example.com"
+            await proxy_auth(path="sign-in/email", request=request)
+
+        forwarded_body = mock_client.request.call_args.kwargs["content"]
+        parsed = _json.loads(forwarded_body)
+        assert "redirectTo" not in parsed
+
+
+# ---------------------------------------------------------------------------
 # State / precondition errors
 # ---------------------------------------------------------------------------
 
