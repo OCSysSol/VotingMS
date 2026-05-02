@@ -10,11 +10,11 @@ import { resetConfigFixture, resetAdminUsersFixture, CURRENT_USER_ID, ADMIN_USER
 import * as configApi from "../../../api/config";
 import * as usersApi from "../../../api/users";
 import { vi } from "vitest";
-import { authClient } from "../../../lib/auth-client";
+import { authClient, changePassword as changePasswordFn } from "../../../lib/auth-client";
 
 const BASE = "http://localhost";
 
-// Mock authClient so getSession returns a predictable current user.
+// Mock auth-client so getSession and changePassword return predictable values.
 // NOTE: vi.mock is hoisted before imports, so we cannot use imported constants here.
 // The literal "current-admin-id" must match CURRENT_USER_ID exported from handlers.ts.
 vi.mock("../../../lib/auth-client", () => ({
@@ -22,8 +22,8 @@ vi.mock("../../../lib/auth-client", () => ({
     getSession: vi.fn().mockResolvedValue({
       data: { user: { id: "current-admin-id" } },
     }),
-    changePassword: vi.fn().mockResolvedValue({ error: null }),
   },
+  changePassword: vi.fn().mockResolvedValue({ error: null }),
 }));
 
 function renderPage() {
@@ -722,7 +722,8 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "Email Server" }));
-    expect(screen.queryByLabelText("App name")).not.toBeInTheDocument();
+    // The tab panel stays in the DOM (hidden attr) — assert not visible, not absent
+    expect(screen.getByLabelText("App name")).not.toBeVisible();
   });
 
   it("clicking UI & Theme tab from Email Server tab restores branding form", async () => {
@@ -730,9 +731,10 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "Email Server" }));
-    expect(screen.queryByLabelText("App name")).not.toBeInTheDocument();
+    // The tab panel stays in the DOM (hidden attr) — assert not visible while inactive
+    expect(screen.getByLabelText("App name")).not.toBeVisible();
     await user.click(screen.getByRole("tab", { name: "UI & Theme" }));
-    await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("App name")).toBeVisible());
     expect(screen.getByRole("tab", { name: "UI & Theme" })).toHaveAttribute("aria-selected", "true");
   });
 
@@ -1131,6 +1133,33 @@ describe("SettingsPage", () => {
 
   // --- User Management tab ---
 
+  it("switching away and back to User Management tab does not re-fetch users", async () => {
+    // Exercises the hasFetchedUsers.current guard: the second tab activation must
+    // NOT trigger a second GET /api/admin/users request.
+    const user = userEvent.setup();
+    let fetchCount = 0;
+    server.use(
+      http.get(`${BASE}/api/admin/users`, () => {
+        fetchCount++;
+        return HttpResponse.json({ users: [ADMIN_USER_CURRENT] });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+
+    // First activation — triggers fetch
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeInTheDocument());
+    expect(fetchCount).toBe(1);
+
+    // Switch away, then back — must NOT trigger a second fetch
+    await user.click(screen.getByRole("tab", { name: "UI & Theme" }));
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    // Give any potential async work a moment to complete
+    await waitFor(() => expect(screen.getByText(ADMIN_USER_CURRENT.email)).toBeVisible());
+    expect(fetchCount).toBe(1);
+  });
+
   it("shows loading state while fetching users", async () => {
     const user = userEvent.setup();
     server.use(
@@ -1399,6 +1428,40 @@ describe("SettingsPage", () => {
     expect(screen.queryByRole("dialog", { name: "Remove user?" })).not.toBeInTheDocument();
   });
 
+  it("remove flow: Escape key closes confirmation dialog without removing user", async () => {
+    const spy = vi.spyOn(usersApi, "removeAdminUser");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Remove user?" })).toBeInTheDocument());
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    // Non-Escape keydown must NOT close the dialog (covers the false branch)
+    fireEvent.keyDown(overlay, { key: "Enter" });
+    expect(screen.getByRole("dialog", { name: "Remove user?" })).toBeInTheDocument();
+    // Escape keydown closes the dialog
+    fireEvent.keyDown(overlay, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove user?" })).not.toBeInTheDocument());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("remove flow: overlay click closes confirmation dialog without removing user", async () => {
+    const spy = vi.spyOn(usersApi, "removeAdminUser");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Remove" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Remove user?" })).toBeInTheDocument());
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    fireEvent.click(overlay);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Remove user?" })).not.toBeInTheDocument());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
   it("remove flow: confirming removes user row and shows success", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -1640,7 +1703,7 @@ describe("SettingsPage", () => {
   });
 
   it("successful password change closes modal and shows success message", async () => {
-    vi.mocked(authClient.changePassword).mockResolvedValueOnce({ error: null } as never);
+    vi.mocked(changePasswordFn).mockResolvedValueOnce({ error: null } as never);
     const user = await openChangePasswordModal();
     await user.type(screen.getByLabelText("Current password"), "OldPass1!");
     await user.type(screen.getByLabelText("New password"), "NewPass1!");
@@ -1652,7 +1715,7 @@ describe("SettingsPage", () => {
 
   it("modal has NOT closed while change-password call is pending, and HAS closed after it completes", async () => {
     let resolve!: (value: { error: null }) => void;
-    vi.mocked(authClient.changePassword).mockImplementationOnce(
+    vi.mocked(changePasswordFn).mockImplementationOnce(
       () => new Promise((res) => { resolve = res; })
     ) as never;
     const user = await openChangePasswordModal();
@@ -1670,7 +1733,7 @@ describe("SettingsPage", () => {
   });
 
   it("wrong current password shows inline error inside modal", async () => {
-    vi.mocked(authClient.changePassword).mockResolvedValueOnce({
+    vi.mocked(changePasswordFn).mockResolvedValueOnce({
       error: { message: "Invalid current password." },
     } as never);
     const user = await openChangePasswordModal();
@@ -1685,7 +1748,7 @@ describe("SettingsPage", () => {
   });
 
   it("changePassword error without message shows fallback error", async () => {
-    vi.mocked(authClient.changePassword).mockResolvedValueOnce({
+    vi.mocked(changePasswordFn).mockResolvedValueOnce({
       error: {},
     } as never);
     const user = await openChangePasswordModal();
@@ -1698,7 +1761,7 @@ describe("SettingsPage", () => {
   });
 
   it("changePassword throws shows fallback error", async () => {
-    vi.mocked(authClient.changePassword).mockRejectedValueOnce(new Error("Network error")) as never;
+    vi.mocked(changePasswordFn).mockRejectedValueOnce(new Error("Network error")) as never;
     const user = await openChangePasswordModal();
     await user.type(screen.getByLabelText("Current password"), "OldPass1!");
     await user.type(screen.getByLabelText("New password"), "NewPass1!");
@@ -1732,7 +1795,7 @@ describe("SettingsPage", () => {
 
   it("Update Password button shows Updating… while in flight", async () => {
     let resolve!: (value: { error: null }) => void;
-    vi.mocked(authClient.changePassword).mockImplementationOnce(
+    vi.mocked(changePasswordFn).mockImplementationOnce(
       () => new Promise((res) => { resolve = res; })
     ) as never;
     const user = await openChangePasswordModal();

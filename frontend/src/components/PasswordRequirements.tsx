@@ -44,11 +44,15 @@ interface PasswordRequirementsProps {
 
 export default function PasswordRequirements({ reqs }: PasswordRequirementsProps) {
   return (
-    <ul className="password-requirements" aria-live="polite" aria-label="Password requirements">
+    <ul className="password-requirements" aria-label="Password requirements">
       {REQUIREMENTS.map(({ key, label }) => {
         const met = reqs[key];
         return (
-          <li key={key} className={met ? "password-requirements__item password-requirements__item--met" : "password-requirements__item"}>
+          <li
+            key={key}
+            className={met ? "password-requirements__item password-requirements__item--met" : "password-requirements__item"}
+            aria-label={`${label}: ${met ? "met" : "not met"}`}
+          >
             <span className="password-requirements__icon" aria-hidden="true">
               {met ? "✓" : "✗"}
             </span>

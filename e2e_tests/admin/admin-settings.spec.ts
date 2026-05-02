@@ -1,5 +1,5 @@
 import { test, expect } from "../fixtures";
-import { makeAdminApi } from "../workflows/helpers";
+import { makeAdminApi, ADMIN_AUTH_PATH } from "../workflows/helpers";
 
 // Admin email used during global-setup provisioning — matches the current logged-in user.
 const ADMIN_EMAIL = process.env.ADMIN_USERNAME ?? "admin@example.com";
@@ -110,19 +110,10 @@ test.describe("Admin Settings — tenant branding", () => {
     await page.getByTestId("branding-save-btn").click();
     await expect(page.getByText("Settings saved.")).toBeVisible();
 
-    // Poll until /api/config reflects the new app_name — Lambda caching can cause
-    // the refetch to lag. Only assert the sidebar once the API confirms the change
-    // so we don't race against network latency on the preview deployment.
-    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
-    for (let i = 0; i < 20; i++) {
-      const res = await page.request.get(`${baseURL}/api/config`);
-      const cfg = await res.json() as { app_name: string };
-      if (cfg.app_name === testAppName) break;
-      await page.waitForTimeout(500);
-    }
-
-    // After invalidateQueries triggers a refetch, the sidebar span should update.
-    // Use a generous timeout to allow for Lambda re-fetch latency.
+    // Wait until the sidebar span reflects the new app_name. The sidebar re-renders
+    // after React Query invalidates the public-config cache following the save. Use
+    // an explicit toHaveText assertion with a generous timeout instead of polling
+    // with hardcoded sleeps — this resolves as soon as the DOM updates.
     await expect(page.locator(".admin-sidebar__app-name").first()).toHaveText(testAppName, {
       timeout: 15000,
     });
@@ -408,7 +399,7 @@ test.describe("Admin Settings — User Management tab", () => {
     ]);
 
     // Open the invite form
-    await page.getByRole("button", { name: "Invite admin" }).click();
+    await page.getByRole("button", { name: "Invite Admin" }).click();
     await expect(page.getByLabel("Email address")).toBeVisible();
 
     // Fill in the invite email and submit
