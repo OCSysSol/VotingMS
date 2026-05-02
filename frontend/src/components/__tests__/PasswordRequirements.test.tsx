@@ -162,14 +162,45 @@ describe("PasswordRequirements component", () => {
 
   // --- Accessibility ---
 
-  it("has aria-live='polite' for screen reader announcements", () => {
+  it("does not have aria-live on the list — individual items carry aria-label for targeted announcements", () => {
     render(<PasswordRequirements reqs={{ minLength: false, hasUppercase: false, hasLowercase: false, hasDigit: false }} />);
     const list = document.querySelector(".password-requirements");
-    expect(list).toHaveAttribute("aria-live", "polite");
+    expect(list).not.toHaveAttribute("aria-live");
   });
 
   it("has accessible label on the list", () => {
     render(<PasswordRequirements reqs={{ minLength: false, hasUppercase: false, hasLowercase: false, hasDigit: false }} />);
     expect(screen.getByRole("list", { name: "Password requirements" })).toBeInTheDocument();
+  });
+
+  it("each unmet item has aria-label ending in 'not met'", () => {
+    render(<PasswordRequirements reqs={{ minLength: false, hasUppercase: false, hasLowercase: false, hasDigit: false }} />);
+    const items = document.querySelectorAll(".password-requirements__item");
+    items.forEach((item) => {
+      expect(item.getAttribute("aria-label")).toMatch(/: not met$/);
+    });
+  });
+
+  it("each met item has aria-label ending in 'met' (not 'not met')", () => {
+    render(<PasswordRequirements reqs={{ minLength: true, hasUppercase: true, hasLowercase: true, hasDigit: true }} />);
+    const items = document.querySelectorAll(".password-requirements__item");
+    items.forEach((item) => {
+      const label = item.getAttribute("aria-label") ?? "";
+      expect(label).toMatch(/: met$/);
+      expect(label).not.toMatch(/not met/);
+    });
+  });
+
+  it("individual item aria-label reflects correct met/unmet state when mixed", () => {
+    render(<PasswordRequirements reqs={{ minLength: true, hasUppercase: false, hasLowercase: true, hasDigit: false }} />);
+    const items = document.querySelectorAll(".password-requirements__item");
+    // minLength: met
+    expect(items[0].getAttribute("aria-label")).toMatch(/: met$/);
+    // hasUppercase: not met
+    expect(items[1].getAttribute("aria-label")).toMatch(/: not met$/);
+    // hasLowercase: met
+    expect(items[2].getAttribute("aria-label")).toMatch(/: met$/);
+    // hasDigit: not met
+    expect(items[3].getAttribute("aria-label")).toMatch(/: not met$/);
   });
 });

@@ -18,3 +18,25 @@ const baseURL =
     : "/api/auth";
 
 export const authClient = createAuthClient({ baseURL });
+
+/**
+ * Change the current admin's password.
+ *
+ * `changePassword` is available on the Better Auth client but is not part of
+ * the TypeScript interface exported by `createAuthClient`. This wrapper
+ * provides a typed entry point without resorting to `as unknown as` casts at
+ * the call site.
+ */
+export async function changePassword(opts: {
+  currentPassword: string;
+  newPassword: string;
+  revokeOtherSessions: boolean;
+}): Promise<{ error?: { message?: string } | null }> {
+  return (
+    authClient as unknown as {
+      changePassword: (
+        opts: { currentPassword: string; newPassword: string; revokeOtherSessions: boolean }
+      ) => Promise<{ error?: { message?: string } | null }>;
+    }
+  ).changePassword(opts);
+}

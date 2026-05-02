@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, testSmtpConfig } from "../../api/config";
 import type { TenantConfig } from "../../api/config";
 import { listAdminUsers, inviteAdminUser, removeAdminUser } from "../../api/users";
 import type { AdminUser } from "../../api/users";
-import { authClient } from "../../lib/auth-client";
+import { authClient, changePassword } from "../../lib/auth-client";
 import PasswordRequirements, { checkPasswordRequirements, allRequirementsMet } from "../../components/PasswordRequirements";
 
 type SettingsTab = "ui-theme" | "email-server" | "user-management";
@@ -47,6 +47,7 @@ export default function SettingsPage() {
   const [testEmailRecipient, setTestEmailRecipient] = useState("");
 
   // User management state
+  const hasFetchedUsers = useRef(false);
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
@@ -95,9 +96,8 @@ export default function SettingsPage() {
       });
   }, []);
 
-  // Load users when User Management tab is first activated
-  useEffect(() => {
-    if (activeTab !== "user-management") return;
+  function refreshUsers() {
+    hasFetchedUsers.current = false;
     setUsersLoading(true);
     setUsersError("");
     Promise.all([
@@ -108,6 +108,7 @@ export default function SettingsPage() {
         setUsers(data.users);
         const userId = (session as { data?: { user?: { id?: string } } } | null)?.data?.user?.id ?? null;
         setCurrentUserId(userId);
+        hasFetchedUsers.current = true;
       })
       .catch(() => {
         setUsersError("Failed to load users.");
@@ -115,6 +116,16 @@ export default function SettingsPage() {
       .finally(() => {
         setUsersLoading(false);
       });
+  }
+
+  // Load users when User Management tab is first activated — but only once.
+  // Subsequent tab switches reuse the already-fetched list. Mutations call
+  // refreshUsers() explicitly to re-fetch after a change.
+  useEffect(() => {
+    if (activeTab !== "user-management") return;
+    if (hasFetchedUsers.current) return;
+    refreshUsers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
   async function handleLogoFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -315,9 +326,7 @@ export default function SettingsPage() {
     setChangePwdError("");
     setIsChangingPassword(true);
     try {
-      const result = await (authClient as unknown as {
-        changePassword: (opts: { currentPassword: string; newPassword: string; revokeOtherSessions: boolean }) => Promise<{ error?: { message?: string } | null }>;
-      }).changePassword({
+      const result = await changePassword({
         currentPassword: changePwdCurrent,
         newPassword: changePwdNew,
         revokeOtherSessions: false,
@@ -422,12 +431,12 @@ export default function SettingsPage() {
       </div>
 
       {/* UI & Theme tab */}
-      {activeTab === "ui-theme" && (
-        <div
-          role="tabpanel"
-          id="tab-panel-ui-theme"
-          aria-labelledby="tab-ui-theme"
-        >
+      <div
+        role="tabpanel"
+        id="tab-panel-ui-theme"
+        aria-labelledby="tab-ui-theme"
+        hidden={activeTab !== "ui-theme"}
+      >
           <div className="admin-card">
             <div className="admin-card__header">
               <p className="admin-card__title">Tenant Branding</p>
@@ -550,10 +559,10 @@ export default function SettingsPage() {
                 </div>
 
                 {saveSuccess && (
-                  <p style={{ color: "var(--green)", marginBottom: 12 }}>Settings saved.</p>
+                  <p className="state-message state-message--success" role="status">Settings saved.</p>
                 )}
                 {saveError && (
-                  <p className="field__error" style={{ marginBottom: 12 }}>{saveError}</p>
+                  <p className="field__error">{saveError}</p>
                 )}
                 {(uploadLogoSuccess || uploadFaviconSuccess) && (
                   <p
@@ -584,15 +593,14 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      )}
 
       {/* Email Server tab */}
-      {activeTab === "email-server" && (
-        <div
-          role="tabpanel"
-          id="tab-panel-email-server"
-          aria-labelledby="tab-email-server"
-        >
+      <div
+        role="tabpanel"
+        id="tab-panel-email-server"
+        aria-labelledby="tab-email-server"
+        hidden={activeTab !== "email-server"}
+      >
           <div className="admin-card">
             <div className="admin-card__header">
               <p className="admin-card__title">Mail Server</p>
@@ -671,18 +679,15 @@ export default function SettingsPage() {
                 </div>
 
                 {smtpSaveSuccess && (
-                  <p style={{ color: "var(--green)", marginBottom: 12 }}>SMTP settings saved.</p>
+                  <p className="state-message state-message--success" role="status">SMTP settings saved.</p>
                 )}
                 {smtpSaveError && (
-                  <p className="field__error" style={{ marginBottom: 12 }}>{smtpSaveError}</p>
+                  <p className="field__error">{smtpSaveError}</p>
                 )}
 
                 {smtpTestResult && (
                   <p
-                    style={{
-                      color: smtpTestResult.ok ? "var(--green)" : "var(--red)",
-                      marginBottom: 12,
-                    }}
+                    className={smtpTestResult.ok ? "state-message state-message--success" : "state-message state-message--error"}
                     role="status"
                   >
                     {smtpTestResult.message}
@@ -711,15 +716,14 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      )}
 
       {/* User Management tab */}
-      {activeTab === "user-management" && (
-        <div
-          role="tabpanel"
-          id="tab-panel-user-management"
-          aria-labelledby="tab-user-management"
-        >
+      <div
+        role="tabpanel"
+        id="tab-panel-user-management"
+        aria-labelledby="tab-user-management"
+        hidden={activeTab !== "user-management"}
+      >
           <div className="admin-card">
             <div className="admin-card__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <p className="admin-card__title">Admin Users</p>
@@ -736,15 +740,15 @@ export default function SettingsPage() {
             <div className="admin-card__body">
 
               {inviteSuccess && (
-                <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{inviteSuccess}</p>
+                <p role="status" className="state-message state-message--success">{inviteSuccess}</p>
               )}
 
               {removeSuccess && (
-                <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{removeSuccess}</p>
+                <p role="status" className="state-message state-message--success">{removeSuccess}</p>
               )}
 
               {changePwdSuccess && (
-                <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{changePwdSuccess}</p>
+                <p role="status" className="state-message state-message--success">{changePwdSuccess}</p>
               )}
 
               {removeError && (
@@ -768,9 +772,9 @@ export default function SettingsPage() {
                   <table className="admin-table">
                     <thead>
                       <tr>
-                        <th>Email</th>
-                        <th>Created</th>
-                        <th></th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Created</th>
+                        <th scope="col"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -814,7 +818,6 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
-      )}
 
       {/* Test email modal */}
       {showTestEmailModal && (
@@ -1007,35 +1010,24 @@ export default function SettingsPage() {
       {/* Remove user confirmation modal */}
       {removeConfirmUser && (
         <div
+          className="dialog-overlay"
           role="dialog"
           aria-modal="true"
           aria-labelledby="remove-user-dialog-title"
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.4)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
+          onKeyDown={(e) => { if (e.key === "Escape") setRemoveConfirmUser(null); }}
+          onClick={() => setRemoveConfirmUser(null)}
         >
           <div
-            style={{
-              background: "#fff",
-              borderRadius: "var(--r-md)",
-              padding: 32,
-              minWidth: 360,
-              maxWidth: 480,
-              width: "100%",
-              boxShadow: "var(--shadow-lg)",
-            }}
+            className="dialog"
+            onClick={(e) => e.stopPropagation()}
           >
-            <h2 id="remove-user-dialog-title" style={{ marginTop: 0, marginBottom: 16 }}>Remove user?</h2>
-            <p style={{ marginBottom: 24 }}>
-              Remove <strong>{removeConfirmUser.email}</strong>? They will lose admin access immediately.
-            </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <h2 id="remove-user-dialog-title" className="dialog__title">Remove user?</h2>
+            <div className="dialog__body">
+              <p>
+                Remove <strong>{removeConfirmUser.email}</strong>? They will lose admin access immediately.
+              </p>
+            </div>
+            <div className="dialog__actions">
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -1058,3 +1050,4 @@ export default function SettingsPage() {
     </div>
   );
 }
+
