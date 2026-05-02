@@ -1210,37 +1210,98 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByText("Failed to load users.")).toBeInTheDocument());
   });
 
-  it("shows Invite admin button on User Management tab", async () => {
+  it("shows Invite Admin button on User Management tab", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
   });
 
-  it("clicking Invite admin shows inline form", async () => {
+  it("clicking Invite Admin opens the invite modal", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    // Modal is not visible before clicking
+    expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    // Modal is now visible
+    const modal = screen.getByRole("dialog", { name: "Invite Admin User" });
+    expect(modal).toBeInTheDocument();
     expect(screen.getByLabelText("Email address")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send invite" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send Invite" })).toBeInTheDocument();
   });
 
-  it("Cancel collapses invite form without calling API", async () => {
+  it("Cancel button closes the invite modal without calling API", async () => {
     const user = userEvent.setup();
     const spy = vi.spyOn(usersApi, "inviteAdminUser");
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Invite Admin User" })).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "test@example.com");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument();
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("Escape key closes the invite modal without calling API", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(usersApi, "inviteAdminUser");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Invite Admin User" })).toBeInTheDocument());
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    fireEvent.keyDown(overlay, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("backdrop click closes the invite modal without calling API", async () => {
+    const user = userEvent.setup();
+    const spy = vi.spyOn(usersApi, "inviteAdminUser");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Invite Admin User" })).toBeInTheDocument());
+    const overlay = document.querySelector(".dialog-overlay") as HTMLElement;
+    fireEvent.click(overlay);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument());
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("invite flow: UI has NOT transitioned while async invite is pending, and HAS transitioned after it completes", async () => {
+    // Assert that modal stays open (email field visible) during the request and closes only after success.
+    const user = userEvent.setup();
+    server.use(
+      http.post(`${BASE}/api/admin/users/invite`, async () => {
+        await new Promise((r) => setTimeout(r, 50));
+        return HttpResponse.json({ id: "new-id", email: "pending@example.com", created_at: new Date().toISOString() }, { status: 201 });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "User Management" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByLabelText("Email address")).toBeInTheDocument());
+    await user.type(screen.getByLabelText("Email address"), "pending@example.com");
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
+    // While in-flight: modal still open, success NOT yet shown
+    expect(screen.getByLabelText("Email address")).toBeInTheDocument();
+    expect(screen.queryByText(/Invite sent to/)).not.toBeInTheDocument();
+    // After completion: modal closes and success message appears
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument());
+    expect(screen.getByText(/Invite sent to pending@example.com/)).toBeInTheDocument();
   });
 
   it("invite flow: submitting valid email shows success and new user in table", async () => {
@@ -1248,32 +1309,36 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByLabelText("Email address")).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "newuser@example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
     await waitFor(() => expect(screen.getByText(/Invite sent to newuser@example.com/)).toBeInTheDocument());
     // New user should appear in table
     expect(screen.getByText("newuser@example.com")).toBeInTheDocument();
-    // Form is hidden after success
-    expect(screen.queryByLabelText("Email address")).not.toBeInTheDocument();
+    // Modal is closed after success
+    expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument();
   });
 
-  it("invite flow: 409 duplicate shows inline error", async () => {
+  it("invite flow: 409 duplicate shows inline error in modal", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByLabelText("Email address")).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "duplicate@example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
     await waitFor(() =>
       expect(screen.getByText("A user with that email already exists.")).toBeInTheDocument()
     );
+    // Modal stays open to allow correction
+    expect(screen.getByRole("dialog", { name: "Invite Admin User" })).toBeInTheDocument();
   });
 
-  it("invite flow: send invite button is disabled while in flight", async () => {
+  it("invite flow: Send Invite button is disabled while in flight", async () => {
     const user = userEvent.setup();
     server.use(
       http.post(`${BASE}/api/admin/users/invite`, async () => {
@@ -1284,10 +1349,11 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByLabelText("Email address")).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "slow@example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
     expect(screen.getByRole("button", { name: "Sending…" })).toBeDisabled();
     await waitFor(() => expect(screen.getByText(/Invite sent to slow@example.com/)).toBeInTheDocument());
   });
@@ -1298,10 +1364,11 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByLabelText("Email address")).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "test@example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
     await waitFor(() => expect(screen.getByText("Failed to send invite.")).toBeInTheDocument());
   });
 
@@ -1442,14 +1509,17 @@ describe("SettingsPage", () => {
     // Navigate to User Management
     await waitFor(() => expect(screen.getByRole("tab", { name: "User Management" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "User Management" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Invite admin" })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Invite Admin" })).toBeInTheDocument());
 
-    // Step 1: Invite a user
-    await user.click(screen.getByRole("button", { name: "Invite admin" }));
+    // Step 1: Invite a user via modal
+    await user.click(screen.getByRole("button", { name: "Invite Admin" }));
+    await waitFor(() => expect(screen.getByRole("dialog", { name: "Invite Admin User" })).toBeInTheDocument());
     await user.type(screen.getByLabelText("Email address"), "sequence@example.com");
-    await user.click(screen.getByRole("button", { name: "Send invite" }));
+    await user.click(screen.getByRole("button", { name: "Send Invite" }));
     await waitFor(() => expect(screen.getByText(/Invite sent to sequence@example.com/)).toBeInTheDocument());
     expect(screen.getByText("sequence@example.com")).toBeInTheDocument();
+    // Modal should be closed after successful invite
+    expect(screen.queryByRole("dialog", { name: "Invite Admin User" })).not.toBeInTheDocument();
 
     // Step 2: Remove the newly invited user
     // The new user row has a Remove button (it's not the current user)
