@@ -2,7 +2,7 @@
 test-results
 frontend/playwright-report
 frontend/test-results
-.DS_Store
+**/.DS_Store
 .vercel
 .env
 .env.development
@@ -24,3 +24,5 @@ frontend/lcov.info
 tasks/pricing-strategy.md
 e2e_tests/.auth/
 e2e_tests/.run-suffix
+requirements.txt
+requirements.txt
