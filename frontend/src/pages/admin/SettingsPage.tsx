@@ -50,7 +50,7 @@ export default function SettingsPage() {
   const [usersLoading, setUsersLoading] = useState(false);
   const [usersError, setUsersError] = useState("");
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [isInviting, setIsInviting] = useState(false);
   const [inviteSuccess, setInviteSuccess] = useState("");
@@ -222,17 +222,29 @@ export default function SettingsPage() {
     }
   }
 
+  function handleInviteModalOpen() {
+    setInviteEmail("");
+    setInviteError("");
+    setInviteSuccess("");
+    setShowInviteModal(true);
+  }
+
+  function handleInviteModalClose() {
+    setShowInviteModal(false);
+    setInviteEmail("");
+    setInviteError("");
+  }
+
   async function handleInviteSubmit(e: React.FormEvent) {
     e.preventDefault();
     setInviteError("");
-    setInviteSuccess("");
     setIsInviting(true);
     try {
       const newUser = await inviteAdminUser(inviteEmail);
       setUsers((prev) => [...prev, newUser]);
       setInviteSuccess(`Invite sent to ${inviteEmail}`);
+      setShowInviteModal(false);
       setInviteEmail("");
-      setShowInviteForm(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send invite.";
       if (message.includes("409") || message.includes("already exists")) {
@@ -659,53 +671,15 @@ export default function SettingsPage() {
           <div className="admin-card">
             <div className="admin-card__header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <p className="admin-card__title">Admin Users</p>
-              {!showInviteForm && (
-                <button
-                  type="button"
-                  className="btn btn--primary"
-                  onClick={() => { setShowInviteForm(true); setInviteError(""); setInviteSuccess(""); }}
-                >
-                  Invite admin
-                </button>
-              )}
+              <button
+                type="button"
+                className="btn btn--primary"
+                onClick={handleInviteModalOpen}
+              >
+                Invite Admin
+              </button>
             </div>
             <div className="admin-card__body">
-              {showInviteForm && (
-                <form onSubmit={(e) => { void handleInviteSubmit(e); }} className="admin-form" style={{ marginBottom: 24 }}>
-                  <div className="field">
-                    <label className="field__label" htmlFor="invite-email">Email address</label>
-                    <input
-                      id="invite-email"
-                      className="field__input"
-                      type="email"
-                      value={inviteEmail}
-                      onChange={(e) => setInviteEmail(e.target.value)}
-                      placeholder="newadmin@example.com"
-                      required
-                      autoFocus
-                    />
-                  </div>
-                  {inviteError && (
-                    <p className="field__error" style={{ marginBottom: 12 }}>{inviteError}</p>
-                  )}
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      type="submit"
-                      className="btn btn--primary"
-                      disabled={isInviting}
-                    >
-                      {isInviting ? "Sending…" : "Send invite"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn--ghost"
-                      onClick={() => { setShowInviteForm(false); setInviteEmail(""); setInviteError(""); }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              )}
 
               {inviteSuccess && (
                 <p role="status" style={{ color: "var(--green)", marginBottom: 12 }}>{inviteSuccess}</p>
@@ -819,6 +793,60 @@ export default function SettingsPage() {
                 Send
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Invite Admin modal */}
+      {showInviteModal && (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="invite-admin-modal-title"
+          onKeyDown={(e) => { if (e.key === "Escape") handleInviteModalClose(); }}
+          onClick={(e) => { if (e.target === e.currentTarget) handleInviteModalClose(); }}
+        >
+          <div className="dialog">
+            <h2 id="invite-admin-modal-title" className="dialog__title">Invite Admin User</h2>
+            <form onSubmit={(e) => { void handleInviteSubmit(e); }}>
+              <div className="dialog__body">
+                <div className="field">
+                  <label className="field__label" htmlFor="invite-email">Email address</label>
+                  <input
+                    id="invite-email"
+                    className="field__input"
+                    type="email"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                    placeholder="newadmin@example.com"
+                    required
+                    autoFocus
+                    aria-invalid={!!inviteError}
+                  />
+                  {inviteError && (
+                    <span className="field__error">{inviteError}</span>
+                  )}
+                </div>
+              </div>
+              <div className="dialog__actions">
+                <button
+                  type="button"
+                  className="btn btn--ghost"
+                  onClick={handleInviteModalClose}
+                  disabled={isInviting}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  disabled={isInviting}
+                >
+                  {isInviting ? "Sending…" : "Send Invite"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
