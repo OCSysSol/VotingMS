@@ -401,6 +401,7 @@ async def unarchive_building(building_id: uuid.UUID, db: AsyncSession) -> Buildi
     if building is None:
         raise HTTPException(status_code=404, detail="Building not found")
     building.is_archived = False
+    building.unarchive_count += 1
     await db.commit()
     await db.refresh(building)
     return building

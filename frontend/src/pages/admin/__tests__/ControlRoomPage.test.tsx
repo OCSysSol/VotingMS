@@ -307,7 +307,7 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 2, created_at: "2022-01-01T00:00:00Z" },
         ])
       )
     );
@@ -335,8 +335,8 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
-          { id: "b4", name: "Delta Court", manager_email: "delta@example.com", is_archived: true, created_at: "2021-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b4", name: "Delta Court", manager_email: "delta@example.com", is_archived: true, unarchive_count: 0, created_at: "2021-01-01T00:00:00Z" },
         ])
       )
     );
@@ -359,7 +359,7 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
         ])
       ),
       http.post(`${BASE}/api/admin/buildings/:buildingId/unarchive`, async () => {
@@ -380,7 +380,7 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
         ])
       ),
       http.post(`${BASE}/api/admin/buildings/:buildingId/unarchive`, () =>
@@ -399,7 +399,7 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
         ])
       )
     );
@@ -418,7 +418,7 @@ describe("ControlRoomPage", () => {
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
         ])
       ),
       http.post(`${BASE}/api/admin/buildings/:buildingId/unarchive`, async () => {
@@ -459,20 +459,143 @@ describe("ControlRoomPage", () => {
     vi.useRealTimers();
   });
 
-  // --- Lot count display ---
+  // --- Tier picker option labels ---
 
-  it("displays '—' for lot_count when not returned by API", async () => {
+  it("tier select shows building limit labels in options", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    const select = screen.getByLabelText("Tier name");
+    const options = Array.from((select as HTMLSelectElement).options).map((o) => o.text);
+    expect(options).toContain("Free (1 building)");
+    expect(options).toContain("Starter (up to 10 buildings)");
+    expect(options).toContain("Growth (up to 25 buildings)");
+    expect(options).toContain("Expansion (up to 50 buildings)");
+    expect(options).toContain("Enterprise (unlimited)");
+  });
+
+  // --- Auto-populate building limit from selected tier ---
+
+  it("selecting Free tier auto-populates building limit to 1", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Free" } });
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(1);
+  });
+
+  it("selecting Starter tier auto-populates building limit to 10", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Starter" } });
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(10);
+  });
+
+  it("selecting Growth tier auto-populates building limit to 25", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Growth" } });
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(25);
+  });
+
+  it("selecting Expansion tier auto-populates building limit to 50", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Expansion" } });
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(50);
+  });
+
+  it("selecting Enterprise tier clears the building limit field (unlimited)", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: "Starter", building_limit: 10, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toHaveValue("Starter"));
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Enterprise" } });
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(null);
+  });
+
+  it("building limit input remains editable after tier auto-populate", async () => {
+    const user = userEvent.setup();
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/subscription`, () =>
+        HttpResponse.json({ tier_name: null, building_limit: null, active_building_count: 0 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("Tier name")).toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText("Tier name"), { target: { value: "Starter" } });
+    // Auto-populated to 10
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(10);
+    // Override manually
+    await user.clear(screen.getByLabelText("Building limit (leave blank for unlimited)"));
+    await user.type(screen.getByLabelText("Building limit (leave blank for unlimited)"), "15");
+    expect(screen.getByLabelText("Building limit (leave blank for unlimited)")).toHaveValue(15);
+  });
+
+  // --- Times unarchived column ---
+
+  it("renders 'Times unarchived' column header in archived buildings table", async () => {
     mockUseSession.mockReturnValue(makeSession(true));
     server.use(
       http.get(`${BASE}/api/admin/buildings`, () =>
         HttpResponse.json([
-          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 0, created_at: "2022-01-01T00:00:00Z" },
         ])
       )
     );
     renderPage();
     await waitFor(() => expect(screen.getByText("Gamma House")).toBeInTheDocument());
-    // lot_count not set → fallback "—"
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Times unarchived" })).toBeInTheDocument();
+  });
+
+  it("displays unarchive_count value for each archived building", async () => {
+    mockUseSession.mockReturnValue(makeSession(true));
+    server.use(
+      http.get(`${BASE}/api/admin/buildings`, () =>
+        HttpResponse.json([
+          { id: "b3", name: "Gamma House", manager_email: "gamma@example.com", is_archived: true, unarchive_count: 3, created_at: "2022-01-01T00:00:00Z" },
+          { id: "b4", name: "Delta Court", manager_email: "delta@example.com", is_archived: true, unarchive_count: 0, created_at: "2021-01-01T00:00:00Z" },
+        ])
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Gamma House")).toBeInTheDocument());
+    expect(screen.getByText("Delta Court")).toBeInTheDocument();
+    // unarchive_count values appear as cell text
+    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getAllByText("0").length).toBeGreaterThanOrEqual(1);
   });
 });

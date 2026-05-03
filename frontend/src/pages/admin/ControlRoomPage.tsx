@@ -4,7 +4,6 @@ import { authClient } from "../../lib/auth-client";
 import { getSubscription, updateSubscription } from "../../api/subscription";
 import type { SubscriptionResponse } from "../../api/subscription";
 import { listBuildings } from "../../api/admin";
-import type { BuildingArchiveOut } from "../../api/admin";
 import { unarchiveBuilding } from "../../api/subscription";
 import type { Building } from "../../types";
 
@@ -138,14 +137,27 @@ export default function ControlRoomPage() {
                   id="ctrl-tier-name"
                   className="field__select"
                   value={tierName}
-                  onChange={(e) => setTierName(e.target.value)}
+                  onChange={(e) => {
+                    const tier = e.target.value;
+                    setTierName(tier);
+                    const limits: Record<string, string> = {
+                      Free: "1",
+                      Starter: "10",
+                      Growth: "25",
+                      Expansion: "50",
+                      Enterprise: "",
+                    };
+                    if (tier in limits) {
+                      setBuildingLimitInput(limits[tier]);
+                    }
+                  }}
                 >
                   <option value="">— select tier —</option>
-                  <option value="Free">Free</option>
-                  <option value="Starter">Starter</option>
-                  <option value="Growth">Growth</option>
-                  <option value="Expansion">Expansion</option>
-                  <option value="Enterprise">Enterprise</option>
+                  <option value="Free">Free (1 building)</option>
+                  <option value="Starter">Starter (up to 10 buildings)</option>
+                  <option value="Growth">Growth (up to 25 buildings)</option>
+                  <option value="Expansion">Expansion (up to 50 buildings)</option>
+                  <option value="Enterprise">Enterprise (unlimited)</option>
                 </select>
               </div>
               <div className="field">
@@ -201,7 +213,7 @@ export default function ControlRoomPage() {
                 <thead>
                   <tr>
                     <th scope="col">Building Name</th>
-                    <th scope="col">Lots</th>
+                    <th scope="col">Times unarchived</th>
                     <th scope="col"></th>
                   </tr>
                 </thead>
@@ -209,7 +221,7 @@ export default function ControlRoomPage() {
                   {archivedBuildings.map((building) => (
                     <tr key={building.id}>
                       <td>{building.name}</td>
-                      <td>{(building as Building & { lot_count?: number }).lot_count ?? "—"}</td>
+                      <td>{building.unarchive_count}</td>
                       <td>
                         <button
                           type="button"

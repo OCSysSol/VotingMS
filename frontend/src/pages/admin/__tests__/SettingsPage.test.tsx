@@ -1853,8 +1853,7 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("tab", { name: "Subscription" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "Subscription" }));
     await waitFor(() => expect(screen.getByText("Pro")).toBeInTheDocument());
-    expect(screen.getByText(/5/)).toBeInTheDocument();
-    expect(screen.getByText(/20/)).toBeInTheDocument();
+    expect(screen.getByText(/5 \/ 20 buildings/)).toBeInTheDocument();
   });
 
   it("shows 'No plan set' when tier_name is null", async () => {
@@ -2065,6 +2064,23 @@ describe("SettingsPage", () => {
     // After completion the select is reset to empty so the button remains disabled;
     // verify the async work completed by checking the success message appears.
     await waitFor(() => expect(screen.getByText("Request sent. We'll be in touch.")).toBeInTheDocument());
+  });
+
+  // --- Tier picker option labels ---
+
+  it("tier change select shows building limit labels in options", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Subscription" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Subscription" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Requested tier" })).toBeInTheDocument());
+    const select = screen.getByRole("combobox", { name: "Requested tier" }) as HTMLSelectElement;
+    const optionTexts = Array.from(select.options).map((o) => o.text);
+    expect(optionTexts).toContain("Free (1 building)");
+    expect(optionTexts).toContain("Starter (up to 10 buildings)");
+    expect(optionTexts).toContain("Growth (up to 25 buildings)");
+    expect(optionTexts).toContain("Expansion (up to 50 buildings)");
+    expect(optionTexts).toContain("Enterprise (unlimited)");
   });
 
   // --- Mobile horizontal scroll (Change 2) ---
