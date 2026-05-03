@@ -198,7 +198,14 @@ export default async function globalSetup(_config: FullConfig) {
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   try {
-    await page.waitForURL(/\/admin\//, { timeout: 120000 });
+    // Match the final post-login destination but NOT /admin/login itself.
+    // /\/admin\// also matches the login page URL, so waitForURL resolves
+    // immediately (page is already at /admin/login) before session cookies
+    // are set — causing all subsequent authenticated API calls to fail with 401.
+    // Use a pattern that only matches actual admin pages (general-meetings,
+    // buildings, settings, control-room) to ensure we wait for the full
+    // auth redirect to complete and session cookies to be established.
+    await page.waitForURL(/\/admin\/(general-meetings|buildings|settings|control-room)/, { timeout: 120000 });
   } catch {
     const url = page.url();
     const content = await page.content();
