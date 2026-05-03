@@ -197,7 +197,15 @@ export default async function globalSetup(_config: FullConfig) {
   await page.getByLabel("Email").fill(ADMIN_EMAIL);
   await page.getByLabel("Password").fill(ADMIN_PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
-  await page.waitForURL(/\/admin\/general-meetings/, { timeout: 120000 });
+  try {
+    await page.waitForURL(/\/admin\/general-meetings/, { timeout: 120000 });
+  } catch {
+    const url = page.url();
+    const content = await page.content();
+    throw new Error(
+      `Admin login failed — stuck at ${url}\nPage content (first 500 chars):\n${content.slice(0, 500)}`
+    );
+  }
   await context.storageState({ path: path.join(authDir, "admin.json") });
   await browser.close();
 
