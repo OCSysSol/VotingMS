@@ -365,6 +365,60 @@ class TestUnarchiveBuilding:
         response = await operator_client.post(f"/api/admin/buildings/{fake_id}/unarchive")
         assert response.status_code == 404
 
+    # --- unarchive_count increment ---
+
+    async def test_unarchive_increments_unarchive_count(
+        self, operator_client: AsyncClient, db_session: AsyncSession
+    ):
+        """Unarchiving a building increments unarchive_count from 0 to 1."""
+        b = Building(name="Count Incr Bldg", manager_email="cnt1@test.com", is_archived=True)
+        db_session.add(b)
+        await db_session.flush()
+        await db_session.refresh(b)
+        assert b.unarchive_count == 0
+
+        await operator_client.post(f"/api/admin/buildings/{b.id}/unarchive")
+
+        await db_session.refresh(b)
+        assert b.unarchive_count == 1
+
+    async def test_unarchive_twice_gives_count_of_two(
+        self, operator_client: AsyncClient, db_session: AsyncSession
+    ):
+        """Unarchiving twice (archive in between) increments unarchive_count to 2."""
+        b = Building(name="Count Twice Bldg", manager_email="cnt2@test.com", is_archived=True)
+        db_session.add(b)
+        await db_session.flush()
+        await db_session.refresh(b)
+
+        # First unarchive
+        await operator_client.post(f"/api/admin/buildings/{b.id}/unarchive")
+        await db_session.refresh(b)
+        assert b.unarchive_count == 1
+
+        # Re-archive then unarchive again
+        b.is_archived = True
+        await db_session.commit()
+        await operator_client.post(f"/api/admin/buildings/{b.id}/unarchive")
+        await db_session.refresh(b)
+        assert b.unarchive_count == 2
+
+    async def test_unarchive_count_included_in_list_buildings_response(
+        self, operator_client: AsyncClient, db_session: AsyncSession
+    ):
+        """unarchive_count is present in the GET /api/admin/buildings response."""
+        b = Building(name="Count List Bldg", manager_email="cntlist@test.com", is_archived=True)
+        b.unarchive_count = 3
+        db_session.add(b)
+        await db_session.commit()
+
+        response = await operator_client.get("/api/admin/buildings?is_archived=true")
+        assert response.status_code == 200
+        buildings = response.json()
+        match = next((x for x in buildings if x["name"] == "Count List Bldg"), None)
+        assert match is not None
+        assert match["unarchive_count"] == 3
+
 
 # ---------------------------------------------------------------------------
 # Building limit enforcement (via POST /api/admin/buildings)

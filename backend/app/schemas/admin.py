@@ -45,6 +45,7 @@ class BuildingOut(BaseModel):
     name: str
     manager_email: str
     is_archived: bool
+    unarchive_count: int
     created_at: datetime
 
     model_config = {"from_attributes": True}

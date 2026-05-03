@@ -940,11 +940,11 @@ export default function SettingsPage() {
                     aria-invalid={!!tierChangeError}
                   >
                     <option value="">-- Select a tier --</option>
-                    <option value="Free">Free</option>
-                    <option value="Starter">Starter</option>
-                    <option value="Growth">Growth</option>
-                    <option value="Expansion">Expansion</option>
-                    <option value="Enterprise">Enterprise</option>
+                    <option value="Free">Free (1 building)</option>
+                    <option value="Starter">Starter (up to 10 buildings)</option>
+                    <option value="Growth">Growth (up to 25 buildings)</option>
+                    <option value="Expansion">Expansion (up to 50 buildings)</option>
+                    <option value="Enterprise">Enterprise (unlimited)</option>
                   </select>
                 </div>
                 {tierChangeSuccess && (

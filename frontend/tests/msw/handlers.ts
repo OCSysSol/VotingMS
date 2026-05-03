@@ -117,6 +117,7 @@ export const ADMIN_BUILDINGS: Building[] = [
     name: "Alpha Tower",
     manager_email: "alpha@example.com",
     is_archived: false,
+    unarchive_count: 0,
     created_at: "2024-01-01T00:00:00Z",
   },
   {
@@ -124,6 +125,7 @@ export const ADMIN_BUILDINGS: Building[] = [
     name: "Beta Court",
     manager_email: "beta@example.com",
     is_archived: false,
+    unarchive_count: 0,
     created_at: "2024-02-01T00:00:00Z",
   },
   {
@@ -131,6 +133,7 @@ export const ADMIN_BUILDINGS: Building[] = [
     name: "Gamma House",
     manager_email: "gamma@example.com",
     is_archived: true,
+    unarchive_count: 1,
     created_at: "2022-01-01T00:00:00Z",
   },
 ];
@@ -683,6 +686,7 @@ export const adminHandlers = [
       name: body?.name ?? "New Building",
       manager_email: body?.manager_email ?? "mgr@example.com",
       is_archived: false,
+      unarchive_count: 0,
       created_at: "2024-03-01T00:00:00Z",
     };
     return HttpResponse.json(newBuilding, { status: 201 });
