@@ -206,7 +206,7 @@ export default async function globalSetup(_config: FullConfig) {
     // waitForURL is used (not waitForFunction) because waitForFunction evaluates
     // JS in the page context and the execution context is detached mid-poll on
     // navigation, causing it to hang indefinitely at 180 s.
-    await page.waitForURL(url => !url.includes("/admin/login"), {
+    await page.waitForURL(url => !url.toString().includes("/admin/login"), {
       timeout: 120000,
     });
   } catch {
