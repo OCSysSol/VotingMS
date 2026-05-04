@@ -44,6 +44,8 @@ from app.services.auth_service import (
     extend_session,
 )
 from app.services.email_service import send_otp_email
+from app.services import smtp_config_service
+from app.services.sms_service import SmsDeliveryError, send as sms_send
 
 logger = get_logger(__name__)
 
@@ -218,8 +220,9 @@ async def request_otp(
     db: AsyncSession = Depends(get_db),
 ) -> OtpRequestResponse:
     """
-    Send a one-time verification code to the voter's email.
-    Always returns 200 {"sent": true} to prevent email enumeration.
+    Send a one-time verification code to the voter's email or phone (SMS).
+    Always returns 200 {"sent": true} to prevent enumeration.
+    Response always includes has_phone: bool.
     """
     # Fire-and-forget cleanup of expired OTPs — doesn't block the request.
     asyncio.create_task(_cleanup_expired_otps())
@@ -290,6 +293,27 @@ async def request_otp(
 
     email_known = bool(email_records or proxy_records)
 
+    # Resolve whether the voter has a phone number on any of their direct lots.
+    # Proxy lots are excluded — phone belongs to the lot owner, not the proxy.
+    has_phone = False
+    if email_records:
+        lot_owner_ids = [rec.lot_owner_id for rec in email_records]
+        phone_result = await db.execute(
+            select(LotOwner.phone_number).where(
+                LotOwner.id.in_(lot_owner_ids),
+                LotOwner.phone_number.isnot(None),
+            ).limit(1)
+        )
+        has_phone = phone_result.scalar_one_or_none() is not None
+
+    # 3b. SMS-channel validation (before generating/storing OTP)
+    if body.channel == "sms":
+        sms_cfg = await smtp_config_service.get_smtp_config(db)
+        if not sms_cfg.sms_enabled or not sms_cfg.sms_provider:
+            raise HTTPException(status_code=503, detail="SMS not configured")
+        if not has_phone:
+            raise HTTPException(status_code=400, detail="No phone number on file for this account")
+
     if email_known:
         # 4. Delete existing OTPs for this (email, meeting_id) pair (lazy cleanup)
         await db.execute(
@@ -320,23 +344,45 @@ async def request_otp(
             await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
             await db.commit()
 
-        # 7. Send the OTP email (skipped when skip_email=True in testing_mode only).
-        # skip_email is silently ignored in non-testing environments (RR5-03).
+        # 7. Deliver the OTP via the requested channel.
         skip_email_effective = body.skip_email and settings.testing_mode
         if not skip_email_effective:
-            try:
-                await send_otp_email(
-                    to_email=body.email,
-                    meeting_title=meeting.title,
-                    code=code,
-                    db=db,
+            if body.channel == "sms":
+                # SMS path: fetch phone number and dispatch via SmsService.
+                phone_result2 = await db.execute(
+                    select(LotOwner.phone_number).where(
+                        LotOwner.id.in_([rec.lot_owner_id for rec in email_records]),
+                        LotOwner.phone_number.isnot(None),
+                    ).limit(1)
                 )
-            except Exception as exc:
-                # Log the SMTP failure but still return 200 — the OTP is already stored
-                # in the DB, so the voter can still authenticate (or retry sending).
-                # A 500 here would expose SMTP misconfiguration and break the auth flow
-                # even though the OTP record was successfully created.
-                logger.error("otp_email_send_failed", email=body.email, error=str(exc))
+                phone_number = phone_result2.scalar_one_or_none()
+                if phone_number:
+                    sms_cfg = await smtp_config_service.get_smtp_config(db)
+                    sms_kwargs = smtp_config_service.get_sms_send_kwargs(sms_cfg)
+                    try:
+                        await sms_send(
+                            to=phone_number,
+                            message=f"Your AGM Voting code is {code}. Expires in 5 minutes.",
+                            **sms_kwargs,
+                        )
+                    except SmsDeliveryError as exc:
+                        logger.error("otp_sms_send_failed", email=body.email, error=str(exc))
+                        raise HTTPException(status_code=502, detail="SMS delivery failed")
+            else:
+                # Default email path
+                try:
+                    await send_otp_email(
+                        to_email=body.email,
+                        meeting_title=meeting.title,
+                        code=code,
+                        db=db,
+                    )
+                except Exception as exc:
+                    # Log the SMTP failure but still return 200 — the OTP is already stored
+                    # in the DB, so the voter can still authenticate (or retry sending).
+                    # A 500 here would expose SMTP misconfiguration and break the auth flow
+                    # even though the OTP record was successfully created.
+                    logger.error("otp_email_send_failed", email=body.email, error=str(exc))
     else:
         # Still update the rate limit so attackers can't use "no rate limit" as
         # a signal that the email was not found.
@@ -345,7 +391,7 @@ async def request_otp(
             await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
             await db.commit()
 
-    return OtpRequestResponse(sent=True)
+    return OtpRequestResponse(sent=True, has_phone=has_phone)
 
 
 @router.post("/auth/logout")

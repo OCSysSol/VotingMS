@@ -64,7 +64,19 @@ from app.schemas.admin import (
     ResendReportOut,
     SetProxyRequest,
 )
-from app.schemas.config import FaviconUploadOut, LogoUploadOut, SmtpConfigOut, SmtpConfigUpdate, SmtpStatusOut, TenantConfigOut, TenantConfigUpdate
+from app.schemas.config import (
+    FaviconUploadOut,
+    LogoUploadOut,
+    SmtpConfigOut,
+    SmtpConfigUpdate,
+    SmtpStatusOut,
+    SmsConfigOut,
+    SmsConfigUpdate,
+    SmsTestRequest,
+    TenantConfigOut,
+    TenantConfigUpdate,
+)
+from app.services.sms_service import SmsDeliveryError, send as sms_send
 from app.services import admin_service
 from app.services import config_service
 from app.services import smtp_config_service
@@ -82,6 +94,7 @@ from app.rate_limiter import (
     admin_invite_limiter,
     get_client_ip,
     provision_limiter,
+    sms_test_rate_limiter,
     smtp_test_rate_limiter,
 )
 
@@ -1222,6 +1235,65 @@ async def test_smtp_config(body: SmtpTestRequest, db: AsyncSession = Depends(get
             status_code=400,
             detail="SMTP connection test failed. Check settings and try again.",
         ) from exc
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# SMS configuration
+# ---------------------------------------------------------------------------
+
+
+def _check_sms_test_rate_limit() -> None:
+    """Raise 429 if more than 5 calls to /config/sms/test occurred in the last 60s."""
+    try:
+        sms_test_rate_limiter.check("sms_test")
+    except HTTPException as exc:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded: max 5 test SMS per minute") from exc
+
+
+@router.get("/config/sms", response_model=SmsConfigOut)
+async def get_sms_config(db: AsyncSession = Depends(get_db)) -> SmsConfigOut:
+    """Return current SMS config — secrets are never included in the response."""
+    config = await smtp_config_service.get_smtp_config(db)
+    return smtp_config_service.build_sms_config_out(config)
+
+
+@router.put("/config/sms", response_model=SmsConfigOut)
+async def update_sms_config(
+    data: SmsConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SmsConfigOut:
+    """Save SMS configuration. Secrets are encrypted at rest."""
+    config = await smtp_config_service.update_sms_config(data, db)
+    return smtp_config_service.build_sms_config_out(config)
+
+
+@router.post("/config/sms/test")
+async def test_sms_config(body: SmsTestRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    """Send a test SMS to the supplied phone number using the current SMS configuration.
+
+    Rate limited to 5 requests per minute.
+    Returns {"ok": true} on success.
+    Returns 503 if SMS is not configured.
+    Returns 502 on delivery failure.
+    """
+    _check_sms_test_rate_limit()
+
+    config = await smtp_config_service.get_smtp_config(db)
+    if not config.sms_enabled or not config.sms_provider:
+        raise HTTPException(status_code=503, detail="SMS is not configured")
+
+    sms_kwargs = smtp_config_service.get_sms_send_kwargs(config)
+    try:
+        await sms_send(
+            to=body.to,
+            message="This is a test SMS from AGM Voting.",
+            **sms_kwargs,
+        )
+    except SmsDeliveryError as exc:
+        logger.error("sms_test_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail="SMS delivery failed") from exc
 
     return {"ok": True}
 

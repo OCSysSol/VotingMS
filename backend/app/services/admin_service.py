@@ -721,12 +721,33 @@ async def get_lot_owner(lot_owner_id: uuid.UUID, db: AsyncSession) -> dict:
 _CSV_LOT_OWNER_ALIASES: dict[str, str] = {
     "lot#": "lot_number",
     "uoe2": "unit_entitlement",
+    "phone": "phone_number",
 }
 
 
 def _normalise_lot_owner_fieldnames(fieldnames: list[str]) -> list[str]:
-    """Map alternate header names (Lot#, UOE2) to canonical names."""
+    """Map alternate header names (Lot#, UOE2, Phone) to canonical names."""
     return [_CSV_LOT_OWNER_ALIASES.get(f.strip().lower(), f.strip().lower()) for f in fieldnames]
+
+
+def _normalise_phone_e164(raw: str) -> str | None:
+    """Normalise a phone number string to E.164 format.
+
+    Rules (applied after stripping spaces/dashes/brackets/dots):
+    - Already starts with '+': keep as-is.
+    - Starts with '04' (Australian mobile): replace leading '0' with '+61'.
+    - Otherwise: store as-is (non-AU numbers without country code).
+    - Blank / whitespace-only: return None.
+    """
+    import re
+    stripped = re.sub(r"[\s\-\(\)\.]", "", raw).strip()
+    if not stripped:
+        return None
+    if stripped.startswith("+"):
+        return stripped
+    if stripped.startswith("04"):
+        return "+61" + stripped[1:]
+    return stripped
 
 
 def _parse_financial_position(raw: str) -> FinancialPosition:
@@ -790,11 +811,14 @@ async def import_lot_owners_from_csv(
     # Track row numbers seen per lot_number to detect duplicates (RR3-31)
     lot_number_rows: dict[str, list[int]] = {}
 
+    has_phone_col = "phone_number" in normalised_fieldnames
+
     for i, row in enumerate(rows, start=2):
         lot_number = row.get("lot_number", "").strip()
         email = row.get("email", "").strip()
         unit_entitlement_raw = row.get("unit_entitlement", "").strip()
         financial_position_raw = row.get("financial_position", "").strip()
+        phone_raw = row.get("phone_number", "").strip() if has_phone_col else ""
 
         row_errors = []
 
@@ -837,6 +861,8 @@ async def import_lot_owners_from_csv(
             else:
                 row_given_name, row_surname = None, None
 
+            phone_number = _normalise_phone_e164(phone_raw) if has_phone_col else None
+
             if lot_number not in lot_data:
                 lot_data[lot_number] = {
                     "unit_entitlement": unit_entitlement,
@@ -844,6 +870,7 @@ async def import_lot_owners_from_csv(
                     "email_entries": [],
                     "given_name": row_given_name,
                     "surname": row_surname,
+                    "phone_number": phone_number,
                 }
             for addr in email.split(";"):
                 addr = addr.strip().lower()
@@ -922,6 +949,9 @@ async def import_lot_owners_from_excel(
     given_name_idx = headers.index("given_name") if "given_name" in headers else None
     surname_idx = headers.index("surname") if "surname" in headers else None
     name_idx = headers.index("name") if "name" in headers else None
+    phone_idx = headers.index("phone") if "phone" in headers else (
+        headers.index("phone_number") if "phone_number" in headers else None
+    )
 
     # Determine name mode from available columns
     if given_name_idx is not None and surname_idx is not None:
@@ -955,6 +985,7 @@ async def import_lot_owners_from_excel(
         email = _cell(email_idx) if email_idx is not None else ""
         unit_entitlement_raw = _cell(uoe2_idx)
         financial_position_raw = _cell(fp_idx) if fp_idx is not None else ""
+        phone_raw = _cell(phone_idx) if phone_idx is not None else ""
 
         row_errors = []
 
@@ -997,6 +1028,8 @@ async def import_lot_owners_from_excel(
             else:
                 row_given_name, row_surname = None, None
 
+            phone_number = _normalise_phone_e164(phone_raw) if phone_idx is not None else None
+
             if lot_number not in lot_data:
                 lot_data[lot_number] = {
                     "unit_entitlement": unit_entitlement,
@@ -1004,6 +1037,7 @@ async def import_lot_owners_from_excel(
                     "email_entries": [],
                     "given_name": row_given_name,
                     "surname": row_surname,
+                    "phone_number": phone_number,
                 }
             for addr in email.split(";"):
                 addr = addr.strip().lower()
@@ -1063,6 +1097,8 @@ async def _upsert_lot_owners(
                 lo.given_name = data["given_name"]
             if data.get("surname") is not None:
                 lo.surname = data["surname"]
+            if "phone_number" in data:
+                lo.phone_number = data["phone_number"]
             await db.flush()
             # Replace emails: delete existing, insert new entries
             await db.execute(
@@ -1082,6 +1118,7 @@ async def _upsert_lot_owners(
                 lot_number=lot_number,
                 given_name=data.get("given_name"),
                 surname=data.get("surname"),
+                phone_number=data.get("phone_number"),
                 unit_entitlement=data["unit_entitlement"],
                 financial_position=data["financial_position"],
             )

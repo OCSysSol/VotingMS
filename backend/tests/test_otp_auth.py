@@ -149,7 +149,7 @@ class TestRequestOtp:
             )
 
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
         mock_send.assert_awaited_once()
 
     async def test_request_otp_inserts_otp_row(
@@ -230,7 +230,7 @@ class TestRequestOtp:
             )
 
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
         mock_send.assert_not_called()
 
     async def test_request_otp_unknown_email_no_otp_row_inserted(
@@ -357,7 +357,7 @@ class TestRequestOtp:
             )
         # Must succeed (200), not 429
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
 
     async def test_request_otp_smtp_failure_returns_200(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
@@ -379,7 +379,7 @@ class TestRequestOtp:
                 json={"email": voter_email, "general_meeting_id": str(agm.id)},
             )
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
 
     async def test_request_otp_smtp_failure_otp_row_still_exists(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
@@ -457,7 +457,7 @@ class TestRequestOtp:
             )
 
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
         mock_send.assert_not_called()
 
     async def test_request_otp_skip_email_true_otp_row_still_created(
@@ -685,7 +685,7 @@ class TestRequestOtp:
             )
 
         assert response.status_code == 200
-        assert response.json() == {"sent": True}
+        assert response.json()["sent"] is True
         # The OTP email was sent to the normalised address
         mock_send.assert_called_once()
         call_kwargs = mock_send.call_args
