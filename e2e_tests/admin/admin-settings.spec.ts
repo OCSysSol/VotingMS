@@ -267,7 +267,10 @@ test.describe("Admin Settings — login page logo reflects branding", () => {
     const loginPage = await context.newPage();
 
     try {
-      await loginPage.goto("/admin/login");
+      // waitUntil: "networkidle" ensures the config fetch (which populates logo_url)
+      // completes before we assert on the logo — without this the <img> may not yet
+      // be in the DOM if the API response races with the assertion.
+      await loginPage.goto("/admin/login", { waitUntil: "networkidle" });
       await expect(loginPage).toHaveURL(/admin\/login/, { timeout: 10000 });
 
       // Step 3: The logo img should have src matching the configured logo_url
