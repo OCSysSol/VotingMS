@@ -899,7 +899,7 @@ test("33M.13: voter alecools votes multi-choice for half of lots with 3-option l
   await expect(mcCard.getByRole('heading', { name: MC_TITLE })).toBeVisible({ timeout: 10000 });
 
   // Vote "For" on first 3 options
-  const forButtons = mcCard.getByTestId("vote-btn-yes");
+  const forButtons = mcCard.locator('[data-choice="yes"]');
   await forButtons.nth(0).click();
   await forButtons.nth(1).click();
   await forButtons.nth(2).click();
@@ -908,11 +908,11 @@ test("33M.13: voter alecools votes multi-choice for half of lots with 3-option l
   await expect(forButtons.nth(3)).toBeDisabled({ timeout: 5000 });
 
   // Vote "Against" on option 4
-  const againstButtons = mcCard.getByTestId("vote-btn-no");
+  const againstButtons = mcCard.locator('[data-choice="no"]');
   await againstButtons.nth(3).click();
 
   // Vote "Abstain" on option 5
-  const abstainButtons = mcCard.getByTestId("vote-btn-abstained");
+  const abstainButtons = mcCard.locator('[data-choice="abstained"]');
   await abstainButtons.nth(4).click();
 
   await submitBallot(page);
@@ -990,7 +990,7 @@ test("33M.15: voter alecools votes all lots on M7, MC for remaining lots", async
 
   // MC: first half of lots already voted, remaining half haven't
   // Vote For on first 3 options for the remaining lots
-  const mcForButtons = mcCard.getByTestId("vote-btn-yes");
+  const mcForButtons = mcCard.locator('[data-choice="yes"]');
   if (await mcForButtons.nth(0).isEnabled().catch(() => false)) {
     await mcForButtons.nth(0).click();
     if (await mcForButtons.nth(1).isEnabled().catch(() => false)) {
@@ -1120,7 +1120,7 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
   // For the MC motion (last card if visible), click up to 3 "For" buttons
   const mcCard = motionCards.last();
   if (await mcCard.getByRole('heading', { name: MC_TITLE }).isVisible().catch(() => false)) {
-    const mcForButtons = mcCard.getByTestId("vote-btn-yes");
+    const mcForButtons = mcCard.locator('[data-choice="yes"]');
     if (await mcForButtons.nth(0).isEnabled().catch(() => false)) {
       await mcForButtons.nth(0).click();
       if (await mcForButtons.nth(1).isEnabled().catch(() => false)) {

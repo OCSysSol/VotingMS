@@ -80,6 +80,7 @@ export function MultiChoiceOptionList({
                 aria-describedby={isForDisabled && limitReached && !disabled && !readOnly && !isForSelected ? limitMsgId : undefined}
                 onClick={() => handleOptionChoice(option.id, "for")}
                 data-testid={`mc-for-${option.id}`}
+                data-choice="yes"
               >
                 <span className="vote-btn__icon" aria-hidden="true">✓</span>
                 <span className="vote-btn__label">For</span>
@@ -91,6 +92,7 @@ export function MultiChoiceOptionList({
                 disabled={isEffectivelyDisabled}
                 onClick={() => handleOptionChoice(option.id, "against")}
                 data-testid={`mc-against-${option.id}`}
+                data-choice="no"
               >
                 <span className="vote-btn__icon" aria-hidden="true">✗</span>
                 <span className="vote-btn__label">Against</span>
@@ -102,6 +104,7 @@ export function MultiChoiceOptionList({
                 disabled={isEffectivelyDisabled}
                 onClick={() => handleOptionChoice(option.id, "abstained")}
                 data-testid={`mc-abstain-${option.id}`}
+                data-choice="abstained"
               >
                 <span className="vote-btn__icon" aria-hidden="true">—</span>
                 <span className="vote-btn__label">Abstain</span>
