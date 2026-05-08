@@ -87,8 +87,8 @@ test.describe("BUG-RV-01: submit button visible after admin reveals new motion",
 
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "For" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-yes").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -168,7 +168,7 @@ test.describe("BUG-RV-01: submit button visible after admin reveals new motion",
     // Vote on the new motion — the previous 2 are read-only (already voted)
     const newMotionCard = page.locator(".motion-card").filter({ hasText: MOTION3_TITLE });
     await expect(newMotionCard).toBeVisible({ timeout: 15000 });
-    await newMotionCard.getByRole("button", { name: "For" }).click();
+    await newMotionCard.getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -237,9 +237,9 @@ test.describe("WF9: Revote — motion locking (BUG-RV-03)", () => {
     await expect(motionCards).toHaveCount(3);
 
     // Vote: Motion 1 → For, Motion 2 → Against, Motion 3 → Abstain
-    await motionCards.filter({ hasText: WF9_MOTION1 }).getByRole("button", { name: "For" }).click();
-    await motionCards.filter({ hasText: WF9_MOTION2 }).getByRole("button", { name: "Against" }).click();
-    await motionCards.filter({ hasText: WF9_MOTION3 }).getByRole("button", { name: "Abstain" }).click();
+    await motionCards.filter({ hasText: WF9_MOTION1 }).getByTestId("vote-btn-yes").click();
+    await motionCards.filter({ hasText: WF9_MOTION2 }).getByTestId("vote-btn-no").click();
+    await motionCards.filter({ hasText: WF9_MOTION3 }).getByTestId("vote-btn-abstained").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -296,24 +296,24 @@ test.describe("WF9: Revote — motion locking (BUG-RV-03)", () => {
     await expect(motionCards.filter({ hasText: WF9_MOTION3 }).getByText("Already voted")).toBeVisible({ timeout: 10000 });
 
     // Motion 1 vote buttons must be disabled (read-only)
-    const m1ForBtn = motionCards.filter({ hasText: WF9_MOTION1 }).getByRole("button", { name: "For" });
+    const m1ForBtn = motionCards.filter({ hasText: WF9_MOTION1 }).getByTestId("vote-btn-yes");
     await expect(m1ForBtn).toBeDisabled({ timeout: 10000 });
     // Motion 1's "For" button must be highlighted (pre-populated with original "yes" choice)
     await expect(m1ForBtn).toHaveAttribute("aria-pressed", "true");
 
     // Motion 2's "Against" button highlighted, disabled
-    const m2NoBtn = motionCards.filter({ hasText: WF9_MOTION2 }).getByRole("button", { name: "Against" });
+    const m2NoBtn = motionCards.filter({ hasText: WF9_MOTION2 }).getByTestId("vote-btn-no");
     await expect(m2NoBtn).toBeDisabled({ timeout: 10000 });
     await expect(m2NoBtn).toHaveAttribute("aria-pressed", "true");
 
     // Motion 3's "Abstain" button highlighted, disabled
-    const m3AbstainBtn = motionCards.filter({ hasText: WF9_MOTION3 }).getByRole("button", { name: "Abstain" });
+    const m3AbstainBtn = motionCards.filter({ hasText: WF9_MOTION3 }).getByTestId("vote-btn-abstained");
     await expect(m3AbstainBtn).toBeDisabled({ timeout: 10000 });
     await expect(m3AbstainBtn).toHaveAttribute("aria-pressed", "true");
 
     // Motion 4 must NOT show "Already voted" badge and must be interactive
     await expect(motionCards.filter({ hasText: WF9_MOTION4 }).getByText("Already voted")).not.toBeVisible();
-    const m4ForBtn = motionCards.filter({ hasText: WF9_MOTION4 }).getByRole("button", { name: "For" });
+    const m4ForBtn = motionCards.filter({ hasText: WF9_MOTION4 }).getByTestId("vote-btn-yes");
     await expect(m4ForBtn).not.toBeDisabled();
 
     // Submit ballot button must be visible (one unvoted motion: motion 4)
@@ -417,7 +417,7 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     // Vote on the motion for Lot A only
     const motionCard = page.locator(".motion-card").first();
     await expect(motionCard).toBeVisible({ timeout: 15000 });
-    await motionCard.getByRole("button", { name: "For" }).click();
+    await motionCard.getByTestId("vote-btn-yes").click();
 
     await page.getByRole("button", { name: "Submit ballot" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
@@ -559,14 +559,14 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     // LotA previously voted "yes" on Motion 1 — the UI pre-seeds choices[M1] = "yes" from
     // already_voted data. Clicking "For" when it is already selected would deselect it, so we
     // only click "For" on Motion 1 if it is not already in the pressed state.
-    const m1ForBtn = motionCards.filter({ hasText: WF10_MOTION1 }).getByRole("button", { name: "For" });
+    const m1ForBtn = motionCards.filter({ hasText: WF10_MOTION1 }).getByTestId("vote-btn-yes");
     await expect(m1ForBtn).toBeVisible({ timeout: 10000 });
     const m1Pressed = await m1ForBtn.getAttribute("aria-pressed");
     if (m1Pressed !== "true") {
       await m1ForBtn.click();
     }
     // Vote "For" on Motion 2 (neither lot has voted on it)
-    await motionCards.filter({ hasText: WF10_MOTION2 }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: WF10_MOTION2 }).getByTestId("vote-btn-yes").click();
 
     // Click Submit ballot
     await page.getByRole("button", { name: "Submit ballot" }).click();
@@ -652,7 +652,7 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     await lotDCheckbox.uncheck();
 
     // Vote on motion 1 for Lot C only and submit
-    await motionCardStep1.getByRole("button", { name: "For" }).click();
+    await motionCardStep1.getByTestId("vote-btn-yes").click();
 
     await page.getByRole("button", { name: "Submit ballot" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
@@ -690,14 +690,14 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     // Lot C previously voted "yes" on Motion 1 — the UI pre-seeds choices[M1] = "yes" from
     // already_voted data. Clicking "For" when it is already selected would deselect it, so we
     // only click "For" on Motion 1 if it is not already in the pressed state.
-    const m1ForBtn = motionCards.filter({ hasText: wf102Motion1 }).getByRole("button", { name: "For" });
+    const m1ForBtn = motionCards.filter({ hasText: wf102Motion1 }).getByTestId("vote-btn-yes");
     await expect(m1ForBtn).toBeVisible({ timeout: 10000 });
     const m1Pressed = await m1ForBtn.getAttribute("aria-pressed");
     if (m1Pressed !== "true") {
       await m1ForBtn.click();
     }
     // Vote "For" on Motion 2 (neither lot has voted on it)
-    await motionCards.filter({ hasText: wf102Motion2 }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: wf102Motion2 }).getByTestId("vote-btn-yes").click();
 
     // Trigger mixed warning
     await page.getByRole("button", { name: "Submit ballot" }).click();

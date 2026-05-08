@@ -484,8 +484,8 @@ test("33M.4: voter alecools logs in, sees 2 motions, votes for half of all lots"
   await expect(sidebar.getByText(`You are voting for ${halfLotCount} lots.`)).toBeVisible({ timeout: 10000 });
 
   // Vote For on motion 1, Against on motion 2
-  await motionCards.nth(0).getByRole("button", { name: "For" }).click();
-  await motionCards.nth(1).getByRole("button", { name: "Against" }).click();
+  await motionCards.nth(0).getByTestId("vote-btn-yes").click();
+  await motionCards.nth(1).getByTestId("vote-btn-no").click();
 
   // Submit
   await submitBallot(page);
@@ -581,8 +581,8 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all lots", 
 
   // Vote on M1 (For) and M2 (Against) for lots that haven't voted yet
   // Read-only motions will have disabled buttons; clicking enabled ones only
-  const m1ForBtn = motionCards.nth(0).getByRole("button", { name: "For" }).first();
-  const m2AgainstBtn = motionCards.nth(1).getByRole("button", { name: "Against" }).first();
+  const m1ForBtn = motionCards.nth(0).getByTestId("vote-btn-yes").first();
+  const m2AgainstBtn = motionCards.nth(1).getByTestId("vote-btn-no").first();
 
   if (await m1ForBtn.isEnabled().catch(() => false)) {
     await m1ForBtn.click();
@@ -592,8 +592,8 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all lots", 
   }
 
   // Vote For on M3 and M4 (new, all lots can vote)
-  await motionCards.nth(2).getByRole("button", { name: "For" }).click();
-  await motionCards.nth(3).getByRole("button", { name: "For" }).click();
+  await motionCards.nth(2).getByTestId("vote-btn-yes").click();
+  await motionCards.nth(3).getByTestId("vote-btn-yes").click();
 
   // Submit — MixedSelectionWarningDialog appears first (half the lots already voted on M1/M2)
   await page.getByRole("button", { name: "Submit ballot" }).click();
@@ -692,8 +692,8 @@ test("33M.9: voter alecools votes half of lots on motions 5 and 6", async ({ pag
   // M1-M4 are read-only (all lots voted). M5 and M6 are interactive.
   const m5Card = motionCards.nth(4);
   const m6Card = motionCards.nth(5);
-  await m5Card.getByRole("button", { name: "For" }).click();
-  await m6Card.getByRole("button", { name: "Against" }).click();
+  await m5Card.getByTestId("vote-btn-yes").click();
+  await m6Card.getByTestId("vote-btn-no").click();
 
   await submitBallot(page);
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
@@ -800,7 +800,7 @@ test("33M.11: voter alecools — remaining lots vote on M6 only (M5 closed)", as
 
   // M6 is interactive — vote Against
   const m6Card = motionCards.nth(5);
-  await m6Card.getByRole("button", { name: "Against" }).click();
+  await m6Card.getByTestId("vote-btn-no").click();
 
   await submitBallot(page);
   await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
@@ -899,7 +899,7 @@ test("33M.13: voter alecools votes multi-choice for half of lots with 3-option l
   await expect(mcCard.getByRole('heading', { name: MC_TITLE })).toBeVisible({ timeout: 10000 });
 
   // Vote "For" on first 3 options
-  const forButtons = mcCard.getByRole("button", { name: "For" });
+  const forButtons = mcCard.locator('[data-choice="yes"]');
   await forButtons.nth(0).click();
   await forButtons.nth(1).click();
   await forButtons.nth(2).click();
@@ -908,11 +908,11 @@ test("33M.13: voter alecools votes multi-choice for half of lots with 3-option l
   await expect(forButtons.nth(3)).toBeDisabled({ timeout: 5000 });
 
   // Vote "Against" on option 4
-  const againstButtons = mcCard.getByRole("button", { name: "Against" });
+  const againstButtons = mcCard.locator('[data-choice="no"]');
   await againstButtons.nth(3).click();
 
   // Vote "Abstain" on option 5
-  const abstainButtons = mcCard.getByRole("button", { name: "Abstain" });
+  const abstainButtons = mcCard.locator('[data-choice="abstained"]');
   await abstainButtons.nth(4).click();
 
   await submitBallot(page);
@@ -983,14 +983,14 @@ test("33M.15: voter alecools votes all lots on M7, MC for remaining lots", async
   const mcCard = motionCards.nth(7);
 
   // Vote For on M7 if interactive
-  const m7ForBtn = m7Card.getByRole("button", { name: "For" }).first();
+  const m7ForBtn = m7Card.getByTestId("vote-btn-yes").first();
   if (await m7ForBtn.isEnabled().catch(() => false)) {
     await m7ForBtn.click();
   }
 
   // MC: first half of lots already voted, remaining half haven't
   // Vote For on first 3 options for the remaining lots
-  const mcForButtons = mcCard.getByRole("button", { name: "For" });
+  const mcForButtons = mcCard.locator('[data-choice="yes"]');
   if (await mcForButtons.nth(0).isEnabled().catch(() => false)) {
     await mcForButtons.nth(0).click();
     if (await mcForButtons.nth(1).isEnabled().catch(() => false)) {
@@ -1108,11 +1108,14 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
   const motionCards = page.locator(".motion-card");
   await expect(motionCards).toHaveCount(10, { timeout: 20000 });
 
-  // Vote For on all interactive (non-read-only) motions for lot 7
+  // Vote For on all interactive (non-read-only) motions for lot 7.
+  // Use a short timeout on isVisible so the loop does not hang on cards that
+  // have no vote-btn-yes (e.g. the multi-choice card renders different buttons).
   for (let i = 0; i < 10; i++) {
     const card = motionCards.nth(i);
-    const forBtn = card.getByRole("button", { name: "For" }).first();
-    if (await forBtn.isEnabled().catch(() => false)) {
+    const forBtn = card.getByTestId("vote-btn-yes").first();
+    const visible = await forBtn.isVisible({ timeout: 1000 }).catch(() => false);
+    if (visible && await forBtn.isEnabled().catch(() => false)) {
       await forBtn.click();
     }
   }
@@ -1120,7 +1123,7 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
   // For the MC motion (last card if visible), click up to 3 "For" buttons
   const mcCard = motionCards.last();
   if (await mcCard.getByRole('heading', { name: MC_TITLE }).isVisible().catch(() => false)) {
-    const mcForButtons = mcCard.getByRole("button", { name: "For" });
+    const mcForButtons = mcCard.locator('[data-choice="yes"]');
     if (await mcForButtons.nth(0).isEnabled().catch(() => false)) {
       await mcForButtons.nth(0).click();
       if (await mcForButtons.nth(1).isEnabled().catch(() => false)) {
@@ -1130,6 +1133,27 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
         await mcForButtons.nth(2).click();
       }
     }
+  }
+
+  // Scroll to bottom so the Submit button is in viewport
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+
+  // If the page already redirected to confirmation (lot 7 fully submitted by proxy),
+  // verify and return.
+  if (page.url().includes("/confirmation")) {
+    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
+    return;
+  }
+
+  // "View Submission" appearing means lot 7 is already fully submitted for all motions.
+  // This can happen if alecools voted lot 7 as proxy for M8/M9 in a prior step.
+  const viewSubmissionBtn = page.getByRole("button", { name: "View Submission" });
+  if (await viewSubmissionBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+    // Lot 7 is fully submitted — navigate to confirmation to verify
+    await viewSubmissionBtn.click();
+    await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 30000 });
+    await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
+    return;
   }
 
   await submitBallot(page);

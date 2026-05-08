@@ -610,14 +610,12 @@ export async function authenticateVoter(
 
   // Wait for either the channel selector (has_phone: true) or the verification code
   // input (has_phone: false) to appear after the API round-trip completes.
-  // Using Promise.race avoids a synchronous isVisible() check that fires before
-  // the React state update has rendered either element.
   const channelSelector = page.getByRole("radiogroup", { name: "Verification channel" });
   const codeInput = page.getByLabel("Verification code");
-  const whichAppeared = await Promise.race([
-    channelSelector.waitFor({ state: "visible", timeout: 15000 }).then(() => "channel" as const),
-    codeInput.waitFor({ state: "visible", timeout: 15000 }).then(() => "code" as const),
-  ]);
+  // Use .or() to race the two locators — Playwright stops tracking both once one resolves.
+  // Promise.race + waitFor leaves a dangling 15s action running that poisons later page actions.
+  await channelSelector.or(codeInput).waitFor({ state: "visible", timeout: 15000 });
+  const whichAppeared = (await channelSelector.isVisible()) ? "channel" : "code";
   if (whichAppeared === "channel") {
     await page.getByRole("radio", { name: "Email" }).check();
     await page.getByRole("button", { name: "Send code" }).click();

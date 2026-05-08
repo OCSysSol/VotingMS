@@ -231,6 +231,9 @@ test.describe("Admin Start Meeting button", () => {
     // interfere with the read-only "pending meeting shows Start Meeting button" test.
     await page.goto(`/admin/general-meetings/${startAgmId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+    // Wait for the async data fetch to complete — "Start Meeting" only renders when
+    // the meeting status is "pending", which comes from the API response.
+    await expect(page.getByText("Pending", { exact: true })).toBeVisible({ timeout: 10000 });
     await expect(page.getByRole("button", { name: "Start Meeting" })).toBeVisible({ timeout: 10000 });
 
     // Click Start Meeting to open the confirmation dialog

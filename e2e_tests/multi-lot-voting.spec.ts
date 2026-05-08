@@ -204,8 +204,8 @@ test.describe("Multi-lot voter journey", () => {
 
     const cards = page.locator(".motion-card");
     await expect(cards).toHaveCount(2);
-    await cards.nth(0).getByRole("button", { name: "For" }).click();
-    await cards.nth(1).getByRole("button", { name: "Abstain" }).click();
+    await cards.nth(0).getByTestId("vote-btn-yes").click();
+    await cards.nth(1).getByTestId("vote-btn-abstained").click();
 
     await page.getByRole("button", { name: "Submit ballot" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();

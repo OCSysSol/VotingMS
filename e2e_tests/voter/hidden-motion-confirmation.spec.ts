@@ -103,8 +103,8 @@ test.describe("US-TCG-06: confirmation receipt shows all voted motions after mee
     // Filter each card by title text, then click its vote button
     const motion1Card = allCards.filter({ hasText: MOTION1_TITLE });
     const motion2Card = allCards.filter({ hasText: MOTION2_TITLE });
-    await motion1Card.getByRole("button", { name: "For" }).click();
-    await motion2Card.getByRole("button", { name: "Against" }).click();
+    await motion1Card.getByTestId("vote-btn-yes").click();
+    await motion2Card.getByTestId("vote-btn-no").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
