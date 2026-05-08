@@ -123,9 +123,9 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Vote Against for Motion 1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Vote Abstain for Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote For — Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote Against — Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote Abstain — Motion 1" })).toBeInTheDocument();
   });
 
   it("shows For as pressed when choice is yes", () => {
@@ -139,7 +139,7 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Vote For — Motion 1" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("calls onChoiceChange when For is clicked", async () => {
@@ -155,7 +155,7 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    await user.click(screen.getByRole("button", { name: "Vote For for Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Vote For — Motion 1" }));
     expect(onChoiceChange).toHaveBeenCalledWith("mot-001", "yes");
   });
 
@@ -172,7 +172,7 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    await user.click(screen.getByRole("button", { name: "Vote For for Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Vote For — Motion 1" }));
     expect(onChoiceChange).toHaveBeenCalledWith("mot-001", null);
   });
 
@@ -189,7 +189,7 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    await user.click(screen.getByRole("button", { name: "Vote For for Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Vote For — Motion 1" }));
     expect(onChoiceChange).not.toHaveBeenCalled();
   });
 
@@ -617,9 +617,9 @@ describe("MotionCard", () => {
         votingClosed={true}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 1" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Vote Against for Motion 1" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Vote Abstain for Motion 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Vote For — Motion 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Vote Against — Motion 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Vote Abstain — Motion 1" })).toBeDisabled();
   });
 
   it("disables multi-choice option buttons when votingClosed=true", () => {
@@ -740,9 +740,9 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Vote Against for Motion 1" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Vote Abstain for Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote For — Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote Against — Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote Abstain — Motion 1" })).toBeInTheDocument();
   });
 
   it("aria-label uses trimmed motion_number when set", () => {
@@ -756,7 +756,7 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion SR-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote For — Motion SR-1" })).toBeInTheDocument();
   });
 
   it("aria-label uses position fallback when motion_number is null", () => {
@@ -770,6 +770,6 @@ describe("MotionCard", () => {
         highlight={false}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote For — Motion 3" })).toBeInTheDocument();
   });
 });

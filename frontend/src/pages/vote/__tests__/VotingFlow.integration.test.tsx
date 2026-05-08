@@ -100,10 +100,10 @@ describe("Voting Flow Integration", () => {
     renderApp(`/vote/${AGM_ID}/voting`);
 
     // Wait for motions
-    await waitFor(() => screen.getAllByRole("button", { name: /^Vote For for Motion/ }));
+    await waitFor(() => screen.getAllByRole("button", { name: /^Vote For — / }));
 
     // Answer all motions
-    const yesButtons = screen.getAllByRole("button", { name: /^Vote For for Motion/ });
+    const yesButtons = screen.getAllByRole("button", { name: /^Vote For — / });
     await user.click(yesButtons[0]);
     await user.click(yesButtons[1]);
 

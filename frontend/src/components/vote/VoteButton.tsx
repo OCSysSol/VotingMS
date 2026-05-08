@@ -30,6 +30,7 @@ export function VoteButton({ choice, selected, disabled, ariaDisabled = false, a
     <button
       type="button"
       className={`vote-btn vote-btn--${choice}${ariaDisabled ? " vote-btn--aria-disabled" : ""}`}
+      data-testid={`vote-btn-${choice}`}
       onClick={onClick}
       disabled={disabled}
       aria-disabled={ariaDisabled || undefined}

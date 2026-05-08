@@ -99,7 +99,7 @@ test.describe("WF8: Edge cases", () => {
 
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(1);
-    await motionCards.first().getByRole("button", { name: "For" }).click();
+    await motionCards.first().getByTestId("vote-btn-yes").click();
     await submitBallot(page);
     await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });
     await expect(page.getByText("Ballot submitted")).toBeVisible({ timeout: 15000 });
@@ -168,8 +168,8 @@ test.describe("WF8: Edge cases", () => {
 
     // No voting actions available — meeting is closed
     await expect(page.getByRole("button", { name: "Submit ballot" })).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "For" })).not.toBeVisible();
-    await expect(page.getByRole("button", { name: "Against" })).not.toBeVisible();
+    await expect(page.getByTestId("vote-btn-yes")).not.toBeVisible();
+    await expect(page.getByTestId("vote-btn-no")).not.toBeVisible();
   });
 
   // ── WF8.5: Building dropdown requires selection ────────────────────────────

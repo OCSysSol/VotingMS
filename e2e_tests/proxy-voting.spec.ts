@@ -263,7 +263,7 @@ test.describe("Proxy voter journey", () => {
 
         await motionCards
           .first()
-          .getByRole("button", { name: "Against" })
+          .getByTestId("vote-btn-no")
           .click();
 
         // Submit ballot

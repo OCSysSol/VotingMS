@@ -81,11 +81,11 @@ describe("VoteButton", () => {
         choice="yes"
         selected={false}
         disabled={false}
-        ariaLabel="Vote For for Motion 1"
+        ariaLabel="Vote For — Motion 1"
         onClick={() => {}}
       />
     );
-    expect(screen.getByRole("button", { name: "Vote For for Motion 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Vote For — Motion 1" })).toBeInTheDocument();
   });
 
   it("does not set aria-label attribute when ariaLabel prop is omitted", () => {

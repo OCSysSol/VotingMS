@@ -126,7 +126,7 @@ export function MotionCard({
               selected={choice === c}
               disabled={isEffectivelyDisabled}
               ariaDisabled={false}
-              ariaLabel={`Vote ${ARIA_ACTION_LABELS[c]} for ${motionLabel}`}
+              ariaLabel={`Vote ${ARIA_ACTION_LABELS[c]} — ${motionLabel}`}
               onClick={() => handleClick(c)}
             />
           ))}
