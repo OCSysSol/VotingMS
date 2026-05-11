@@ -184,6 +184,16 @@ class TestSecurityHeaders:
         coep = response.headers.get("Cross-Origin-Embedder-Policy", "")
         assert coep == "credentialless"
 
+    async def test_cross_origin_opener_policy_header_present(self, client: AsyncClient):
+        """Cross-Origin-Opener-Policy: same-origin isolates the browsing context,
+        preventing cross-origin opener attacks (XS-Leaks, Spectre side-channels).
+        Bare https: in img-src was replaced with explicit Vercel live domains to
+        prevent CSP wildcard bypass via arbitrary HTTPS image URLs (DAST rule 10055).
+        """
+        response = await client.get("/api/health")
+        coop = response.headers.get("Cross-Origin-Opener-Policy", "")
+        assert coop == "same-origin"
+
     # --- Boundary values ---
 
     async def test_headers_present_on_404_response(self, client: AsyncClient):

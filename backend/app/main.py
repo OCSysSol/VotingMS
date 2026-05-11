@@ -39,7 +39,7 @@ _SECURITY_HEADERS = {
         "script-src 'self' 'unsafe-inline' https://vercel.live https://*.vercel.live; "  # unsafe-inline required for Vite module preload polyfill; vercel.live required for Vercel preview feedback widget
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; "
-        "img-src 'self' data: https:; "
+        "img-src 'self' data: https://vercel.live https://*.vercel.live; "
         "connect-src 'self' https://vercel.live wss://vercel.live https://*.vercel.live wss://*.vercel.live; "  # vercel.live WSS and wildcard subdomains required for Vercel preview feedback widget
         "frame-src https://vercel.live https://*.vercel.live; "  # allows Vercel preview toolbar to load iframes
         "frame-ancestors 'none'; "
@@ -54,6 +54,9 @@ _SECURITY_HEADERS = {
     # credentialless allows cross-origin no-cors resources (fonts, analytics) without
     # requiring CORP headers, while blocking credentialled cross-origin embeds (DAST rule 90004)
     "Cross-Origin-Embedder-Policy": "credentialless",
+    # Isolate the browsing context to same-origin windows, preventing cross-origin
+    # opener attacks such as XS-Leaks and Spectre-based side-channels (DAST rule 10035)
+    "Cross-Origin-Opener-Policy": "same-origin",
 }
 
 
