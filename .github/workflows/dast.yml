@@ -21,6 +21,7 @@ jobs:
           rules_file_name: '.github/zap-rules.tsv'
           fail_action: true
           allow_issue_writing: false
+          artifact_name: zap-scan-demo
         env:
           ZAP_AUTH_HEADER_VALUE: ${{ secrets.VERCEL_BYPASS_TOKEN }}
           ZAP_AUTH_HEADER: x-vercel-protection-bypass
@@ -61,6 +62,7 @@ jobs:
           rules_file_name: '.github/zap-rules.tsv'
           fail_action: true
           allow_issue_writing: false
+          artifact_name: zap-scan-uat
         env:
           ZAP_AUTH_HEADER_VALUE: ${{ secrets.VERCEL_BYPASS_TOKEN }}
           ZAP_AUTH_HEADER: x-vercel-protection-bypass
