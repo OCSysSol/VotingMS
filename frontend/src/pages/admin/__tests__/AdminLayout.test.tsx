@@ -11,15 +11,30 @@ import { BrandingContext, DEFAULT_CONFIG } from "../../../context/BrandingContex
 const BASE = "http://localhost";
 
 // Use vi.hoisted() so mock functions are available inside the hoisted vi.mock() factories.
-const { mockSignOut, mockNavigate } = vi.hoisted(() => ({
+const { mockSignOut, mockNavigate, mockSessionAtom } = vi.hoisted(() => ({
   mockSignOut: vi.fn().mockResolvedValue(undefined),
   mockNavigate: vi.fn(),
+  mockSessionAtom: {
+    value: {
+      data: { user: { id: "u1", email: "user1@example.com" }, session: { id: "s1" } } as unknown,
+      error: null as unknown,
+      isPending: false,
+      isRefetching: false,
+      refetch: vi.fn(),
+    },
+    set: vi.fn(),
+  },
 }));
 
 vi.mock("../../../lib/auth-client", () => ({
   authClient: {
     signOut: mockSignOut,
     useSession: vi.fn().mockReturnValue({ data: null, isPending: false }),
+    $store: {
+      atoms: {
+        session: mockSessionAtom,
+      },
+    },
   },
 }));
 
@@ -84,15 +99,24 @@ describe("AdminLayout", () => {
     }
   });
 
-  it("calls logout and navigates to login on Sign out click", async () => {
+  it("calls logout, clears the session atom, and navigates to login on Sign out click", async () => {
     const user = userEvent.setup();
     mockNavigate.mockClear();
+    mockSessionAtom.set.mockClear();
     renderLayout();
     // Click the first Sign out button (sidebar)
     await user.click(screen.getAllByRole("button", { name: "Sign out" })[0]);
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith("/admin/login", { replace: true });
     });
+    expect(mockSessionAtom.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: null,
+        error: null,
+        isPending: false,
+        isRefetching: false,
+      })
+    );
   });
 
   // --- Mobile drawer ---

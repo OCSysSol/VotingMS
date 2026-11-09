@@ -296,6 +296,32 @@ class TestAuthProxyHappyPath:
         # Other response headers are preserved
         assert response.headers.get("x-custom") == "keep-me"
 
+    async def test_proxy_preserves_multiple_set_cookie_headers(self):
+        """proxy_auth preserves multiple Set-Cookie headers from httpx.Headers without comma-folding."""
+        import httpx
+
+        upstream = _make_upstream_response(
+            content=b'{"ok": true}',
+            headers=httpx.Headers([
+                ("content-type", "application/json"),
+                ("set-cookie", "__Secure-neon-auth.session_token=tok1; Path=/; HttpOnly; Secure; SameSite=Lax"),
+                ("set-cookie", "__Secure-neon-auth.session_data=dat1; Path=/; HttpOnly; Secure; SameSite=Lax"),
+            ]),
+        )
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-in/email", request=request)
+
+        set_cookies = response.headers.getlist("set-cookie")
+        assert set_cookies == [
+            "__Secure-neon-auth.session_token=tok1; Path=/; HttpOnly; Secure; SameSite=Lax",
+            "__Secure-neon-auth.session_data=dat1; Path=/; HttpOnly; Secure; SameSite=Lax",
+        ]
+
     async def test_proxy_forwards_upstream_non_200_status(self):
         """proxy_auth transparently forwards non-200 upstream status codes."""
         upstream = _make_upstream_response(
