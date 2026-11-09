@@ -71,46 +71,36 @@ def _unsign_token(signed_token: str) -> str:
 
 
 async def _load_direct_lot_owner_ids(
-    voter_email: str, building_id: uuid.UUID
+    db: AsyncSession, voter_email: str, building_id: uuid.UUID
 ) -> set[uuid.UUID]:
-    """Load lot IDs for direct lot owners matching voter_email within building_id.
-
-    Opens its own AsyncSession so it can be run concurrently via asyncio.gather
-    without sharing a session with another coroutine.
-    """
-    async with AsyncSessionLocal() as s:
-        r = await s.execute(
-            select(lot_persons.c.lot_id)
-            .join(Person, Person.id == lot_persons.c.person_id)
-            .join(Lot, Lot.id == lot_persons.c.lot_id)
-            .where(
-                Person.email.isnot(None),
-                Person.email == voter_email,
-                Lot.building_id == building_id,
-            )
+    """Load lot IDs for direct lot owners matching voter_email within building_id."""
+    r = await db.execute(
+        select(lot_persons.c.lot_id)
+        .join(Person, Person.id == lot_persons.c.person_id)
+        .join(Lot, Lot.id == lot_persons.c.lot_id)
+        .where(
+            Person.email.isnot(None),
+            Person.email == voter_email,
+            Lot.building_id == building_id,
         )
-        return {row[0] for row in r.all()}
+    )
+    return {row[0] for row in r.all()}
 
 
 async def _load_proxy_lot_owner_ids(
-    voter_email: str, building_id: uuid.UUID
+    db: AsyncSession, voter_email: str, building_id: uuid.UUID
 ) -> set[uuid.UUID]:
-    """Load lot IDs for proxy lots where proxy person email matches within building_id.
-
-    Opens its own AsyncSession so it can be run concurrently via asyncio.gather
-    without sharing a session with another coroutine.
-    """
-    async with AsyncSessionLocal() as s:
-        r = await s.execute(
-            select(LotProxy.lot_id)
-            .join(Person, Person.id == LotProxy.person_id)
-            .join(Lot, Lot.id == LotProxy.lot_id)
-            .where(
-                Person.email == voter_email,
-                Lot.building_id == building_id,
-            )
+    """Load lot IDs for proxy lots where proxy person email matches within building_id."""
+    r = await db.execute(
+        select(LotProxy.lot_id)
+        .join(Person, Person.id == LotProxy.person_id)
+        .join(Lot, Lot.id == LotProxy.lot_id)
+        .where(
+            Person.email == voter_email,
+            Lot.building_id == building_id,
         )
-        return {row[0] for row in r.all()}
+    )
+    return {row[0] for row in r.all()}
 
 
 
@@ -182,14 +172,9 @@ async def resolve_voter_state(
     from app.models.vote import Vote as _Vote, VoteStatus as _VoteStatus
     from app.schemas.auth import LotInfo as _LotInfo
 
-    # Fire direct-owner and proxy-lot lookups concurrently.
-    # Each helper opens its own AsyncSession so they can run in parallel without
-    # sharing a connection — a single AsyncSession must not be used across
-    # concurrent coroutines (SQLAlchemy asyncio safety requirement).
-    direct_lot_owner_ids, proxy_lot_owner_ids = await _asyncio.gather(
-        _load_direct_lot_owner_ids(voter_email, building_id),
-        _load_proxy_lot_owner_ids(voter_email, building_id),
-    )
+    # Load direct-owner and proxy-lot lookups sequentially on the active request session.
+    direct_lot_owner_ids = await _load_direct_lot_owner_ids(db, voter_email, building_id)
+    proxy_lot_owner_ids = await _load_proxy_lot_owner_ids(db, voter_email, building_id)
 
     # Merge: union of direct and proxy lots
     all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids

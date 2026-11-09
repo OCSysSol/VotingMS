@@ -77,14 +77,11 @@ class TestLoadDirectLotOwnerIds:
         lot_id_2 = uuid.uuid4()
         mock_session = _make_mock_session_for_ids([lot_id_1, lot_id_2])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_direct_lot_owner_ids(
-                voter_email="voter@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_direct_lot_owner_ids(
+            mock_session,
+            voter_email="voter@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == {lot_id_1, lot_id_2}
 
@@ -92,14 +89,11 @@ class TestLoadDirectLotOwnerIds:
         """Returns an empty set when no LotOwnerEmail row matches the email."""
         mock_session = _make_mock_session_for_ids([])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_direct_lot_owner_ids(
-                voter_email="unknown@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_direct_lot_owner_ids(
+            mock_session,
+            voter_email="unknown@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == set()
 
@@ -108,14 +102,11 @@ class TestLoadDirectLotOwnerIds:
         lot_id = uuid.uuid4()
         mock_session = _make_mock_session_for_ids([lot_id])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            await _load_direct_lot_owner_ids(
-                voter_email="voter@test.com",
-                building_id=uuid.uuid4(),
-            )
+        await _load_direct_lot_owner_ids(
+            mock_session,
+            voter_email="voter@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         mock_session.execute.assert_awaited_once()
 
@@ -126,14 +117,11 @@ class TestLoadDirectLotOwnerIds:
         lot_id = uuid.uuid4()
         mock_session = _make_mock_session_for_ids([lot_id])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_direct_lot_owner_ids(
-                voter_email="single@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_direct_lot_owner_ids(
+            mock_session,
+            voter_email="single@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == {lot_id}
         assert len(result) == 1
@@ -144,14 +132,11 @@ class TestLoadDirectLotOwnerIds:
         # DB returns the same ID twice (edge case — should not happen with FK constraints)
         mock_session = _make_mock_session_for_ids([lot_id, lot_id])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_direct_lot_owner_ids(
-                voter_email="dup@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_direct_lot_owner_ids(
+            mock_session,
+            voter_email="dup@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == {lot_id}
         assert len(result) == 1
@@ -171,14 +156,11 @@ class TestLoadProxyLotOwnerIds:
         proxy_lot_id = uuid.uuid4()
         mock_session = _make_mock_session_for_ids([proxy_lot_id])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_proxy_lot_owner_ids(
-                voter_email="proxy@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_proxy_lot_owner_ids(
+            mock_session,
+            voter_email="proxy@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == {proxy_lot_id}
 
@@ -186,14 +168,11 @@ class TestLoadProxyLotOwnerIds:
         """Returns an empty set when no LotProxy row matches the email."""
         mock_session = _make_mock_session_for_ids([])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_proxy_lot_owner_ids(
-                voter_email="notaproxy@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_proxy_lot_owner_ids(
+            mock_session,
+            voter_email="notaproxy@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == set()
 
@@ -204,14 +183,11 @@ class TestLoadProxyLotOwnerIds:
         lot_id_3 = uuid.uuid4()
         mock_session = _make_mock_session_for_ids([lot_id_1, lot_id_2, lot_id_3])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            result = await _load_proxy_lot_owner_ids(
-                voter_email="multiproxy@test.com",
-                building_id=uuid.uuid4(),
-            )
+        result = await _load_proxy_lot_owner_ids(
+            mock_session,
+            voter_email="multiproxy@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         assert result == {lot_id_1, lot_id_2, lot_id_3}
 
@@ -219,14 +195,11 @@ class TestLoadProxyLotOwnerIds:
         """Verifies that a DB query is issued on the session."""
         mock_session = _make_mock_session_for_ids([])
 
-        with patch(
-            "app.services.auth_service.AsyncSessionLocal",
-            _mock_async_session_local(mock_session),
-        ):
-            await _load_proxy_lot_owner_ids(
-                voter_email="proxy@test.com",
-                building_id=uuid.uuid4(),
-            )
+        await _load_proxy_lot_owner_ids(
+            mock_session,
+            voter_email="proxy@test.com",
+            building_id=uuid.uuid4(),
+        )
 
         mock_session.execute.assert_awaited_once()
 

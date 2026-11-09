@@ -518,8 +518,8 @@ class TestMain:
         assert data["status"] == "ok"
         assert data["db"] == "connected"
 
-    async def test_health_endpoint_returns_503_on_db_failure(self):
-        """Health endpoint returns 503 when the DB query raises an exception."""
+    async def test_health_endpoint_returns_553_on_db_failure(self):
+        """Health endpoint returns 553 when the DB query raises an exception."""
         from app.main import app
         from app.database import get_db
 
@@ -537,16 +537,16 @@ class TestMain:
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
                 response = await client.get("/api/health")
-            assert response.status_code == 503
+            assert response.status_code == 553
             detail = response.json()["detail"]
             assert detail["status"] == "degraded"
             assert detail["db"] == "unreachable"
-            assert "error" in detail
+            assert "error" not in detail
         finally:
             app.dependency_overrides.pop(get_db, None)
 
-    async def test_health_endpoint_returns_503_on_timeout(self):
-        """Health endpoint returns 503 when the DB query exceeds the 2-second timeout."""
+    async def test_health_endpoint_returns_553_on_timeout(self):
+        """Health endpoint returns 553 when the DB query exceeds the 2-second timeout."""
         from app.main import app
         from app.database import get_db
 
@@ -564,10 +564,11 @@ class TestMain:
                 transport=ASGITransport(app=app), base_url="http://test"
             ) as client:
                 response = await client.get("/api/health")
-            assert response.status_code == 503
+            assert response.status_code == 553
             detail = response.json()["detail"]
             assert detail["status"] == "degraded"
             assert detail["db"] == "unreachable"
+            assert "error" not in detail
         finally:
             app.dependency_overrides.pop(get_db, None)
 

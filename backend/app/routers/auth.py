@@ -36,10 +36,9 @@ from app.schemas.auth import (
     OtpRequestResponse,
     SessionRestoreRequest,
 )
+from app.rate_limiter import otp_verify_limiter
 from app.services.auth_service import (
     _TOKEN_MAX_AGE_SECONDS,
-    _load_direct_lot_owner_ids,
-    _load_proxy_lot_owner_ids,
     _unsign_token,
     cleanup_expired_otps,
     cleanup_expired_sessions,
@@ -62,6 +61,8 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 _OTP_RATE_LIMIT_WINDOW_SECONDS = 60
 _OTP_RATE_LIMIT_MAX_ATTEMPTS = 1  # one successful request per window
+_OTP_VERIFY_MAX_FAILURES = 5
+_OTP_VERIFY_WINDOW_SECONDS = 300  # 5 minutes
 
 # ---------------------------------------------------------------------------
 # OTP alphabet — excludes visually ambiguous characters O, 0, I, 1
@@ -368,6 +369,21 @@ async def verify_auth(
     if meeting is None:
         raise HTTPException(status_code=404, detail="General Meeting not found")
 
+    rate_key = f"{request.email}:{meeting.building_id}"
+
+    # Rate limit check: 5 failed attempts per (email, building_id) in 5 minutes.
+    # Bypassed in testing_mode unless testing_mode=False (follows request-otp pattern).
+    if not settings.testing_mode and otp_verify_limiter.is_rate_limited(rate_key):
+        logger.warning(
+            "otp_verify_rate_limit_triggered",
+            email=request.email,
+            agm_id=str(request.general_meeting_id),
+        )
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed verification attempts. Please try again later.",
+        )
+
     # 2. Validate OTP — find most recent unused unexpired OTP for (email, meeting_id)
     now = datetime.now(UTC)
     otp_result = await db.execute(
@@ -384,6 +400,8 @@ async def verify_auth(
     otp = otp_result.scalar_one_or_none()
 
     if otp is None:
+        if not settings.testing_mode:
+            otp_verify_limiter.record(rate_key)
         # Perform a timing-safe comparison against a dummy value so that
         # "no OTP row found" and "OTP found but code wrong" take the same
         # wall-clock time — eliminating a timing oracle that could reveal
@@ -394,6 +412,8 @@ async def verify_auth(
             detail="Invalid or expired verification code",
         )
     if not hmac.compare_digest(otp.code, request.code):
+        if not settings.testing_mode:
+            otp_verify_limiter.record(rate_key)
         logger.warning(
             "otp_verify_failed",
             email=request.email,
@@ -421,6 +441,8 @@ async def verify_auth(
     lots = voter_state["lots"]
 
     if not lots:
+        if not settings.testing_mode:
+            otp_verify_limiter.record(rate_key)
         raise HTTPException(
             status_code=401,
             detail="Email address not found for this building",
@@ -441,6 +463,8 @@ async def verify_auth(
         building_id=building_id,
         general_meeting_id=request.general_meeting_id,
     )
+    if not settings.testing_mode:
+        otp_verify_limiter.reset(rate_key)
     await db.commit()
 
     response.set_cookie(

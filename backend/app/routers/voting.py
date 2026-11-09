@@ -82,13 +82,11 @@ async def list_motions(
     voter_email = session.voter_email
     building_id = session.building_id
 
-    # Fire direct-owner and proxy-lot lookups concurrently.
+    # Load direct-owner and proxy-lot lookups sequentially on the active request session.
     # session.building_id is used directly — the session FK guarantees the meeting
     # exists and provides building_id, so the meeting existence check is not needed.
-    direct_lot_owner_ids, proxy_lot_owner_ids = await asyncio.gather(
-        _load_direct_lot_owner_ids(voter_email, building_id),
-        _load_proxy_lot_owner_ids(voter_email, building_id),
-    )
+    direct_lot_owner_ids = await _load_direct_lot_owner_ids(db, voter_email, building_id)
+    proxy_lot_owner_ids = await _load_proxy_lot_owner_ids(db, voter_email, building_id)
     all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
 
     # Get submitted vote motion IDs, choices, and option IDs for this voter's lots
