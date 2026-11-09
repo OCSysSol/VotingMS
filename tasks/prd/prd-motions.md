@@ -426,6 +426,40 @@ This document covers motion management for the AGM Voting App: CRUD operations o
 
 ---
 
+### US-AM06: Real-time character limit indicators, field-level error highlighting, and graceful error messaging for motion fields
+
+**Status:** ✅ Implemented — branch: `feat/motion-field-limits`, committed 2026-11-09
+
+**Description:** As a meeting host/admin, I want real-time character limit indicators, field-level error highlighting, and clear error messaging for Motion Title, Motion Number, and Description across both motion creation and motion editing, so that I can see field limits as I type, immediately identify and locate invalid fields, and avoid confusing validation rejections.
+
+**Acceptance Criteria:**
+- [x] Motion fields enforce backend-aligned limits:
+  - **Motion Title**: maximum 500 characters; visual warning threshold at 450 characters (90%).
+  - **Motion Number**: maximum 50 characters; visual warning threshold at 45 characters (90%).
+  - **Motion Description**: maximum 5,000 characters; visual warning threshold at 4,500 characters (90%).
+- [x] Real-time character limit counter is displayed immediately below each field:
+  - Formatted as `"{current}/{max}"` (e.g., `450/500`, `48/50`, `4820/5000`).
+  - Styled with neutral muted color (`var(--text-muted)`) when under 90% of the maximum limit.
+  - Styled with warning amber color (`var(--amber)`) when between 90% and 100% of the maximum limit inclusive.
+  - Styled with error red color (`var(--red)`) when exceeding the maximum limit.
+- [x] Field-level error styling:
+  - Inputs and textareas exceeding their limit receive `aria-invalid="true"` and an error border (`.field__input--error` / `.field__input[aria-invalid="true"]`), making the invalid field immediately distinguishable.
+- [x] Client-side validation prevents submission when any field exceeds its limit:
+  - Submission is blocked before any API call is made.
+  - A descriptive, human-readable error summary is displayed identifying the exact motion number and field name (e.g., `"Motion 2: Title exceeds the 500 character limit (512/500 characters)"`, `"Motion 1: Description exceeds the 5,000 character limit (5,210/5000 characters)"`, or `"Motion number exceeds the 50 character limit (54/50 characters)"`).
+  - Screen readers are notified via `role="alert"` on error summary messages and `aria-describedby` links to field counters.
+- [x] Graceful handling of backend 422 API errors:
+  - If a 422 Unprocessable Entity is returned by the API (e.g. `POST /api/admin/general-meetings`, `POST /api/admin/general-meetings/{id}/motions`, `PATCH /api/admin/motions/{id}`), the response is parsed to extract field locations and messages without exposing raw JSON, internal validation dumps, or generic unhelpful text.
+- [x] Comprehensive coverage across all motion entry interfaces:
+  - Meeting creation flow: `MotionEditor.tsx` / `CreateGeneralMeetingForm.tsx`.
+  - Meeting detail flow: "Add Motion" modal in `GeneralMeetingDetailPage.tsx`.
+  - Meeting detail flow: "Edit Motion" modal in `GeneralMeetingDetailPage.tsx`.
+- [x] No regression on existing multi-choice option length limits (1,000 chars) and validations.
+- [x] All unit, integration, and E2E tests pass at 100% test coverage.
+- [x] Typecheck, lint, and security checks pass cleanly.
+
+---
+
 ## Functional Requirements
 
 - FR-11: AGM records and their motions are immutable after creation. No edits or deletions are permitted regardless of AGM status once the motion is visible and has received votes.

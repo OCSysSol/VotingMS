@@ -208,8 +208,15 @@ button, input, select, textarea {
   box-shadow: 0 0 0 3px rgba(12,27,46,.1);
 }
 
-.field__input[aria-invalid="true"] {
+.field__input[aria-invalid="true"],
+.field__input--error {
   border-color: var(--red);
+}
+
+.field__input[aria-invalid="true"]:focus,
+.field__input--error:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 
 .field__error {
