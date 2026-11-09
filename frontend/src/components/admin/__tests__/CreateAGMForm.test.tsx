@@ -357,4 +357,70 @@ describe("CreateGeneralMeetingForm", () => {
       expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/agm-new");
     });
   });
+
+  it("shows error when multi-choice option text exceeds 1,000 characters", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    fireEvent.change(optionInputs[0], { target: { value: "A".repeat(1001) } });
+    await user.type(optionInputs[1], "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText(/Motion 1, Option 1 exceeds the 1,000 character limit/i)).toBeInTheDocument();
+  });
+
+  it("shows error when multi-choice option text is whitespace-only", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(optionInputs[0], "Alice");
+    await user.type(optionInputs[1], "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+
+    const updatedOptionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(updatedOptionInputs[2], "   ");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText(/Motion 1, Option 3: option text must not be empty/i)).toBeInTheDocument();
+  });
+
+  it("surfaces formatted 422 error from server when option validation fails", async () => {
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "motions", 0, "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(optionInputs[0], "Alice");
+    await user.type(optionInputs[1], "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    await waitFor(() => {
+      expect(screen.getByText("option text must not exceed 1000 characters")).toBeInTheDocument();
+    });
+  });
 });

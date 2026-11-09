@@ -135,28 +135,40 @@ export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
               </div>
               <div style={{ marginBottom: 8 }}>
                 <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                {(motion.options ?? [{ text: "" }, { text: "" }]).map((opt, oi) => (
-                  <div key={oi} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input
-                      aria-label={`Motion ${index + 1} option ${oi + 1}`}
-                      className="field__input"
-                      type="text"
-                      value={opt.text}
-                      onChange={(e) => updateOption(index, oi, e.target.value)}
-                      placeholder={`Option ${oi + 1}`}
-                    />
-                    {(motion.options ?? []).length > 2 && (
-                      <button
-                        type="button"
-                        className="btn btn--danger btn--sm"
-                        aria-label={`Remove motion ${index + 1} option ${oi + 1}`}
-                        onClick={() => removeOption(index, oi)}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {(motion.options ?? [{ text: "" }, { text: "" }]).map((opt, oi) => {
+                  const len = opt.text.length;
+                  const counterClass = `field__counter${
+                    len > 1000 ? " field__counter--error" : len >= 900 ? " field__counter--warning" : ""
+                  }`;
+                  return (
+                    <div key={oi} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                        <textarea
+                          aria-label={`Motion ${index + 1} option ${oi + 1}`}
+                          className="field__input field__input--textarea"
+                          rows={2}
+                          style={{ resize: "vertical" }}
+                          value={opt.text}
+                          onChange={(e) => updateOption(index, oi, e.target.value)}
+                          placeholder={`Option ${oi + 1}`}
+                        />
+                        {(motion.options ?? []).length > 2 && (
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--sm"
+                            aria-label={`Remove motion ${index + 1} option ${oi + 1}`}
+                            onClick={() => removeOption(index, oi)}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      <div className={counterClass} data-testid={`motion-${index + 1}-option-${oi + 1}-counter`}>
+                        {len}/1000
+                      </div>
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
                   className="btn btn--secondary btn--sm"

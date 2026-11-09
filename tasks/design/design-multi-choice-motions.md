@@ -14,7 +14,7 @@ Multi-choice motions present voters with a set of custom text options (e.g. cand
 |---|---|---|
 | `id` | UUID PK | |
 | `motion_id` | UUID FK → `motions.id` CASCADE | |
-| `text` | VARCHAR | NOT NULL; max 200 chars |
+| `text` | VARCHAR / TEXT | NOT NULL; max 1,000 chars validated via Pydantic; DB column is unbounded sa.String() |
 | `display_order` | INTEGER | NOT NULL; unique per motion via `uq_motion_options_motion_display_order` |
 | `outcome` | VARCHAR | nullable; `'pass'`, `'fail'`, or `'tie'`; stored at meeting close |
 | `for_voter_count` | INTEGER | NOT NULL DEFAULT 0; snapshot stored at close |
@@ -184,3 +184,30 @@ Yes — migrations added:
 - `votechoice` enum: `selected`, `against`
 - `votes.motion_option_id` (UUID nullable FK)
 - Drop `uq_votes_gm_motion_lot_owner`; add `uq_votes_non_multi_choice` and `uq_votes_multi_choice` partial indexes
+
+---
+
+## Expanded Option Text Limit (1,000 Characters) & Graceful Error Handling
+
+**Status:** Implemented
+
+### Schema & Validation
+- Backend `MotionOptionCreate` Pydantic validator (`backend/app/schemas/admin.py`) increased from `len(v) > 200` to `len(v) > 1000`.
+- No database migration required: `motion_options.text` is already unbounded `sa.String()` / `TEXT` in PostgreSQL.
+- Sanitization via `bleach.clean(..., tags=[], strip=True)` handles clean text up to 1,000 characters.
+
+### Frontend Authoring UX (`MotionEditor.tsx`, `GeneralMeetingDetailPage.tsx`)
+- Option input upgraded to multi-line `<textarea className="field__input field__input--textarea" rows={2} style={{ resize: "vertical" }} />`.
+- Live character counter: `"{length}/1000"`.
+  - Muted gray when `< 900`.
+  - Amber warning when `900 <= length <= 1000`.
+  - Red error when `length > 1000`.
+- Client-side pre-submission validation blocks form submit if any option text is > 1000 chars with inline message: `"Option {N} exceeds the 1,000 character limit ({length}/1,000 characters)"`.
+- API 422 errors gracefully parsed to surface field errors cleanly.
+
+### Voter & Display Accessibility (`MultiChoiceOptionList.tsx`, `styles/index.css`)
+- `.mc-option-row`: styled with `align-items: flex-start` so multi-line text keeps voting buttons top-aligned.
+- `.mc-option-row__text`: styled with `word-break: break-word`, `overflow-wrap: anywhere`, `min-width: 0`.
+- Screen reader accessibility: button group `aria-label` truncated to 80 chars + `...` (e.g. `Vote for ${truncateAriaText(option.text, 80)}`) to prevent screen readers announcing 1,000 characters per button.
+- `AdminVoteEntryPanel.tsx` & `AGMReportView.tsx`: table cells styled with `word-break: break-word` and button `aria-label`s truncated.
+

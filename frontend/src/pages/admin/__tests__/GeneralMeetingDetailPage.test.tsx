@@ -2547,6 +2547,178 @@ describe("Bulk motion visibility", () => {
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Option limit cannot exceed the number of options.");
   });
+
+  it("shows validation error and character counters when Add Motion option exceeds 1000 characters", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    const opt1 = screen.getByLabelText("Option 1");
+    fireEvent.change(opt1, { target: { value: "A".repeat(1001) } });
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    // Check live character counters
+    const counter1 = screen.getByTestId("add-motion-option-1-counter");
+    expect(counter1).toHaveTextContent("1001/1000");
+    expect(counter1).toHaveClass("field__counter--error");
+
+    const counter2 = screen.getByTestId("add-motion-option-2-counter");
+    expect(counter2).toHaveTextContent("3/1000");
+    expect(counter2).not.toHaveClass("field__counter--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Option 1 exceeds the 1,000 character limit/i);
+  });
+
+  it("shows validation error when Add Motion has whitespace-only option", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+    await user.type(screen.getByLabelText("Option 3"), "   ");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Option text must not be empty.");
+  });
+
+  it("surfaces formatted 422 error from server when Add Motion option validation fails", async () => {
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:id/motions", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("option text must not exceed 1000 characters");
+    });
+  });
+
+  it("shows validation error and character counters when Edit Motion option exceeds 1000 characters", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    const opt1 = screen.getByLabelText("Option 1");
+    fireEvent.change(opt1, { target: { value: "A".repeat(1001) } });
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    // Check live character counters
+    const counter1 = screen.getByTestId("edit-motion-option-1-counter");
+    expect(counter1).toHaveTextContent("1001/1000");
+    expect(counter1).toHaveClass("field__counter--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Option 1 exceeds the 1,000 character limit/i);
+  });
+
+  it("shows validation error when Edit Motion has whitespace-only option", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+    await user.type(screen.getByLabelText("Option 3"), "   ");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Option text must not be empty.");
+  });
+
+  it("surfaces formatted 422 error from server when Edit Motion option validation fails", async () => {
+    server.use(
+      http.patch("http://localhost/api/admin/motions/:id", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("option text must not exceed 1000 characters");
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

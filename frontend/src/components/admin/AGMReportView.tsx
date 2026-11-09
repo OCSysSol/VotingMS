@@ -123,9 +123,9 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
       <tr style={isWinner ? { borderLeft: "4px solid var(--green)", background: "var(--green-bg)" } : undefined}>
         <td colSpan={3} style={{ padding: "8px 10px", background: isWinner ? undefined : "var(--surface-raised, #f7f7f7)", borderBottom: "1px solid var(--border, #e0e0e0)" }}>
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontWeight: 600 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 7, fontWeight: 600, wordBreak: "break-word", overflowWrap: "anywhere", minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--navy)", flexShrink: 0 }} />
-              {optTally.option_text}
+              <span style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{optTally.option_text}</span>
               <OutcomeBadge outcome={optTally.outcome} />
             </span>
             {/* Fix 3: summary counts visible in collapsed state */}
@@ -137,7 +137,7 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
             <button
               type="button"
               aria-expanded={expanded}
-              aria-label={`${expanded ? "Hide voting details" : "Show voting details"} for ${optTally.option_text}`}
+              aria-label={`${expanded ? "Hide voting details" : "Show voting details"} for ${optTally.option_text.length > 80 ? `${optTally.option_text.slice(0, 80)}...` : optTally.option_text}`}
               onClick={() => setExpanded((v) => !v)}
               style={{
                 marginLeft: "auto",

@@ -349,4 +349,55 @@ describe("MotionEditor", () => {
     expect(lastCall[0].motion_type).toBe("special");
     expect(lastCall[0].is_multi_choice).toBe(true);
   });
+
+  // --- Option textarea and character counter ---
+
+  it("renders multi-choice options as textareas with field__input--textarea", () => {
+    const mcMotion: MotionFormEntry = {
+      title: "Election",
+      description: "",
+      motion_number: "",
+      motion_type: "general",
+      is_multi_choice: true,
+      option_limit: "1",
+      options: [{ text: "Alice" }, { text: "Bob" }],
+    };
+    render(<MotionEditor motions={[mcMotion]} onChange={() => {}} />);
+    const textarea = screen.getByLabelText("Motion 1 option 1");
+    expect(textarea.tagName).toBe("TEXTAREA");
+    expect(textarea).toHaveClass("field__input--textarea");
+    expect(textarea).toHaveAttribute("rows", "2");
+  });
+
+  it("renders live character counters with neutral, warning, and error classes", () => {
+    const mcMotion: MotionFormEntry = {
+      title: "Election",
+      description: "",
+      motion_number: "",
+      motion_type: "general",
+      is_multi_choice: true,
+      option_limit: "1",
+      options: [
+        { text: "A".repeat(500) },   // neutral (< 900)
+        { text: "B".repeat(950) },   // warning (900..1000)
+        { text: "C".repeat(1005) },  // error (> 1000)
+      ],
+    };
+    render(<MotionEditor motions={[mcMotion]} onChange={() => {}} />);
+
+    const counter1 = screen.getByTestId("motion-1-option-1-counter");
+    expect(counter1).toHaveTextContent("500/1000");
+    expect(counter1).toHaveClass("field__counter");
+    expect(counter1).not.toHaveClass("field__counter--warning");
+    expect(counter1).not.toHaveClass("field__counter--error");
+
+    const counter2 = screen.getByTestId("motion-1-option-2-counter");
+    expect(counter2).toHaveTextContent("950/1000");
+    expect(counter2).toHaveClass("field__counter--warning");
+    expect(counter2).not.toHaveClass("field__counter--error");
+
+    const counter3 = screen.getByTestId("motion-1-option-3-counter");
+    expect(counter3).toHaveTextContent("1005/1000");
+    expect(counter3).toHaveClass("field__counter--error");
+  });
 });
