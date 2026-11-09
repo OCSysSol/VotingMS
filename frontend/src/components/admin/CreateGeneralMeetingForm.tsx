@@ -7,7 +7,7 @@ import MotionEditor, { type MotionFormEntry } from "./MotionEditor";
 import MotionExcelUpload from "./MotionExcelUpload";
 import BuildingSearchCombobox from "./BuildingSearchCombobox";
 
-import { formatApiErrorMessage } from "../../utils/validation";
+import { formatApiErrorMessage, MOTION_LIMITS } from "../../utils/validation";
 
 export default function CreateGeneralMeetingForm() {
   const navigate = useNavigate();
@@ -43,11 +43,23 @@ export default function CreateGeneralMeetingForm() {
         setFormError(`Motion ${i + 1} title is required.`);
         return;
       }
+      if (motions[i].title.length > MOTION_LIMITS.TITLE.MAX) {
+        setFormError(`Motion ${i + 1}: Title exceeds the 500 character limit (${motions[i].title.length}/500 characters).`);
+        return;
+      }
+      if ((motions[i].motion_number?.length ?? 0) > MOTION_LIMITS.MOTION_NUMBER.MAX) {
+        setFormError(`Motion ${i + 1}: Motion number exceeds the 50 character limit (${motions[i].motion_number!.length}/50 characters).`);
+        return;
+      }
+      if (motions[i].description.length > MOTION_LIMITS.DESCRIPTION.MAX) {
+        setFormError(`Motion ${i + 1}: Description exceeds the 5,000 character limit (${motions[i].description.length.toLocaleString()}/5000 characters).`);
+        return;
+      }
       if (motions[i].is_multi_choice) {
         const opts = motions[i].options ?? [];
         for (let oi = 0; oi < opts.length; oi++) {
           const txt = opts[oi].text;
-          if (txt.length > 1000) {
+          if (txt.length > MOTION_LIMITS.OPTION_TEXT.MAX) {
             setFormError(`Motion ${i + 1}, Option ${oi + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
             return;
           }
@@ -161,7 +173,7 @@ export default function CreateGeneralMeetingForm() {
       <MotionEditor motions={motions} onChange={setMotions} />
 
       {formError && (
-        <p className="field__error" style={{ marginBottom: 16 }}>{formError}</p>
+        <p role="alert" className="field__error" style={{ marginBottom: 16 }}>{formError}</p>
       )}
 
       <div style={{ marginTop: 8 }}>

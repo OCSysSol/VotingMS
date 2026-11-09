@@ -2719,6 +2719,118 @@ describe("Bulk motion visibility", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("option text must not exceed 1000 characters");
     });
   });
+
+  it("shows live character counters and validates field limits in Add Motion modal", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+
+    const titleInput = screen.getByLabelText("Title *");
+    const descInput = screen.getByLabelText("Description");
+    const numInput = screen.getByLabelText("Motion number (optional)");
+
+    // Initial counters
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveTextContent("0/500");
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveTextContent("0/5000");
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveTextContent("0/50");
+
+    // Title limit check (> 500)
+    fireEvent.change(titleInput, { target: { value: "T".repeat(501) } });
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveTextContent("501/500");
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveClass("field__counter--error");
+    expect(titleInput).toHaveAttribute("aria-invalid", "true");
+    expect(titleInput).toHaveClass("field__input--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title exceeds the 500 character limit (501/500 characters).");
+
+    // Reset Title to valid
+    fireEvent.change(titleInput, { target: { value: "Valid Title" } });
+
+    // Motion number limit check (> 50)
+    fireEvent.change(numInput, { target: { value: "N".repeat(51) } });
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveTextContent("51/50");
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveClass("field__counter--error");
+    expect(numInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Motion number exceeds the 50 character limit (51/50 characters).");
+
+    // Reset Motion number to valid
+    fireEvent.change(numInput, { target: { value: "1" } });
+
+    // Description limit check (> 5000)
+    fireEvent.change(descInput, { target: { value: "D".repeat(5001) } });
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveTextContent("5001/5000");
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveClass("field__counter--error");
+    expect(descInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Description exceeds the 5,000 character limit (5,001/5000 characters).");
+  });
+
+  it("shows live character counters and validates field limits in Edit Motion modal", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const titleInput = screen.getByLabelText("Title");
+    const descInput = screen.getByLabelText("Description");
+    const numInput = screen.getByLabelText("Motion number (optional)");
+
+    // Title limit check (> 500)
+    fireEvent.change(titleInput, { target: { value: "T".repeat(501) } });
+    expect(screen.getByTestId("modal-edit-title-counter")).toHaveTextContent("501/500");
+    expect(screen.getByTestId("modal-edit-title-counter")).toHaveClass("field__counter--error");
+    expect(titleInput).toHaveAttribute("aria-invalid", "true");
+    expect(titleInput).toHaveClass("field__input--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title exceeds the 500 character limit (501/500 characters).");
+
+    // Empty Title check
+    fireEvent.change(titleInput, { target: { value: "   " } });
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title is required");
+
+    // Reset Title to valid
+    fireEvent.change(titleInput, { target: { value: "Valid Title" } });
+
+    // Motion number limit check (> 50)
+    fireEvent.change(numInput, { target: { value: "N".repeat(51) } });
+    expect(screen.getByTestId("modal-edit-number-counter")).toHaveTextContent("51/50");
+    expect(screen.getByTestId("modal-edit-number-counter")).toHaveClass("field__counter--error");
+    expect(numInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Motion number exceeds the 50 character limit (51/50 characters).");
+
+    // Reset Motion number to valid
+    fireEvent.change(numInput, { target: { value: "1" } });
+
+    // Description limit check (> 5000)
+    fireEvent.change(descInput, { target: { value: "D".repeat(5001) } });
+    expect(screen.getByTestId("modal-edit-desc-counter")).toHaveTextContent("5001/5000");
+    expect(screen.getByTestId("modal-edit-desc-counter")).toHaveClass("field__counter--error");
+    expect(descInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Description exceeds the 5,000 character limit (5,001/5000 characters).");
+  });
 });
 
 // ---------------------------------------------------------------------------

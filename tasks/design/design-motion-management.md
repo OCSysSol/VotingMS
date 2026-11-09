@@ -199,3 +199,55 @@ Yes — migrations added:
 - `motions.voting_closed_at` (TIMESTAMPTZ nullable)
 - `motions.option_limit` (INTEGER nullable)
 - `motiontype` enum: added `multi_choice` value
+
+---
+
+## Real-time Character Limit Indicators & Graceful Error Messaging (US-AM06)
+
+**Status:** Implemented
+
+### Field Limits & Warning Thresholds
+
+The frontend constraints mirror existing backend Pydantic models (`MotionCreate`, `MotionAddRequest`, `MotionUpdateRequest`):
+
+| Field | Max Characters | Warning Threshold (>= 90%) | Component Inputs | Backend Schema Rule |
+|---|---|---|---|---|
+| **Title** | 500 | >= 450 | `<input className="field__input">` | `Field(..., max_length=500)` |
+| **Motion Number** | 50 | >= 45 | `<input className="field__input">` | `Field(default=None, max_length=50)` |
+| **Description** | 5,000 | >= 4,500 | `<textarea className="field__input">` | `Field(default=None, max_length=5000)` |
+| **Option Text** | 1,000 | >= 900 | `<textarea className="field__input">` | `MotionOptionCreate` validator |
+
+Constants defined in `frontend/src/utils/validation.ts`:
+```typescript
+export const MOTION_LIMITS = {
+  TITLE: { MAX: 500, WARN: 450 },
+  MOTION_NUMBER: { MAX: 50, WARN: 45 },
+  DESCRIPTION: { MAX: 5000, WARN: 4500 },
+  OPTION_TEXT: { MAX: 1000, WARN: 900 },
+} as const;
+
+export function getCounterClass(length: number, max: number, warn: number): string {
+  if (length > max) return "field__counter field__counter--error";
+  if (length >= warn) return "field__counter field__counter--warning";
+  return "field__counter";
+}
+```
+
+### UI & Styling Specification
+
+1. **Character Counter Placement & Rendering**:
+   - Placed directly beneath the corresponding `<input>` or `<textarea>`.
+   - Formatted as `{length}/{max}`.
+   - Styled with `field__counter`, transitioning to `field__counter--warning` at >= 90% and `field__counter--error` when exceeding limit.
+
+2. **Field-Level Error Highlighting**:
+   - When a field exceeds its limit, set `aria-invalid="true"` and apply `.field__input--error`.
+   - Focus state on invalid input retains red border with a subtle focus ring.
+
+3. **Client-Side Validation Logic**:
+   - Before submitting in `CreateGeneralMeetingForm.tsx`: validate all motions in list. Display which motion index and field is invalid (e.g. `"Motion 2: Title exceeds the 500 character limit (512/500 characters)"`).
+   - Before submitting in `GeneralMeetingDetailPage.tsx` Add Motion & Edit Motion modals: validate fields and display clear error message.
+
+4. **Backend 422 API Error Extraction**:
+   - Enhance `formatApiErrorMessage` in `frontend/src/utils/validation.ts` to parse Pydantic `loc` arrays (`["body", "motions", 0, "title"]`) into human-readable messages like `"Motion 1: Title - String should have at most 500 characters"`.
+
