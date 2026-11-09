@@ -398,9 +398,19 @@ export async function seedPendingMeeting(
 
 /**
  * Close a meeting via the admin API. Asserts 200 OK.
+ * If the meeting is already closed (409), treat as idempotent success.
  */
 export async function closeMeeting(api: APIRequestContext, meetingId: string): Promise<void> {
   const res = await api.post(`/api/admin/general-meetings/${meetingId}/close`);
+  if (res.status() === 409) {
+    const text = await res.text();
+    if (text.includes("already closed")) {
+      return;
+    }
+    throw new Error(
+      `Failed to close meeting ${meetingId} (${res.status()}): ${text}`
+    );
+  }
   if (!res.ok()) {
     throw new Error(
       `Failed to close meeting ${meetingId} (${res.status()}): ${await res.text()}`
@@ -410,19 +420,35 @@ export async function closeMeeting(api: APIRequestContext, meetingId: string): P
 
 /**
  * Delete a meeting via the admin API (204 No Content on success).
- * If the meeting is open, closes it first so the delete succeeds.
+ * If the meeting cannot be deleted because it is retained for audit compliance (or has votes),
+ * archives it instead.
+ * If the meeting is open, closes it first, then archives it.
  * If the meeting does not exist (404) the call is silently ignored.
  */
 export async function deleteMeeting(api: APIRequestContext, meetingId: string): Promise<void> {
   // Try to delete directly first
-  let res = await api.delete(`/api/admin/general-meetings/${meetingId}`);
+  const res = await api.delete(`/api/admin/general-meetings/${meetingId}`);
   if (res.status() === 404) {
     return; // already gone
   }
   if (res.status() === 409) {
-    // Meeting is open — close it first, then retry the delete
+    const text = await res.text();
+    if (text.includes("retained for audit compliance") || text.includes("archive the meeting instead")) {
+      const archRes = await api.post(`/api/admin/general-meetings/${meetingId}/archive`);
+      if (archRes.status() === 409) {
+        const archText = await archRes.text();
+        if (archText.includes("already archived")) return;
+      }
+      return;
+    }
+    // Meeting is open — close it first, then archive it
     await closeMeeting(api, meetingId);
-    res = await api.delete(`/api/admin/general-meetings/${meetingId}`);
+    const archRes = await api.post(`/api/admin/general-meetings/${meetingId}/archive`);
+    if (archRes.status() === 409) {
+      const archText = await archRes.text();
+      if (archText.includes("already archived")) return;
+    }
+    return;
   }
   if (!res.ok()) {
     throw new Error(
