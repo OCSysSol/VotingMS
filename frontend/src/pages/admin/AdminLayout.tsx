@@ -100,6 +100,16 @@ export default function AdminLayout() {
     try {
       await authClient.signOut();
     } finally {
+      const sessionAtom = authClient.$store?.atoms?.session;
+      if (sessionAtom) {
+        sessionAtom.set({
+          ...sessionAtom.value,
+          data: null,
+          error: null,
+          isPending: false,
+          isRefetching: false,
+        });
+      }
       queryClient.clear();
       navigate("/admin/login", { replace: true });
     }

@@ -148,16 +148,24 @@ async def proxy_auth(path: str, request: Request) -> Response:
             resp.text,
         )
 
-    # Forward response headers except transfer-encoding (incompatible with
-    # buffered Response — httpx already decoded any chunked transfer encoding).
-    resp_headers = {
-        k: v
-        for k, v in resp.headers.items()
-        if k.lower() not in ("transfer-encoding",)
-    }
-
-    return Response(
+    # Forward response headers except transfer-encoding and content-length
+    # (httpx already decoded any chunked/compressed transfer encoding, and
+    # Response recalculates content-length from resp.content).
+    # Use multi_items() so multiple Set-Cookie headers from Neon Auth (e.g.
+    # session_token and session_data on sign-in / sign-out) are preserved as
+    # separate Set-Cookie headers instead of being comma-folded.
+    response = Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=resp_headers,
     )
+    header_items = (
+        resp.headers.multi_items()
+        if hasattr(resp.headers, "multi_items")
+        else resp.headers.items()
+    )
+    for k, v in header_items:
+        if k.lower() not in ("transfer-encoding", "content-length"):
+            response.headers.append(k, v)
+
+    return response
+

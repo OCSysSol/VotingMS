@@ -7,12 +7,22 @@ import { BrandingContext, DEFAULT_CONFIG } from "../../../context/BrandingContex
 import type { TenantConfig } from "../../../api/config";
 
 // Use vi.hoisted() so mock functions are available inside the hoisted vi.mock() factories.
-const { mockNavigate, mockFetch, mockGetSession, mockForgetPassword, mockResetPassword } = vi.hoisted(() => ({
+const { mockNavigate, mockFetch, mockGetSession, mockForgetPassword, mockResetPassword, mockSessionAtom } = vi.hoisted(() => ({
   mockNavigate: vi.fn(),
   mockFetch: vi.fn(),
   mockGetSession: vi.fn(),
   mockForgetPassword: vi.fn(),
   mockResetPassword: vi.fn(),
+  mockSessionAtom: {
+    value: {
+      data: null as unknown,
+      error: null as unknown,
+      isPending: false,
+      isRefetching: false,
+      refetch: vi.fn(),
+    },
+    set: vi.fn(),
+  },
 }));
 
 vi.mock("react-router-dom", async () => {
@@ -29,6 +39,11 @@ vi.mock("../../../lib/auth-client", () => ({
     getSession: mockGetSession,
     forgetPassword: mockForgetPassword,
     resetPassword: mockResetPassword,
+    $store: {
+      atoms: {
+        session: mockSessionAtom,
+      },
+    },
   },
 }));
 
@@ -60,6 +75,14 @@ describe("AdminLoginPage", () => {
     mockGetSession.mockResolvedValue({ data: { session: {}, user: {} }, error: null });
     mockForgetPassword.mockClear();
     mockResetPassword.mockClear();
+    mockSessionAtom.set.mockClear();
+    mockSessionAtom.value = {
+      data: null,
+      error: null,
+      isPending: false,
+      isRefetching: false,
+      refetch: vi.fn(),
+    };
     // Replace global fetch with our mock
     globalThis.fetch = mockFetch;
   });
@@ -94,21 +117,52 @@ describe("AdminLoginPage", () => {
     });
   });
 
-  it("calls getSession before navigating to ensure session is populated", async () => {
+  it("calls getSession and updates the reactive session atom before navigating", async () => {
     mockFetch.mockResolvedValueOnce(makeFetchResponse(200, {}));
     const callOrder: string[] = [];
+    const newSessionData = { session: { id: "s2" }, user: { id: "u2", email: "user2@example.com" } };
     mockGetSession.mockImplementationOnce(async () => {
       callOrder.push("getSession");
-      return { data: { session: {}, user: {} }, error: null };
+      return { data: newSessionData, error: null };
+    });
+    mockSessionAtom.set.mockImplementationOnce(() => {
+      callOrder.push("sessionAtom.set");
     });
     mockNavigate.mockImplementationOnce(() => { callOrder.push("navigate"); });
     const user = userEvent.setup();
     renderPage();
-    await user.type(screen.getByLabelText("Email"), "admin@example.com");
+    await user.type(screen.getByLabelText("Email"), "user2@example.com");
     await user.type(screen.getByLabelText("Password"), "correct-password");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(mockNavigate).toHaveBeenCalled());
-    expect(callOrder).toEqual(["getSession", "navigate"]);
+    expect(callOrder).toEqual(["getSession", "sessionAtom.set", "navigate"]);
+    expect(mockSessionAtom.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: newSessionData,
+        error: null,
+        isPending: false,
+        isRefetching: false,
+      })
+    );
+  });
+
+  it("handles null data/error from getSession when syncing session atom", async () => {
+    mockFetch.mockResolvedValueOnce(makeFetchResponse(200, {}));
+    mockGetSession.mockResolvedValueOnce(null);
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByLabelText("Email"), "user2@example.com");
+    await user.type(screen.getByLabelText("Password"), "correct-password");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/admin", { replace: true }));
+    expect(mockSessionAtom.set).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: null,
+        error: null,
+        isPending: false,
+        isRefetching: false,
+      })
+    );
   });
 
   it("POSTs to /api/auth/sign-in/email with the entered email and password", async () => {

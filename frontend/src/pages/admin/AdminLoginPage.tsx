@@ -145,10 +145,22 @@ export default function AdminLoginPage() {
         return;
       }
 
-      // Refetch the session so RequireAdminAuth sees it before we navigate.
-      // Without this, useSession() may still return null on the next render,
-      // causing a redirect back to the login page.
-      await authClient.getSession();
+      // Refetch the session and sync the reactive session atom so RequireAdminAuth
+      // sees the new session before we navigate. Because sign-in uses a direct
+      // fetch() call (to inspect 429 status codes) instead of authClient.signIn,
+      // Better Auth's internal $sessionSignal is not triggered automatically, and
+      // authClient.getSession() alone does not update the useSession() store atom.
+      const sessionRes = await authClient.getSession();
+      const sessionAtom = authClient.$store?.atoms?.session;
+      if (sessionAtom) {
+        sessionAtom.set({
+          ...sessionAtom.value,
+          data: sessionRes?.data ?? null,
+          error: sessionRes?.error ?? null,
+          isPending: false,
+          isRefetching: false,
+        });
+      }
       navigate("/admin", { replace: true });
     } catch {
       setLoginError("Invalid email or password.");
