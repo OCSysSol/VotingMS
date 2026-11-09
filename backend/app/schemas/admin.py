@@ -286,8 +286,8 @@ class MotionOptionCreate(BaseModel):
     def text_non_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("option text must not be empty")
-        if len(v) > 200:
-            raise ValueError("option text must not exceed 200 characters")
+        if len(v) > 1000:
+            raise ValueError("option text must not exceed 1000 characters")
         return v
 
 

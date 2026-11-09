@@ -1885,4 +1885,38 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     // MC motion was not touched — must not appear in multi_choice_votes
     expect(body.entries[0].multi_choice_votes).toHaveLength(0);
   });
+
+  it("formats long option text with word wrapping and truncates aria-label to 80 chars", async () => {
+    const longOptionText = "A".repeat(100);
+    const meetingWithLongOption: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0],
+          options: [
+            { id: "opt-long-1", text: longOptionText, display_order: 1 },
+            { id: "opt-short-2", text: "Bob", display_order: 2 },
+          ],
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingWithLongOption });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByText(longOptionText)).toBeInTheDocument();
+    });
+
+    const truncated = `${"A".repeat(80)}...`;
+    expect(screen.getByRole("button", { name: `For option ${truncated} lot 1A` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Against option ${truncated} lot 1A` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Abstain option ${truncated} lot 1A` })).toBeInTheDocument();
+
+    // Short option remains untruncated
+    expect(screen.getByRole("button", { name: "For option Bob lot 1A" })).toBeInTheDocument();
+  });
 });

@@ -24,6 +24,7 @@ import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
 import MotionManagementTable from "../../components/admin/MotionManagementTable";
 import AdminVoteEntryPanel from "./AdminVoteEntryPanel";
 import { formatLocalDateTime } from "../../utils/dateTime";
+import { formatApiErrorMessage } from "../../utils/validation";
 import { useBranding } from "../../context/BrandingContext";
 
 /** Convert a UTC ISO string to a "YYYY-MM-DDTHH:MM" value for datetime-local inputs. */
@@ -440,7 +441,7 @@ export default function GeneralMeetingDetailPage() {
       setAddMotionForm({ title: "", description: "", motion_type: "general", is_multi_choice: false, motion_number: "", option_limit: "1", options: [{ text: "" }, { text: "" }] });
     },
     onError: (error: Error) => {
-      setAddMotionError(error.message || "Failed to add motion");
+      setAddMotionError(formatApiErrorMessage(error) || "Failed to add motion");
     },
   });
 
@@ -453,7 +454,7 @@ export default function GeneralMeetingDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
-      setEditMotionError(error.message || "Failed to update motion");
+      setEditMotionError(formatApiErrorMessage(error) || "Failed to update motion");
     },
   });
 
@@ -606,10 +607,24 @@ export default function GeneralMeetingDetailPage() {
 
     // Validate multi-choice fields
     if (editForm.is_multi_choice) {
-      const validOptions = editForm.options.filter((o) => o.text.trim());
+      const opts = editForm.options;
+      for (let idx = 0; idx < opts.length; idx++) {
+        const txt = opts[idx].text;
+        if (txt.length > 1000) {
+          setEditMotionError(`Option ${idx + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
+          return;
+        }
+      }
+      const validOptions = opts.filter((o) => o.text.trim());
       if (validOptions.length < 2) {
         setEditMotionError("Multi-choice motions require at least 2 options.");
         return;
+      }
+      for (let idx = 0; idx < opts.length; idx++) {
+        if (!opts[idx].text.trim()) {
+          setEditMotionError("Option text must not be empty.");
+          return;
+        }
       }
       const limit = parseInt(editForm.option_limit, 10);
       if (isNaN(limit) || limit < 1) {
@@ -1067,10 +1082,24 @@ export default function GeneralMeetingDetailPage() {
                   return;
                 }
                 if (addMotionForm.is_multi_choice) {
-                  const validOpts = addMotionForm.options.filter((o) => o.text.trim());
+                  const opts = addMotionForm.options;
+                  for (let idx = 0; idx < opts.length; idx++) {
+                    const txt = opts[idx].text;
+                    if (txt.length > 1000) {
+                      setAddMotionError(`Option ${idx + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
+                      return;
+                    }
+                  }
+                  const validOpts = opts.filter((o) => o.text.trim());
                   if (validOpts.length < 2) {
                     setAddMotionError("Multi-choice motions require at least 2 options.");
                     return;
+                  }
+                  for (let idx = 0; idx < opts.length; idx++) {
+                    if (!opts[idx].text.trim()) {
+                      setAddMotionError("Option text must not be empty.");
+                      return;
+                    }
                   }
                   const lim = parseInt(addMotionForm.option_limit, 10);
                   if (isNaN(lim) || lim < 1) {
@@ -1167,35 +1196,47 @@ export default function GeneralMeetingDetailPage() {
                   </div>
                   <div>
                     <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                    {addMotionForm.options.map((opt, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input
-                          aria-label={`Option ${idx + 1}`}
-                          className="field__input"
-                          type="text"
-                          value={opt.text}
-                          onChange={(e) => {
-                            const updated = [...addMotionForm.options];
-                            updated[idx] = { text: e.target.value };
-                            setAddMotionForm((f) => ({ ...f, options: updated }));
-                          }}
-                          placeholder={`Option ${idx + 1}`}
-                        />
-                        {addMotionForm.options.length > 2 && (
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            aria-label={`Remove option ${idx + 1}`}
-                            onClick={() => {
-                              const updated = addMotionForm.options.filter((_, i) => i !== idx);
-                              setAddMotionForm((f) => ({ ...f, options: updated }));
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {addMotionForm.options.map((opt, idx) => {
+                      const len = opt.text.length;
+                      const counterClass = `field__counter${
+                        len > 1000 ? " field__counter--error" : len >= 900 ? " field__counter--warning" : ""
+                      }`;
+                      return (
+                        <div key={idx} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                            <textarea
+                              aria-label={`Option ${idx + 1}`}
+                              className="field__input field__input--textarea"
+                              rows={2}
+                              style={{ resize: "vertical" }}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const updated = [...addMotionForm.options];
+                                updated[idx] = { text: e.target.value };
+                                setAddMotionForm((f) => ({ ...f, options: updated }));
+                              }}
+                              placeholder={`Option ${idx + 1}`}
+                            />
+                            {addMotionForm.options.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn btn--danger btn--sm"
+                                aria-label={`Remove option ${idx + 1}`}
+                                onClick={() => {
+                                  const updated = addMotionForm.options.filter((_, i) => i !== idx);
+                                  setAddMotionForm((f) => ({ ...f, options: updated }));
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div className={counterClass} data-testid={`add-motion-option-${idx + 1}-counter`}>
+                            {len}/1000
+                          </div>
+                        </div>
+                      );
+                    })}
                     <button
                       type="button"
                       className="btn btn--secondary btn--sm"
@@ -1344,35 +1385,47 @@ export default function GeneralMeetingDetailPage() {
                   </div>
                   <div>
                     <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                    {editForm.options.map((opt, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input
-                          aria-label={`Option ${idx + 1}`}
-                          className="field__input"
-                          type="text"
-                          value={opt.text}
-                          onChange={(e) => {
-                            const updated = [...editForm.options];
-                            updated[idx] = { text: e.target.value };
-                            setEditForm((f) => ({ ...f, options: updated }));
-                          }}
-                          placeholder={`Option ${idx + 1}`}
-                        />
-                        {editForm.options.length > 2 && (
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            aria-label={`Remove option ${idx + 1}`}
-                            onClick={() => {
-                              const updated = editForm.options.filter((_, i) => i !== idx);
-                              setEditForm((f) => ({ ...f, options: updated }));
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {editForm.options.map((opt, idx) => {
+                      const len = opt.text.length;
+                      const counterClass = `field__counter${
+                        len > 1000 ? " field__counter--error" : len >= 900 ? " field__counter--warning" : ""
+                      }`;
+                      return (
+                        <div key={idx} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                            <textarea
+                              aria-label={`Option ${idx + 1}`}
+                              className="field__input field__input--textarea"
+                              rows={2}
+                              style={{ resize: "vertical" }}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const updated = [...editForm.options];
+                                updated[idx] = { text: e.target.value };
+                                setEditForm((f) => ({ ...f, options: updated }));
+                              }}
+                              placeholder={`Option ${idx + 1}`}
+                            />
+                            {editForm.options.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn btn--danger btn--sm"
+                                aria-label={`Remove option ${idx + 1}`}
+                                onClick={() => {
+                                  const updated = editForm.options.filter((_, i) => i !== idx);
+                                  setEditForm((f) => ({ ...f, options: updated }));
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div className={counterClass} data-testid={`edit-motion-option-${idx + 1}-counter`}>
+                            {len}/1000
+                          </div>
+                        </div>
+                      );
+                    })}
                     <button
                       type="button"
                       className="btn btn--secondary btn--sm"

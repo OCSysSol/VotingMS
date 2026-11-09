@@ -7,6 +7,8 @@ import MotionEditor, { type MotionFormEntry } from "./MotionEditor";
 import MotionExcelUpload from "./MotionExcelUpload";
 import BuildingSearchCombobox from "./BuildingSearchCombobox";
 
+import { formatApiErrorMessage } from "../../utils/validation";
+
 export default function CreateGeneralMeetingForm() {
   const navigate = useNavigate();
 
@@ -20,7 +22,7 @@ export default function CreateGeneralMeetingForm() {
   const mutation = useMutation<GeneralMeetingOut, Error, GeneralMeetingCreateRequest>({
     mutationFn: (data) => createGeneralMeeting(data),
     onSuccess: (data) => { navigate(`/admin/general-meetings/${data.id}`); },
-    onError: (err) => { setFormError(err.message); },
+    onError: (err) => { setFormError(formatApiErrorMessage(err)); },
   });
 
   function handleSubmit(e: React.FormEvent) {
@@ -42,10 +44,24 @@ export default function CreateGeneralMeetingForm() {
         return;
       }
       if (motions[i].is_multi_choice) {
-        const validOpts = (motions[i].options ?? []).filter((o: { text: string }) => o.text.trim());
+        const opts = motions[i].options ?? [];
+        for (let oi = 0; oi < opts.length; oi++) {
+          const txt = opts[oi].text;
+          if (txt.length > 1000) {
+            setFormError(`Motion ${i + 1}, Option ${oi + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
+            return;
+          }
+        }
+        const validOpts = opts.filter((o: { text: string }) => o.text.trim());
         if (validOpts.length < 2) {
           setFormError(`Motion ${i + 1}: multi-choice requires at least 2 options.`);
           return;
+        }
+        for (let oi = 0; oi < opts.length; oi++) {
+          if (!opts[oi].text.trim()) {
+            setFormError(`Motion ${i + 1}, Option ${oi + 1}: option text must not be empty.`);
+            return;
+          }
         }
         const lim = parseInt(motions[i].option_limit ?? "1", 10);
         if (isNaN(lim) || lim < 1) {

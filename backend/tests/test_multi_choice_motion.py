@@ -559,7 +559,7 @@ class TestCreateMeetingWithMultiChoiceMotion:
     async def test_option_text_max_length_exceeded(
         self, client: AsyncClient, mc_building: Building
     ):
-        """Option text > 200 chars is rejected."""
+        """Option text > 1000 chars is rejected."""
         payload = {
             "building_id": str(mc_building.id),
             "title": "Test",
@@ -573,7 +573,7 @@ class TestCreateMeetingWithMultiChoiceMotion:
                     "is_multi_choice": True,
                     "option_limit": 1,
                     "options": [
-                        {"text": "A" * 201, "display_order": 1},
+                        {"text": "A" * 1001, "display_order": 1},
                         {"text": "Bob", "display_order": 2},
                     ],
                 }
@@ -1727,12 +1727,12 @@ class TestMotionOptionSchemas:
         from pydantic import ValidationError
         from app.schemas.admin import MotionOptionCreate
         with pytest.raises(ValidationError):
-            MotionOptionCreate(text="A" * 201, display_order=1)
+            MotionOptionCreate(text="A" * 1001, display_order=1)
 
     def test_motion_option_create_max_length_text_accepted(self):
         from app.schemas.admin import MotionOptionCreate
-        opt = MotionOptionCreate(text="A" * 200, display_order=1)
-        assert len(opt.text) == 200
+        opt = MotionOptionCreate(text="A" * 1000, display_order=1)
+        assert len(opt.text) == 1000
 
     def test_motion_option_create_valid(self):
         from app.schemas.admin import MotionOptionCreate

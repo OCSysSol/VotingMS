@@ -219,6 +219,27 @@ button, input, select, textarea {
   color: var(--red);
 }
 
+.field__input--textarea {
+  min-height: 52px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.field__counter {
+  font-size: 0.75rem;
+  margin-top: 2px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.field__counter--warning {
+  color: var(--amber);
+}
+
+.field__counter--error {
+  color: var(--red);
+}
+
 .field__select {
   width: 100%;
   padding: 11px 40px 11px 14px;
@@ -669,7 +690,7 @@ button, input, select, textarea {
 /* Per-option For/Against/Abstain row (Slice 3) */
 .mc-option-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
@@ -683,6 +704,9 @@ button, input, select, textarea {
   font-size: 0.95rem;
   color: var(--text-primary);
   flex: 1;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .mc-option-row__buttons {

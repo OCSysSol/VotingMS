@@ -6,9 +6,10 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     String,
-    UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,15 +32,25 @@ class VoteStatus(str, enum.Enum):
 
 class Vote(Base):
     __tablename__ = "votes"
-    # The old unique constraint uq_votes_gm_motion_lot_owner has been replaced by two
-    # partial unique indexes defined in the migration:
-    #   uq_votes_non_multi_choice (WHERE motion_option_id IS NULL)
-    #   uq_votes_multi_choice     (WHERE motion_option_id IS NOT NULL)
-    # Partial indexes with WHERE clauses cannot be expressed as UniqueConstraint or
-    # Index(..., unique=True) in the SQLAlchemy ORM model — they are defined exclusively
-    # in the Alembic migration (same pattern as the motion_number partial index on motions).
-    # Migration: a1b2c3d4e5f7_add_multi_choice_motion_type.py
-    __table_args__ = ()
+    __table_args__ = (
+        Index(
+            "uq_votes_non_multi_choice",
+            "general_meeting_id",
+            "motion_id",
+            "lot_owner_id",
+            unique=True,
+            postgresql_where=text("motion_option_id IS NULL"),  # nosemgrep: raw-sql-requires-comment -- partial index WHERE predicate
+        ),
+        Index(
+            "uq_votes_multi_choice",
+            "general_meeting_id",
+            "motion_id",
+            "lot_owner_id",
+            "motion_option_id",
+            unique=True,
+            postgresql_where=text("motion_option_id IS NOT NULL"),  # nosemgrep: raw-sql-requires-comment -- partial index WHERE predicate
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         primary_key=True,
