@@ -90,6 +90,21 @@ class TestRateLimiter:
         # key_b is unaffected
         limiter.check("key_b")  # must not raise
 
+    def test_is_rate_limited_and_record(self):
+        """is_rate_limited returns False initially, True after max_requests recorded."""
+        limiter = RateLimiter(max_requests=2, window_seconds=60)
+        assert limiter.is_rate_limited("k1") is False
+        limiter.record("k1")
+        assert limiter.is_rate_limited("k1") is False
+        limiter.record("k1")
+        assert limiter.is_rate_limited("k1") is True
+
+    def test_otp_verify_limiter_has_expected_limits(self):
+        """otp_verify_limiter is configured for 5 req/300s."""
+        from app.rate_limiter import otp_verify_limiter
+        assert otp_verify_limiter.max_requests == 5
+        assert otp_verify_limiter.window_seconds == 300
+
     def test_get_remaining_decrements_with_each_request(self):
         """get_remaining() returns max_requests - used_requests."""
         limiter = RateLimiter(max_requests=5, window_seconds=60)

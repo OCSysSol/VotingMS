@@ -270,18 +270,26 @@ export function VotingPage() {
     navigate(`/vote/${meetingId}/confirmation`);
   };
 
-  const handleSignOut = useCallback(() => {
-    logout().catch(() => {});
-    if (meetingId) {
-      sessionStorage.removeItem(`meeting_lots_${meetingId}`);
-      sessionStorage.removeItem(`meeting_lots_info_${meetingId}`);
-      sessionStorage.removeItem(`meeting_lot_info_${meetingId}`);
-      sessionStorage.removeItem(`meeting_building_name_${meetingId}`);
-      sessionStorage.removeItem(`meeting_title_${meetingId}`);
-      sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+  const handleSignOut = useCallback(async () => {
+    try {
+      await Promise.race([
+        logout(),
+        new Promise((resolve) => setTimeout(resolve, 600)),
+      ]);
+    } catch {
+      // Swallowed: sign-out must not fail or block navigation if network/server errors
+    } finally {
+      if (meetingId) {
+        sessionStorage.removeItem(`meeting_lots_${meetingId}`);
+        sessionStorage.removeItem(`meeting_lots_info_${meetingId}`);
+        sessionStorage.removeItem(`meeting_lot_info_${meetingId}`);
+        sessionStorage.removeItem(`meeting_building_name_${meetingId}`);
+        sessionStorage.removeItem(`meeting_title_${meetingId}`);
+        sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+      }
+      queryClient.clear();
+      navigate("/");
     }
-    queryClient.clear();
-    navigate("/");
   }, [meetingId, queryClient, navigate]);
 
   const hasMixedVoteStatus = (): boolean => {

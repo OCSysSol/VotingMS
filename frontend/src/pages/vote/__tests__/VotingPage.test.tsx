@@ -467,7 +467,9 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 
   it("sign out clears all meeting-scoped sessionStorage keys", async () => {
@@ -484,6 +486,9 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
     expect(sessionStorage.getItem(`meeting_lots_${AGM_ID}`)).toBeNull();
     expect(sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`)).toBeNull();
     expect(sessionStorage.getItem(`meeting_lot_info_${AGM_ID}`)).toBeNull();
@@ -503,8 +508,24 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    // Navigation happens synchronously before the async logout resolves
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
+  });
+
+  it("sign out navigates to '/' when logout() exceeds 600ms timeout", async () => {
+    // Simulate a hanging logout request that does not resolve
+    server.use(
+      http.post(`http://localhost/api/auth/logout`, () => new Promise(() => {}))
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await vi.advanceTimersByTimeAsync(700);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 
   // --- Lot selection panel ---

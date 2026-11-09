@@ -70,6 +70,18 @@ class RateLimiter:
             )
         self._timestamps[key].append(now)
 
+    def is_rate_limited(self, key: str) -> bool:
+        """Return True if key has reached or exceeded max_requests within the sliding window."""
+        now = time.monotonic()
+        self._evict_old(key, now)
+        return len(self._timestamps[key]) >= self.max_requests
+
+    def record(self, key: str) -> None:
+        """Record an attempt for key at the current timestamp."""
+        now = time.monotonic()
+        self._evict_old(key, now)
+        self._timestamps[key].append(now)
+
     def get_remaining(self, key: str) -> int:
         """Return the number of remaining requests for key in the current window."""
         now = time.monotonic()
@@ -122,3 +134,6 @@ provision_limiter = RateLimiter(max_requests=5, window_seconds=60)
 # SMS test: 5 calls per 60-second sliding window (server-wide).
 # Same pattern as smtp_test_rate_limiter — protects against SMS cost abuse.
 sms_test_rate_limiter = RateLimiter(max_requests=5, window_seconds=60)
+
+# OTP verify: 5 failed attempts per 5 minutes per (email, building_id).
+otp_verify_limiter = RateLimiter(max_requests=5, window_seconds=300)
