@@ -438,7 +438,7 @@ test.describe("Admin General Meetings — motion number workflows", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
     // Motion must be hidden to enable Edit button
-    const editBtn = page.getByRole("button", { name: "Edit" });
+    const editBtn = page.locator("table").getByRole("button", { name: "Edit", exact: true });
     await expect(editBtn).toBeVisible({ timeout: 10000 });
     await expect(editBtn).toBeEnabled({ timeout: 5000 });
     await editBtn.click();
@@ -491,7 +491,7 @@ test.describe("Admin General Meetings — motion number workflows", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
     // Find the motion with SR-1 motion_number (from Scenario A) and edit it
-    const editBtns = page.getByRole("button", { name: "Edit" });
+    const editBtns = page.locator("table").getByRole("button", { name: "Edit", exact: true });
     await expect(editBtns.first()).toBeVisible({ timeout: 10000 });
     await expect(editBtns.first()).toBeEnabled({ timeout: 5000 });
     await editBtns.first().click();
