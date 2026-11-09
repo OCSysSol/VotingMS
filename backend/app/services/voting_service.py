@@ -7,7 +7,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,12 +33,18 @@ from app.schemas.voting import (
     DraftsResponse,
     LotBallotResult,
     LotBallotSummary,
+    MotionOut,
     MultiChoiceOptionChoice,
     MultiChoiceVoteItem,
     MyBallotResponse,
     SubmitResponse,
     VoteSummaryItem,
 )
+from app.services.auth_service import (
+    _load_direct_lot_owner_ids,
+    _load_proxy_lot_owner_ids,
+)
+
 
 
 def compute_ballot_hash(
@@ -894,3 +900,101 @@ async def get_my_ballot(
         submitted_lots=submitted_lots,
         remaining_lot_owner_ids=remaining_lot_owner_ids,
     )
+
+
+async def list_meeting_motions_for_voter(
+    db: AsyncSession,
+    general_meeting_id: uuid.UUID,
+    voter_email: str,
+    building_id: uuid.UUID,
+) -> list[MotionOut]:
+    """List motions for a General Meeting for an authenticated voter.
+
+    Returns visible motions PLUS any motions the voter has already submitted votes for.
+    Hidden motion titles are never leaked for unvoted motions (server-side filtering).
+    """
+    direct_lot_owner_ids = await _load_direct_lot_owner_ids(db, voter_email, building_id)
+    proxy_lot_owner_ids = await _load_proxy_lot_owner_ids(db, voter_email, building_id)
+    all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
+
+    # Get submitted vote motion IDs, choices, and option IDs for this voter's lots
+    voted_result = await db.execute(
+        select(Vote.motion_id, Vote.choice, Vote.motion_option_id).where(
+            Vote.general_meeting_id == general_meeting_id,
+            Vote.lot_owner_id.in_(all_lot_owner_ids),
+            Vote.status == VoteStatus.submitted,
+        )
+    )
+    # Build a dict preferring a non-not_eligible choice when multiple lots vote on the same motion.
+    # For multi-choice motions, use VoteChoice.selected as the submitted_choice sentinel
+    # (indicates "you voted" without implying a specific binary choice).
+    # submitted_option_choices_by_motion maps motion_id -> {option_id_str -> choice_str}
+    voted_choice_by_motion: dict[uuid.UUID, VoteChoice] = {}
+    submitted_option_choices_by_motion: dict[uuid.UUID, dict[str, str]] = {}
+    for motion_id, choice, motion_option_id in voted_result.all():
+        existing = voted_choice_by_motion.get(motion_id)
+        if existing is None or existing == VoteChoice.not_eligible:
+            voted_choice_by_motion[motion_id] = choice
+        if motion_option_id is not None and choice in (VoteChoice.selected, VoteChoice.against, VoteChoice.abstained):
+            submitted_option_choices_by_motion.setdefault(motion_id, {})
+            opt_id_str = str(motion_option_id)
+            if opt_id_str not in submitted_option_choices_by_motion[motion_id]:
+                # Map stored VoteChoice back to display string for the frontend
+                if choice == VoteChoice.selected:
+                    choice_str = "for"
+                elif choice == VoteChoice.against:
+                    choice_str = "against"
+                else:
+                    choice_str = "abstained"
+                submitted_option_choices_by_motion[motion_id][opt_id_str] = choice_str
+    voted_motion_ids = set(voted_choice_by_motion.keys())
+
+    # Fetch motions that are visible OR already voted on by this voter
+    result = await db.execute(
+        select(Motion)
+        .where(
+            Motion.general_meeting_id == general_meeting_id,
+            or_(
+                Motion.is_visible == True,  # noqa: E712
+                Motion.id.in_(voted_motion_ids),
+            ),
+        )
+        .order_by(Motion.display_order)
+    )
+    motions = list(result.scalars().all())
+
+    # Load options for multi-choice motions
+    mc_motion_ids = [m.id for m in motions if m.is_multi_choice]
+    options_by_motion: dict[uuid.UUID, list] = {}
+    if mc_motion_ids:
+        opts_result = await db.execute(
+            select(MotionOption)
+            .where(MotionOption.motion_id.in_(mc_motion_ids))
+            .order_by(MotionOption.display_order)
+        )
+        for opt in opts_result.scalars().all():
+            options_by_motion.setdefault(opt.motion_id, []).append(opt)
+
+    return [
+        MotionOut(
+            id=m.id,
+            title=m.title,
+            description=m.description,
+            display_order=m.display_order,
+            motion_number=m.motion_number,
+            motion_type=m.motion_type,
+            is_multi_choice=m.is_multi_choice,
+            is_visible=m.is_visible,
+            already_voted=m.id in voted_motion_ids,
+            submitted_choice=voted_choice_by_motion.get(m.id),
+            submitted_option_choices=submitted_option_choices_by_motion.get(m.id, {}),
+            option_limit=m.option_limit,
+            voting_closed_at=m.voting_closed_at,
+            options=[
+                {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
+                for opt in options_by_motion.get(m.id, [])
+            ],
+        )
+        for m in motions
+    ]
+

@@ -38,13 +38,10 @@ function renderChoiceContent(vote: BallotVoteItem): ReactNode {
     // Use option_choices if present (Slice 3 format) — render per-option coloured list
     if (vote.option_choices && vote.option_choices.length > 0) {
       return (
-        <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        <ul className="vote-item__option-list">
           {vote.option_choices.map((oc) => (
-            <li
-              key={oc.option_id}
-              style={{ display: "flex", flexDirection: "column", gap: 2, marginBottom: 4 }}
-            >
-              <span style={{ fontSize: "0.8rem", color: "var(--text-secondary)" }}>
+            <li key={oc.option_id} className="vote-item__option-item">
+              <span className="vote-item__option-text">
                 {oc.option_text}
               </span>
               <span
@@ -178,12 +175,12 @@ export function ConfirmationPage() {
           <p className="vote-summary__heading">Your votes</p>
           {isMultiLot
             ? (
-              <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+              <ul className="vote-summary__list">
                 {data.submitted_lots.map((lot) => (
-                  <li key={lot.lot_owner_id} style={{ marginBottom: "12px" }}>
-                    <p style={{ fontWeight: 600, marginBottom: "4px" }}>Lot {lot.lot_number}</p>
+                  <li key={lot.lot_owner_id} className="vote-summary__lot-item">
+                    <p className="vote-summary__lot-title">Lot {lot.lot_number}</p>
                     {renderSubmitterInfo(lot)}
-                    <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                    <ul className="vote-summary__list">
                       {[...lot.votes].sort((a, b) => a.display_order - b.display_order).map((v) => (
                         <li className="vote-item" key={v.motion_id}>
                           <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
@@ -199,7 +196,7 @@ export function ConfirmationPage() {
               <>
                 {data.submitted_lots.length === 1 && renderSubmitterInfo(data.submitted_lots[0])}
                 {/* RR4-37: wrap <li> elements in a <ul> to ensure valid semantic HTML */}
-                <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+                <ul className="vote-summary__list">
                   {sortedVotes.map((v) => (
                     <li className="vote-item" key={v.motion_id}>
                       <span className="vote-item__motion">Motion {v.motion_number?.trim() || v.display_order}. {v.motion_title}</span>
@@ -212,7 +209,7 @@ export function ConfirmationPage() {
           }
         </div>
 
-        <div className="submit-section" style={{ borderTop: "none", marginTop: "24px", paddingTop: "0" }}>
+        <div className="submit-section confirmation__actions">
           <button
             className="btn btn--secondary"
             onClick={() => {

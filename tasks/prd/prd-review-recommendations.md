@@ -113,15 +113,15 @@ Each section maps findings to user stories with verifiable acceptance criteria. 
 
 ### US-VIL-07: Data retention policy — meeting data lifecycle
 
-**Status:** ✅ Implemented
+**Status:** ✅ Implemented — branch: `feat/app-review-polish-and-a11y`, committed 2026-11-09
 
 **As a** system operator,
 **I want** a documented and enforced data retention policy for AGM records,
 **So that** the system complies with applicable privacy and corporate governance regulations.
 
 **Acceptance criteria:**
-- [ ] A `data_retention_policy.md` document is added to `docs/` stating: ballot submissions and votes are retained for a minimum of 7 years after the AGM date; lot owner PII (email addresses) may be anonymised after 7 years; buildings and meeting metadata are retained indefinitely
-- [ ] An admin endpoint `POST /api/admin/general-meetings/{id}/anonymise` is specified (not necessarily implemented in this story) with the behaviour: replace all `voter_email` and `LotOwnerEmail.email` values for the target meeting with anonymised values — this endpoint is gated to super-admin or requires explicit confirmation token
+- [x] A `data_retention_policy.md` document is added to `docs/` stating: ballot submissions and votes are retained for a minimum of 7 years after the AGM date; lot owner PII (email addresses) may be anonymised after 7 years; buildings and meeting metadata are retained indefinitely
+- [x] An admin endpoint `POST /api/admin/general-meetings/{id}/anonymise` is specified (not necessarily implemented in this story) with the behaviour: replace all `voter_email` and `LotOwnerEmail.email` values for the target meeting with anonymised values — this endpoint is gated to super-admin or requires explicit confirmation token
 - [ ] The existing `DELETE /api/admin/buildings/{id}` endpoint returns a warning in its response body if the building has closed meetings younger than 7 years, but still proceeds (the caller is responsible for compliance)
 
 **Technical notes:** `docs/` — new policy document. `backend/app/routers/admin.py`. No schema change needed for the warning; anonymisation endpoint requires future work.
