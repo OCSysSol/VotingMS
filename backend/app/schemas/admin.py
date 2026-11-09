@@ -101,47 +101,66 @@ class BuildingImportResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Lot owner schemas
+# Lot owner / persons schemas
 # ---------------------------------------------------------------------------
 
 
-class LotOwnerEmailOut(BaseModel):
+class PersonOut(BaseModel):
     id: uuid.UUID
-    email: str | None
+    email: str
     given_name: str | None = None
     surname: str | None = None
+    phone_number: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+# Backward-compatible alias: kept so code that references LotOwnerEmailOut still works.
+LotOwnerEmailOut = PersonOut
 
 
 class LotOwnerOut(BaseModel):
     id: uuid.UUID
     lot_number: str
-    given_name: str | None = None
-    surname: str | None = None
-    owner_emails: list[LotOwnerEmailOut] = []
+    persons: list[PersonOut] = []
     unit_entitlement: int
     financial_position: str
     proxy_email: str | None = None
     proxy_given_name: str | None = None
     proxy_surname: str | None = None
+    proxy_phone_number: str | None = None
 
     model_config = {"from_attributes": True}
 
     @computed_field  # type: ignore[prop-decorator]
     @property
     def emails(self) -> list[str]:
-        """Backward-compatible alias: flat list of email strings."""
-        return [e.email for e in self.owner_emails if e.email]
+        """Backward-compatible flat list of email strings."""
+        return [p.email for p in self.persons]
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def owner_emails(self) -> list[dict]:
+        """Backward-compatible list using PersonOut structure."""
+        return [
+            {
+                "id": str(p.id),
+                "email": p.email,
+                "given_name": p.given_name,
+                "surname": p.surname,
+                "phone_number": p.phone_number,
+            }
+            for p in self.persons
+        ]
 
 
 class LotOwnerCreate(BaseModel):
     lot_number: str = Field(..., max_length=255)
-    given_name: str | None = Field(default=None, max_length=255)
-    surname: str | None = Field(default=None, max_length=255)
     unit_entitlement: int
     financial_position: str = "normal"
     emails: list[str] = []
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
 
     @field_validator("unit_entitlement")
     @classmethod
@@ -166,8 +185,6 @@ class LotOwnerCreate(BaseModel):
 
 
 class LotOwnerUpdate(BaseModel):
-    given_name: str | None = Field(default=None, max_length=255)
-    surname: str | None = Field(default=None, max_length=255)
     unit_entitlement: int | None = None
     financial_position: str | None = None
 
@@ -187,12 +204,7 @@ class LotOwnerUpdate(BaseModel):
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> "LotOwnerUpdate":
-        if (
-            self.given_name is None
-            and self.surname is None
-            and self.unit_entitlement is None
-            and self.financial_position is None
-        ):
+        if self.unit_entitlement is None and self.financial_position is None:
             raise ValueError("At least one field must be provided")
         return self
 
@@ -209,9 +221,11 @@ class AddEmailRequest(BaseModel):
 
 
 class AddOwnerEmailRequest(BaseModel):
+    """Add an owner email (person) to a lot. Service looks up or creates the person by email."""
     email: str = Field(..., max_length=254)
     given_name: str | None = Field(default=None, max_length=255)
     surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
 
     @field_validator("email")
     @classmethod
@@ -221,22 +235,29 @@ class AddOwnerEmailRequest(BaseModel):
         return v
 
 
-class UpdateOwnerEmailRequest(BaseModel):
+class UpdatePersonRequest(BaseModel):
+    """Patch name/phone/email on a persons row."""
     email: str | None = Field(default=None, max_length=254)
     given_name: str | None = Field(default=None, max_length=255)
     surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
 
     @model_validator(mode="after")
-    def at_least_one_field(self) -> "UpdateOwnerEmailRequest":
-        if self.email is None and self.given_name is None and self.surname is None:
+    def at_least_one_field(self) -> "UpdatePersonRequest":
+        if not self.model_fields_set:
             raise ValueError("At least one field must be provided")
         return self
+
+
+# Backward-compat alias: code that still imports UpdateOwnerEmailRequest keeps working.
+UpdateOwnerEmailRequest = UpdatePersonRequest
 
 
 class SetProxyRequest(BaseModel):
     proxy_email: str = Field(..., max_length=254)
     given_name: str | None = Field(default=None, max_length=255)
     surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
 
     @field_validator("proxy_email")
     @classmethod
@@ -265,8 +286,8 @@ class MotionOptionCreate(BaseModel):
     def text_non_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("option text must not be empty")
-        if len(v) > 200:
-            raise ValueError("option text must not exceed 200 characters")
+        if len(v) > 1000:
+            raise ValueError("option text must not exceed 1000 characters")
         return v
 
 
@@ -596,6 +617,16 @@ class GeneralMeetingBallotResetOut(BaseModel):
     deleted: int
 
 
+class GeneralMeetingUpdate(BaseModel):
+    voting_closes_at: datetime
+
+
+class GeneralMeetingUpdateOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    voting_closes_at: datetime
+
+
 # ---------------------------------------------------------------------------
 # Subscription schemas
 # ---------------------------------------------------------------------------
@@ -720,3 +751,14 @@ class AdminVoteEntryRequest(BaseModel):
 class AdminVoteEntryResult(BaseModel):
     submitted_count: int
     skipped_count: int
+
+# ---------------------------------------------------------------------------
+# Ballot hash verification schemas
+# ---------------------------------------------------------------------------
+
+
+class BallotVerifyOut(BaseModel):
+    verified: bool
+    ballot_id: uuid.UUID
+    computed_hash: str
+    stored_hash: str | None

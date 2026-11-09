@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MultiChoiceOptionList, optionChoiceMapToRequest } from "../MultiChoiceOptionList";
+import { MultiChoiceOptionList, optionChoiceMapToRequest, truncateAriaText } from "../MultiChoiceOptionList";
 import type { MotionOut } from "../../../api/voter";
 
 const mcMotion: MotionOut = {
@@ -383,5 +383,57 @@ describe("optionChoiceMapToRequest", () => {
     expect(result).toContainEqual({ option_id: "opt-1", choice: "for" });
     expect(result).toContainEqual({ option_id: "opt-2", choice: "against" });
     expect(result).toContainEqual({ option_id: "opt-3", choice: "abstained" });
+  });
+});
+
+describe("truncateAriaText", () => {
+  it("returns original text if length <= maxLength", () => {
+    expect(truncateAriaText("Short option")).toBe("Short option");
+    expect(truncateAriaText("A".repeat(80))).toBe("A".repeat(80));
+  });
+
+  it("truncates text exceeding 80 characters with ellipsis", () => {
+    const longText = "A".repeat(100);
+    const truncated = truncateAriaText(longText);
+    expect(truncated).toBe(`${"A".repeat(80)}...`);
+    expect(truncated.length).toBe(83);
+  });
+
+  it("supports custom maxLength", () => {
+    expect(truncateAriaText("Hello World", 5)).toBe("Hello...");
+  });
+});
+
+describe("MultiChoiceOptionList with long options (1000 chars)", () => {
+  const longOptionText = "This is a very detailed proposal description explaining all the terms and conditions for Option 1 in full length to test screen reader accessibility.";
+  const longMotion: MotionOut = {
+    ...mcMotion,
+    options: [
+      { id: "opt-long-1", text: longOptionText, display_order: 1 },
+      { id: "opt-short-2", text: "Short Option", display_order: 2 },
+    ],
+  };
+
+  it("truncates button group and voting button aria-labels for options > 80 chars", () => {
+    render(
+      <MultiChoiceOptionList
+        motion={longMotion}
+        optionChoices={{}}
+        onChoiceChange={() => {}}
+        disabled={false}
+      />
+    );
+
+    const truncated = `${longOptionText.slice(0, 80)}...`;
+    // Group aria-label
+    expect(screen.getByRole("group", { name: `Vote for ${truncated}` })).toBeInTheDocument();
+    // Button aria-labels
+    expect(screen.getByRole("button", { name: `For ${truncated}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Against ${truncated}` })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Abstain for ${truncated}` })).toBeInTheDocument();
+
+    // Short option is not truncated
+    expect(screen.getByRole("group", { name: "Vote for Short Option" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "For Short Option" })).toBeInTheDocument();
   });
 });

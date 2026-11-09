@@ -10,19 +10,20 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
+from fastapi import APIRouter, BackgroundTasks, Cookie, Depends, HTTPException, Response
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import AsyncSessionLocal, get_db
+from app.database import get_db
 from app.logging_config import get_logger
 from app.models.auth_otp import AuthOtp
 from app.models.building import Building
 from app.models.general_meeting import GeneralMeeting, get_effective_status
-from app.models.lot_owner import LotOwner
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
 from app.models.lot_proxy import LotProxy
+from app.models.person import Person
 from app.models.motion import Motion
 from app.models.otp_rate_limit import OTPRateLimit
 from app.models.session_record import SessionRecord
@@ -40,10 +41,17 @@ from app.services.auth_service import (
     _load_direct_lot_owner_ids,
     _load_proxy_lot_owner_ids,
     _unsign_token,
+    cleanup_expired_otps,
+    cleanup_expired_sessions,
     create_session,
     extend_session,
+    mask_phone_hint,
+    resolve_voter_state,
+    upsert_rate_limit,
 )
 from app.services.email_service import send_otp_email
+from app.services import smtp_config_service, config_service
+from app.services.sms_service import SmsDeliveryError, send as sms_send
 
 logger = get_logger(__name__)
 
@@ -65,164 +73,24 @@ def _generate_otp_code() -> str:
     return "".join(secrets.choice(_OTP_ALPHABET) for _ in range(8))
 
 
-async def _resolve_voter_state(
-    db: AsyncSession,
-    voter_email: str,
-    general_meeting_id: uuid.UUID,
-    building_id: uuid.UUID,
-) -> dict:
-    """Shared lot-lookup helper used by both verify_auth and restore_session.
-
-    Looks up direct lot owners and proxy lots for the given voter email within
-    the building, fetches visible motions, and computes per-lot already_submitted
-    and voted_motion_ids flags.
-
-    Returns a dict with keys:
-      - lots: list[LotInfo]
-      - visible_motions: list[Motion]
-      - unvoted_visible_count: int
-    """
-    # Fire direct-owner and proxy-lot lookups concurrently.
-    # Each helper opens its own AsyncSession so they can run in parallel without
-    # sharing a connection — a single AsyncSession must not be used across
-    # concurrent coroutines (SQLAlchemy asyncio safety requirement).
-    direct_lot_owner_ids, proxy_lot_owner_ids = await asyncio.gather(
-        _load_direct_lot_owner_ids(voter_email, building_id),
-        _load_proxy_lot_owner_ids(voter_email, building_id),
-    )
-
-    # Merge: union of direct and proxy lots
-    all_lot_owner_ids = direct_lot_owner_ids | proxy_lot_owner_ids
-
-    # Fetch all relevant LotOwner records
-    lots_result = await db.execute(
-        select(LotOwner).where(LotOwner.id.in_(all_lot_owner_ids))
-    )
-    lot_owners = {lo.id: lo for lo in lots_result.scalars().all()}
-
-    # Fetch all currently visible motions for this meeting.
-    visible_motions_result = await db.execute(
-        select(Motion).where(
-            Motion.general_meeting_id == general_meeting_id,
-            Motion.is_visible == True,  # noqa: E712
-        )
-    )
-    visible_motions = list(visible_motions_result.scalars().all())
-    visible_motion_ids: set[uuid.UUID] = {m.id for m in visible_motions}
-
-    # For each lot, determine the set of visible motion IDs that already have a
-    # submitted Vote row.
-    voted_by_lot_result = await db.execute(
-        select(Vote.lot_owner_id, Vote.motion_id).where(
-            Vote.general_meeting_id == general_meeting_id,
-            Vote.lot_owner_id.in_(all_lot_owner_ids),
-            Vote.status == VoteStatus.submitted,
-        )
-    )
-    voted_motion_ids_by_lot: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for lot_owner_id, motion_id in voted_by_lot_result.all():
-        voted_motion_ids_by_lot.setdefault(lot_owner_id, set()).add(motion_id)
-
-    lots = []
-    for lot_owner_id in all_lot_owner_ids:
-        lo = lot_owners.get(lot_owner_id)
-        if lo is None:  # pragma: no cover  # FK constraint guarantees lot_owner always exists
-            continue
-        is_proxy = lot_owner_id not in direct_lot_owner_ids
-        fp = lo.financial_position
-        voted_for_this_lot = voted_motion_ids_by_lot.get(lot_owner_id, set())
-        already_submitted = (
-            len(visible_motion_ids) > 0
-            and visible_motion_ids.issubset(voted_for_this_lot)
-        )
-        lots.append(LotInfo(
-            lot_owner_id=lo.id,
-            lot_number=lo.lot_number,
-            financial_position=fp.value if hasattr(fp, "value") else fp,
-            already_submitted=already_submitted,
-            is_proxy=is_proxy,
-            voted_motion_ids=list(voted_for_this_lot),
-        ))
-
-    lots.sort(key=lambda l: l.lot_number)
-
-    any_lot_not_submitted = any(not l.already_submitted for l in lots)
-    unvoted_visible_count = len(visible_motions) if any_lot_not_submitted else 0
-
-    return {
-        "lots": lots,
-        "visible_motions": visible_motions,
-        "unvoted_visible_count": unvoted_visible_count,
-    }
-
-
-async def _upsert_rate_limit(
-    db: AsyncSession,
-    email: str,
-    building_id: uuid.UUID,
-    now: datetime,
-) -> None:
-    """Insert or update the OTPRateLimit row for (email, building_id).
-
-    Resets the window on each call — caller is responsible for checking the
-    limit BEFORE calling this function.
-    """
-    rl_result = await db.execute(
-        select(OTPRateLimit).where(
-            OTPRateLimit.email == email,
-            OTPRateLimit.building_id == building_id,
-        )
-    )
-    rl_record = rl_result.scalar_one_or_none()
-    if rl_record is None:
-        db.add(OTPRateLimit(
-            email=email,
-            building_id=building_id,
-            attempt_count=1,
-            first_attempt_at=now,
-            last_attempt_at=now,
-        ))
-    else:
-        rl_record.attempt_count += 1
-        rl_record.last_attempt_at = now
-    await db.flush()
-
-
-async def _cleanup_expired_otps() -> None:
-    """Delete expired OTP records — runs as a fire-and-forget background task."""
-    try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                delete(AuthOtp).where(AuthOtp.expires_at < datetime.now(UTC))
-            )
-            await session.commit()
-    except Exception:  # pragma: no cover
-        pass  # Background cleanup — never let failures surface to the caller
-
-
-async def _cleanup_expired_sessions() -> None:
-    """Delete expired session records — runs as a fire-and-forget background task."""
-    try:
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                delete(SessionRecord).where(SessionRecord.expires_at < datetime.now(UTC))
-            )
-            await session.commit()
-    except Exception:  # pragma: no cover
-        pass  # Background cleanup — never let failures surface to the caller
-
 
 @router.post("/auth/request-otp", response_model=OtpRequestResponse)
 async def request_otp(
     body: OtpRequestBody,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> OtpRequestResponse:
     """
-    Send a one-time verification code to the voter's email.
-    Always returns 200 {"sent": true} to prevent email enumeration.
+    Send a one-time verification code to the voter's email or phone (SMS).
+    Always returns 200 {"sent": true} to prevent enumeration.
+    Response always includes has_phone: bool and enabled_channels: list[str].
+
+    channel is optional:
+      - When None: backend auto-selects enabled_channels[0] as the effective channel.
+      - When supplied: backend enforces that it is in enabled_channels (503 if not).
     """
-    # Fire-and-forget cleanup of expired OTPs — doesn't block the request.
-    asyncio.create_task(_cleanup_expired_otps())
+    # Schedule cleanup of expired OTPs as a BackgroundTask (runs after response is sent).
+    background_tasks.add_task(cleanup_expired_otps)
 
     # Normalise email to lowercase for case-insensitive matching
     body = body.model_copy(update={"email": body.email.strip().lower()})
@@ -240,7 +108,16 @@ async def request_otp(
     #    across all Lambda instances.
     #    Disabled in testing_mode so E2E tests can re-request OTPs immediately
     #    after setup (beforeAll) without hitting the 429 rate limit.
-    if not settings.testing_mode:
+    #
+    #    Rate limit is also skipped when body.channel is explicitly specified
+    #    (i.e., the second call from the channel-selector modal). This call
+    #    immediately follows the first (auto-send to email) call within the same
+    #    60-second window. Blocking it would prevent the voter from selecting SMS
+    #    after the initial email auto-send (Bug 2 fix).
+    #    Security note: the channel-confirm call only sends to the voter's own
+    #    phone number - it cannot be used to spam email since body.channel is
+    #    validated against enabled_channels later in this handler.
+    if not settings.testing_mode and body.channel is None:
         now_for_rate = datetime.now(UTC)
         rl_result = await db.execute(
             select(OTPRateLimit).where(
@@ -266,29 +143,81 @@ async def request_otp(
                     detail="Please wait before requesting another code",
                 )
 
-    # 3. Check if email is known in this building (enumeration-safe: still return 200 if not found)
-    emails_result = await db.execute(
-        select(LotOwnerEmail)
-        .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
-        .where(
-            LotOwnerEmail.email.isnot(None),
-            LotOwnerEmail.email == body.email,
-            LotOwner.building_id == meeting.building_id,
+    # 2b. Load tenant config to determine enabled channels
+    tenant_config = await config_service.get_config(db)
+    sms_cfg = await smtp_config_service.get_smtp_config(db)
+
+    # Compute enabled_channels from config flags + SMS provider availability
+    enabled_channels: list[str] = []
+    if tenant_config.otp_email_enabled:
+        enabled_channels.append("email")
+    if tenant_config.otp_sms_enabled and sms_cfg.sms_enabled and sms_cfg.sms_provider:
+        enabled_channels.append("sms")
+
+    # If no channels are configured (edge case: admin disabled both via direct DB), fall back to email
+    if not enabled_channels:
+        enabled_channels = ["email"]
+
+    # 2c. Resolve effective channel:
+    #     - If body.channel is None: auto-select the first enabled channel.
+    #     - If body.channel is supplied: enforce that it is in enabled_channels.
+    if body.channel is None:
+        effective_channel: str = enabled_channels[0]
+    elif body.channel not in enabled_channels:
+        raise HTTPException(
+            status_code=503,
+            detail="Requested verification method is not available",
         )
+    else:
+        effective_channel = body.channel
+
+    # 3. Check if email is known in this building (enumeration-safe: still return 200 if not found)
+    # Direct owner: email matches a Person linked to a Lot in this building
+    direct_person_result = await db.execute(
+        select(Person)
+        .join(lot_persons, lot_persons.c.person_id == Person.id)
+        .join(Lot, Lot.id == lot_persons.c.lot_id)
+        .where(
+            Person.email.isnot(None),
+            Person.email == body.email,
+            Lot.building_id == meeting.building_id,
+        )
+        .limit(1)
     )
-    email_records = list(emails_result.scalars().all())
+    direct_person = direct_person_result.scalar_one_or_none()
 
     proxy_result = await db.execute(
         select(LotProxy)
-        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
+        .join(Person, Person.id == LotProxy.person_id)
+        .join(Lot, Lot.id == LotProxy.lot_id)
         .where(
-            LotProxy.proxy_email == body.email,
-            LotOwner.building_id == meeting.building_id,
+            Person.email == body.email,
+            Lot.building_id == meeting.building_id,
         )
+        .limit(1)
     )
-    proxy_records = list(proxy_result.scalars().all())
+    proxy_record = proxy_result.scalar_one_or_none()
 
-    email_known = bool(email_records or proxy_records)
+    email_known = bool(direct_person or proxy_record)
+
+    # Resolve whether the voter has a phone number on their matched Person row.
+    # Proxy lots are excluded — phone belongs to the contact, not the proxy.
+    has_phone = bool(direct_person and direct_person.phone_number)
+
+    # 3b. SMS-channel validation (before generating/storing OTP).
+    # Note: sms_cfg.sms_enabled and sms_cfg.sms_provider are already validated by
+    # enabled_channels computation above (SMS is only added to enabled_channels when
+    # both flags are set), so no redundant check needed here.
+    if effective_channel == "sms":
+        if not has_phone and email_known:
+            # SMS is the effective channel and voter has no phone on file
+            # Check: is SMS the only available channel?
+            if enabled_channels == ["sms"]:
+                raise HTTPException(
+                    status_code=400,
+                    detail="SMS is the only verification method and no phone number is on file for your account",
+                )
+            raise HTTPException(status_code=400, detail="No phone number on file for this account")
 
     if email_known:
         # 4. Delete existing OTPs for this (email, meeting_id) pair (lazy cleanup)
@@ -317,35 +246,73 @@ async def request_otp(
         # commit is for the rate-limit upsert only (CRIT-2).
         now_rl = datetime.now(UTC)
         if not settings.testing_mode:
-            await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
+            await upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
             await db.commit()
 
-        # 7. Send the OTP email (skipped when skip_email=True in testing_mode only).
-        # skip_email is silently ignored in non-testing environments (RR5-03).
-        skip_email_effective = body.skip_email and settings.testing_mode
+        # 7. Deliver the OTP via the effective channel.
+        skip_email_effective = settings.testing_mode
         if not skip_email_effective:
-            try:
-                await send_otp_email(
-                    to_email=body.email,
-                    meeting_title=meeting.title,
-                    code=code,
-                    db=db,
-                )
-            except Exception as exc:
-                # Log the SMTP failure but still return 200 — the OTP is already stored
-                # in the DB, so the voter can still authenticate (or retry sending).
-                # A 500 here would expose SMTP misconfiguration and break the auth flow
-                # even though the OTP record was successfully created.
-                logger.error("otp_email_send_failed", email=body.email, error=str(exc))
+            if effective_channel == "sms":
+                # SMS path: phone number is on the matched Person row.
+                phone_number = direct_person.phone_number if direct_person else None
+                if phone_number:
+                    sms_kwargs = smtp_config_service.get_sms_send_kwargs(sms_cfg)
+                    app_name = tenant_config.app_name or "AGM Voting"
+                    sms_body = (
+                        f"{app_name}: Your verification code is {code}. "
+                        "Never share your verification code under any circumstances. "
+                        "If you did not request this, please contact your OC manager immediately. "
+                        "Do not reply to this SMS."
+                    )
+                    try:
+                        await sms_send(
+                            to=phone_number,
+                            message=sms_body,
+                            **sms_kwargs,
+                        )
+                    except SmsDeliveryError as exc:
+                        logger.error("otp_sms_send_failed", email=body.email, error=str(exc))
+                        raise HTTPException(
+                            status_code=422,
+                            detail="SMS could not be sent. Please try again or use email instead.",
+                        )
+            else:
+                # Default email path
+                try:
+                    await send_otp_email(
+                        to_email=body.email,
+                        meeting_title=meeting.title,
+                        code=code,
+                        db=db,
+                    )
+                except Exception as exc:
+                    # Log the SMTP failure but still return 200 — the OTP is already stored
+                    # in the DB, so the voter can still authenticate (or retry sending).
+                    # A 500 here would expose SMTP misconfiguration and break the auth flow
+                    # even though the OTP record was successfully created.
+                    logger.error("otp_email_send_failed", email=body.email, error=str(exc))
     else:
         # Still update the rate limit so attackers can't use "no rate limit" as
         # a signal that the email was not found.
         if not settings.testing_mode:
             now_rl = datetime.now(UTC)
-            await _upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
+            await upsert_rate_limit(db, body.email, meeting.building_id, now_rl)
             await db.commit()
 
-    return OtpRequestResponse(sent=True)
+    # Compute masked phone hint server-side when a phone number is present.
+    # Only the last 4 digits are revealed; the rest are replaced with bullet characters
+    # grouped as 4-char blocks separated by spaces (e.g. "+61433590018" → "•••• •••• 0018").
+    # The full number is never returned to the client.
+    phone_hint: str | None = None
+    if has_phone and direct_person and direct_person.phone_number:
+        phone_hint = mask_phone_hint(direct_person.phone_number)
+
+    return OtpRequestResponse(
+        sent=True,
+        has_phone=has_phone,
+        phone_hint=phone_hint,
+        enabled_channels=enabled_channels,
+    )
 
 
 @router.post("/auth/logout")
@@ -445,7 +412,7 @@ async def verify_auth(
     building_id = meeting.building_id
 
     # 4. Resolve lots, visible motions, and already_submitted flags via shared helper
-    voter_state = await _resolve_voter_state(
+    voter_state = await resolve_voter_state(
         db=db,
         voter_email=request.email,
         general_meeting_id=request.general_meeting_id,
@@ -515,6 +482,7 @@ async def verify_auth(
 async def restore_session(
     request: SessionRestoreRequest,
     response: Response,
+    background_tasks: BackgroundTasks,
     agm_session: str | None = Cookie(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> AuthVerifyResponse:
@@ -528,8 +496,8 @@ async def restore_session(
 
     Returns 401 if the token is invalid, expired, or the AGM is closed.
     """
-    # Fire-and-forget cleanup of expired sessions — doesn't block the request.
-    asyncio.create_task(_cleanup_expired_sessions())
+    # Schedule cleanup of expired sessions as a BackgroundTask (runs after response is sent).
+    background_tasks.add_task(cleanup_expired_sessions)
 
     # Resolve the token: cookie takes priority over request body
     token_to_use = agm_session or request.session_token
@@ -572,7 +540,7 @@ async def restore_session(
     building_id = meeting.building_id
 
     # 4. Run lot-lookup via shared helper (same logic as verify_auth)
-    voter_state = await _resolve_voter_state(
+    voter_state = await resolve_voter_state(
         db=db,
         voter_email=voter_email,
         general_meeting_id=request.general_meeting_id,

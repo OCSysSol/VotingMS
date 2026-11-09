@@ -21,11 +21,13 @@ from app.models import (
     LotProxy,
     Motion,
 )
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
+from app.models.person import Person
 
 # Helpers and fixtures (make_csv, make_excel, meeting_dt, closing_dt, client, building,
 # building_with_owners) are defined in conftest.py and automatically available.
-from tests.conftest import make_csv, make_excel, meeting_dt, closing_dt
+from tests.conftest import make_csv, make_excel, meeting_dt, closing_dt, add_person_to_lot, get_or_create_person
 
 # ---------------------------------------------------------------------------
 # GET /api/admin/buildings/{building_id}/lot-owners
@@ -83,12 +85,8 @@ class TestListLotOwners:
         owners = list_response.json()
         lot_owner_id = owners[0]["id"]
 
-        db_session.add(LotProxy(
-            lot_owner_id=uuid.UUID(lot_owner_id),
-            proxy_email="named@proxy.com",
-            given_name="Alice",
-            surname="Brown",
-        ))
+        _named_p = await get_or_create_person(db_session, "named@proxy.com", given_name="Alice", surname="Brown")
+        db_session.add(LotProxy(lot_id=uuid.UUID(lot_owner_id), person_id=_named_p.id))
         await db_session.flush()
 
         response = await client.get(
@@ -161,6 +159,251 @@ class TestListLotOwners:
             f"/api/admin/buildings/{uuid.uuid4()}/lot-owners"
         )
         assert response.status_code == 404
+
+    # --- Server-side sort ---
+
+    async def test_sort_by_lot_number_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=lot_number&sort_dir=asc returns lots in numeric-ascending order."""
+        for lot_num in ("10", "2", "1"):
+            db_session.add(LotOwner(building_id=building.id, lot_number=lot_num, unit_entitlement=10))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=lot_number&sort_dir=asc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot_numbers = [o["lot_number"] for o in data]
+        # Natural numeric order: 1, 2, 10
+        assert lot_numbers == ["1", "2", "10"]
+
+    async def test_sort_by_lot_number_desc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=lot_number&sort_dir=desc returns lots in numeric-descending order."""
+        for lot_num in ("1", "2", "10"):
+            db_session.add(LotOwner(building_id=building.id, lot_number=lot_num, unit_entitlement=10))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=lot_number&sort_dir=desc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot_numbers = [o["lot_number"] for o in data]
+        # Natural numeric order descending: 10, 2, 1
+        assert lot_numbers == ["10", "2", "1"]
+
+    async def test_sort_by_unit_entitlement_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=unit_entitlement&sort_dir=asc returns lots ordered by entitlement ascending."""
+        for entitlement, lot_num in ((300, "A"), (100, "B"), (200, "C")):
+            db_session.add(LotOwner(building_id=building.id, lot_number=lot_num, unit_entitlement=entitlement))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=unit_entitlement&sort_dir=asc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        entitlements = [o["unit_entitlement"] for o in data]
+        assert entitlements == [100, 200, 300]
+
+    async def test_sort_by_unit_entitlement_desc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=unit_entitlement&sort_dir=desc returns lots ordered by entitlement descending."""
+        for entitlement, lot_num in ((100, "A"), (300, "B"), (200, "C")):
+            db_session.add(LotOwner(building_id=building.id, lot_number=lot_num, unit_entitlement=entitlement))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=unit_entitlement&sort_dir=desc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        entitlements = [o["unit_entitlement"] for o in data]
+        assert entitlements == [300, 200, 100]
+
+    async def test_sort_by_financial_position_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=financial_position asc: PostgreSQL enum declaration order is normal < in_arrear,
+        so ascending sort puts 'normal' before 'in_arrear'."""
+        from app.models import FinancialPosition
+        db_session.add(LotOwner(building_id=building.id, lot_number="X1", unit_entitlement=10,
+                                financial_position=FinancialPosition.in_arrear))
+        db_session.add(LotOwner(building_id=building.id, lot_number="X2", unit_entitlement=10,
+                                financial_position=FinancialPosition.normal))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=financial_position&sort_dir=asc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Enum declaration order: normal (1st) < in_arrear (2nd)
+        positions = [o["financial_position"] for o in data]
+        assert positions[0] == "normal"
+        assert positions[-1] == "in_arrear"
+
+    async def test_sort_by_financial_position_desc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=financial_position desc: 'in_arrear' comes first (declared last)."""
+        from app.models import FinancialPosition
+        db_session.add(LotOwner(building_id=building.id, lot_number="Y1", unit_entitlement=10,
+                                financial_position=FinancialPosition.normal))
+        db_session.add(LotOwner(building_id=building.id, lot_number="Y2", unit_entitlement=10,
+                                financial_position=FinancialPosition.in_arrear))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=financial_position&sort_dir=desc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        # Descending: in_arrear (2nd in declaration) comes first
+        positions = [o["financial_position"] for o in data]
+        assert positions[0] == "in_arrear"
+        assert positions[-1] == "normal"
+
+    async def test_invalid_sort_by_returns_400(self, client: AsyncClient, building: Building):
+        """An unrecognised sort_by value returns 400."""
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=invalid_column"
+        )
+        assert response.status_code == 400
+
+    async def test_invalid_sort_dir_returns_400(self, client: AsyncClient, building: Building):
+        """An unrecognised sort_dir value returns 400."""
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_dir=sideways"
+        )
+        assert response.status_code == 400
+
+    async def test_default_sort_is_lot_number_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """Without sort params the results are ordered by lot_number ascending (natural numeric)."""
+        for lot_num in ("10", "2", "1"):
+            db_session.add(LotOwner(building_id=building.id, lot_number=lot_num, unit_entitlement=10))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        lot_numbers = [o["lot_number"] for o in data]
+        assert lot_numbers == ["1", "2", "10"]
+
+    async def test_sort_by_email_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=email&sort_dir=asc returns lots ordered by min(lower(email)) ascending."""
+        lot_z = LotOwner(building_id=building.id, lot_number="SE1", unit_entitlement=10)
+        lot_a = LotOwner(building_id=building.id, lot_number="SE2", unit_entitlement=10)
+        lot_m = LotOwner(building_id=building.id, lot_number="SE3", unit_entitlement=10)
+        db_session.add_all([lot_z, lot_a, lot_m])
+        await db_session.flush()
+        await add_person_to_lot(db_session, lot_z, "zebra@example.com")
+        await add_person_to_lot(db_session, lot_a, "apple@example.com")
+        await add_person_to_lot(db_session, lot_m, "mango@example.com")
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=email&sort_dir=asc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        se_data = [o for o in data if o["lot_number"] in ("SE1", "SE2", "SE3")]
+        assert len(se_data) == 3
+        lot_numbers = [o["lot_number"] for o in se_data]
+        # apple < mango < zebra → SE2, SE3, SE1
+        assert lot_numbers == ["SE2", "SE3", "SE1"]
+
+    async def test_sort_by_email_desc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=email&sort_dir=desc returns lots ordered by min(lower(email)) descending."""
+        lot_z = LotOwner(building_id=building.id, lot_number="SD1", unit_entitlement=10)
+        lot_a = LotOwner(building_id=building.id, lot_number="SD2", unit_entitlement=10)
+        lot_m = LotOwner(building_id=building.id, lot_number="SD3", unit_entitlement=10)
+        db_session.add_all([lot_z, lot_a, lot_m])
+        await db_session.flush()
+        await add_person_to_lot(db_session, lot_z, "zebra.sd@example.com")
+        await add_person_to_lot(db_session, lot_a, "apple.sd@example.com")
+        await add_person_to_lot(db_session, lot_m, "mango.sd@example.com")
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=email&sort_dir=desc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        sd_data = [o for o in data if o["lot_number"] in ("SD1", "SD2", "SD3")]
+        assert len(sd_data) == 3
+        lot_numbers = [o["lot_number"] for o in sd_data]
+        # desc: zebra > mango > apple → SD1, SD3, SD2
+        assert lot_numbers == ["SD1", "SD3", "SD2"]
+
+    async def test_sort_by_proxy_email_asc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=proxy_email&sort_dir=asc returns lots ordered by proxy email ascending; lots
+        without a proxy sort first (nullsfirst)."""
+        lot_z = LotOwner(building_id=building.id, lot_number="SP1", unit_entitlement=10)
+        lot_a = LotOwner(building_id=building.id, lot_number="SP2", unit_entitlement=10)
+        lot_none = LotOwner(building_id=building.id, lot_number="SP3", unit_entitlement=10)
+        db_session.add_all([lot_z, lot_a, lot_none])
+        await db_session.flush()
+        proxy_z = await get_or_create_person(db_session, "zproxy@example.com")
+        proxy_a = await get_or_create_person(db_session, "aproxy@example.com")
+        db_session.add(LotProxy(lot_id=lot_z.id, person_id=proxy_z.id))
+        db_session.add(LotProxy(lot_id=lot_a.id, person_id=proxy_a.id))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=proxy_email&sort_dir=asc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        sp_data = [o for o in data if o["lot_number"] in ("SP1", "SP2", "SP3")]
+        assert len(sp_data) == 3
+        lot_numbers = [o["lot_number"] for o in sp_data]
+        # nullsfirst: SP3 (no proxy) first, then aproxy < zproxy → SP2, SP1
+        assert lot_numbers == ["SP3", "SP2", "SP1"]
+
+    async def test_sort_by_proxy_email_desc(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """sort_by=proxy_email&sort_dir=desc returns lots ordered by proxy email descending;
+        lots without a proxy sort last (nullslast)."""
+        lot_z = LotOwner(building_id=building.id, lot_number="SPD1", unit_entitlement=10)
+        lot_a = LotOwner(building_id=building.id, lot_number="SPD2", unit_entitlement=10)
+        lot_none = LotOwner(building_id=building.id, lot_number="SPD3", unit_entitlement=10)
+        db_session.add_all([lot_z, lot_a, lot_none])
+        await db_session.flush()
+        proxy_z = await get_or_create_person(db_session, "zproxy.d@example.com")
+        proxy_a = await get_or_create_person(db_session, "aproxy.d@example.com")
+        db_session.add(LotProxy(lot_id=lot_z.id, person_id=proxy_z.id))
+        db_session.add(LotProxy(lot_id=lot_a.id, person_id=proxy_a.id))
+        await db_session.commit()
+
+        response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners?sort_by=proxy_email&sort_dir=desc"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        spd_data = [o for o in data if o["lot_number"] in ("SPD1", "SPD2", "SPD3")]
+        assert len(spd_data) == 3
+        lot_numbers = [o["lot_number"] for o in spd_data]
+        # nullslast: zproxy > aproxy → SPD1, SPD2, then SPD3 (no proxy) last
+        assert lot_numbers == ["SPD1", "SPD2", "SPD3"]
 
 
 # ---------------------------------------------------------------------------
@@ -274,10 +517,8 @@ class TestGetLotOwner:
         lot_owner_id = owners[0]["id"]
 
         # Seed a proxy for this lot owner
-        proxy = LotProxy(
-            lot_owner_id=uuid.UUID(lot_owner_id),
-            proxy_email="proxy@example.com",
-        )
+        _proxy_p = await get_or_create_person(db_session, "proxy@example.com")
+        proxy = LotProxy(lot_id=uuid.UUID(lot_owner_id), person_id=_proxy_p.id)
         db_session.add(proxy)
         await db_session.flush()
 
@@ -298,12 +539,8 @@ class TestGetLotOwner:
         owners = list_response.json()
         lot_owner_id = owners[0]["id"]
 
-        db_session.add(LotProxy(
-            lot_owner_id=uuid.UUID(lot_owner_id),
-            proxy_email="named@proxy.com",
-            given_name="Jane",
-            surname="Doe",
-        ))
+        _named_jane = await get_or_create_person(db_session, "named@proxy.com", given_name="Jane", surname="Doe")
+        db_session.add(LotProxy(lot_id=uuid.UUID(lot_owner_id), person_id=_named_jane.id))
         await db_session.flush()
 
         response = await client.get(f"/api/admin/lot-owners/{lot_owner_id}")
@@ -730,7 +967,7 @@ class TestImportLotOwners:
         for lo in owners_result.scalars().all():
             db_session.add(GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             ))
         await db_session.commit()
@@ -846,6 +1083,119 @@ class TestImportLotOwners:
 
 
 # ---------------------------------------------------------------------------
+# Orphan person cleanup after lot owner import
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestImportLotOwnersOrphanCleanup:
+    """After re-import, persons with no remaining lot_persons or lot_proxies rows
+    are deleted. Persons still linked to other buildings' lots are preserved."""
+
+    async def test_reimport_removes_orphaned_person(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """A person removed from all lots in this building (and no other links) is deleted."""
+        csv1 = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [["ORP1", "orphan.import@test.com", "100"]],
+        )
+        resp = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv1, "text/csv")},
+        )
+        assert resp.status_code == 200
+
+        # Confirm person was created
+        from sqlalchemy import select as _sel
+        person_result = await db_session.execute(
+            _sel(Person).where(Person.email == "orphan.import@test.com")
+        )
+        person = person_result.scalar_one_or_none()
+        assert person is not None
+        person_id = person.id
+
+        # Re-import with a different email — original person loses all lot_persons links
+        csv2 = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [["ORP1", "replacement@test.com", "100"]],
+        )
+        resp2 = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv2, "text/csv")},
+        )
+        assert resp2.status_code == 200
+
+        # Original person must be deleted (no more lot_persons or lot_proxies)
+        db_session.expire_all()
+        gone = await db_session.execute(
+            _sel(Person).where(Person.id == person_id)
+        )
+        assert gone.scalar_one_or_none() is None, (
+            "Orphaned person was not deleted after re-import removed all their lot links"
+        )
+
+    async def test_reimport_preserves_person_linked_to_other_building(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """A person who owns a lot in another building is NOT deleted even when
+        removed from this building's import."""
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        b1 = Building(name="OrphanClean B1", manager_email="oc1@test.com")
+        b2 = Building(name="OrphanClean B2", manager_email="oc2@test.com")
+        db_session.add_all([b1, b2])
+        await db_session.flush()
+
+        # Import person into b1
+        csv1 = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [["OC1", "shared.oc@test.com", "100"]],
+        )
+        resp = await client.post(
+            f"/api/admin/buildings/{b1.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv1, "text/csv")},
+        )
+        assert resp.status_code == 200
+
+        # Also link same person to b2 directly in DB
+        from sqlalchemy import select as _sel
+        person_result = await db_session.execute(
+            _sel(Person).where(Person.email == "shared.oc@test.com")
+        )
+        person = person_result.scalar_one()
+        person_id = person.id
+
+        lo_b2 = LotOwner(building_id=b2.id, lot_number="OC2", unit_entitlement=50)
+        db_session.add(lo_b2)
+        await db_session.flush()
+        await db_session.execute(
+            pg_insert(lot_persons).values(lot_id=lo_b2.id, person_id=person.id).on_conflict_do_nothing()
+        )
+        await db_session.commit()
+
+        # Re-import b1 with a different email — removes shared.oc from b1's lots
+        csv2 = make_csv(
+            ["lot_number", "email", "unit_entitlement"],
+            [["OC1", "replacement.oc@test.com", "100"]],
+        )
+        resp2 = await client.post(
+            f"/api/admin/buildings/{b1.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv2, "text/csv")},
+        )
+        assert resp2.status_code == 200
+
+        # Person must still exist — they're still linked to b2's lot
+        db_session.expire_all()
+        still_there = await db_session.execute(
+            _sel(Person).where(Person.id == person_id)
+        )
+        assert still_there.scalar_one_or_none() is not None, (
+            "Person still linked to another building's lot was incorrectly deleted"
+        )
+
+
+# ---------------------------------------------------------------------------
 # POST /api/admin/buildings/{building_id}/lot-owners/import — owner name columns
 # ---------------------------------------------------------------------------
 
@@ -870,7 +1220,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "alice@test.com")
+            select(Person).where(Person.email == "alice@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -894,7 +1244,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "bob@test.com")
+            select(Person).where(Person.email == "bob@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -916,7 +1266,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "corp@test.com")
+            select(Person).where(Person.email == "corp@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -940,7 +1290,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "noname@test.com")
+            select(Person).where(Person.email == "noname@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -977,7 +1327,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "dedup@test.com")
+            select(Person).where(Person.email == "dedup@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -1011,7 +1361,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "excel.name@test.com")
+            select(Person).where(Person.email == "excel.name@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -1043,7 +1393,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "noname.xl@test.com")
+            select(Person).where(Person.email == "noname.xl@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -1074,7 +1424,7 @@ class TestImportLotOwnersNameColumns:
         assert response.json()["imported"] == 2
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "ntassell@outlook.com")
+            select(Person).where(Person.email == "ntassell@outlook.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -1082,7 +1432,7 @@ class TestImportLotOwnersNameColumns:
         assert email_row.surname == "Tassell"
 
         result2 = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "sbtunit5@gmail.com")
+            select(Person).where(Person.email == "sbtunit5@gmail.com")
         )
         email_row2 = result2.scalar_one_or_none()
         assert email_row2 is not None
@@ -1108,7 +1458,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
         # Only one LotOwnerEmail created (dedup)
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "dup.csv@test.com")
+            select(Person).where(Person.email == "dup.csv@test.com")
         )
         rows = result.scalars().all()
         assert len(rows) == 1
@@ -1141,7 +1491,7 @@ class TestImportLotOwnersNameColumns:
         assert response.status_code == 200
 
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "sep.name@test.com")
+            select(Person).where(Person.email == "sep.name@test.com")
         )
         email_row = result.scalar_one_or_none()
         assert email_row is not None
@@ -1174,7 +1524,7 @@ class TestImportLotOwnersNameColumns:
         )
         assert response.status_code == 200
         result = await db_session.execute(
-            select(LotOwnerEmail).where(LotOwnerEmail.email == "dup.xl@test.com")
+            select(Person).where(Person.email == "dup.xl@test.com")
         )
         rows = result.scalars().all()
         assert len(rows) == 1
@@ -1518,8 +1868,7 @@ class TestAddEmailToLotOwner:
         lo = LotOwner(building_id=building.id, lot_number="EM02", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        existing = LotOwnerEmail(lot_owner_id=lo.id, email="first@test.com")
-        db_session.add(existing)
+        await add_person_to_lot(db_session, lo, "first@test.com")
         await db_session.commit()
         await db_session.refresh(lo)
 
@@ -1589,8 +1938,7 @@ class TestRemoveEmailFromLotOwner:
         lo = LotOwner(building_id=building.id, lot_number="REM01", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="todelete@test.com")
-        db_session.add(em)
+        await add_person_to_lot(db_session, lo, "todelete@test.com")
         await db_session.commit()
         await db_session.refresh(lo)
 
@@ -2195,7 +2543,7 @@ class TestAddEmailDuplicate:
         lo = LotOwner(building_id=b.id, lot_number="DE1", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="existing@test.com"))
+        await add_person_to_lot(db_session, lo, "existing@test.com")
         await db_session.commit()
 
         response = await client.post(
@@ -2260,7 +2608,8 @@ class TestSetLotOwnerProxy:
         lo = LotOwner(building_id=building.id, lot_number="PX02", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotProxy(lot_owner_id=lo.id, proxy_email="old_proxy@test.com"))
+        _proxy_p = await get_or_create_person(db_session, "old_proxy@test.com")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=_proxy_p.id))
         await db_session.commit()
         await db_session.refresh(lo)
 
@@ -2325,7 +2674,8 @@ class TestRemoveLotOwnerProxy:
         lo = LotOwner(building_id=building.id, lot_number="PX05", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotProxy(lot_owner_id=lo.id, proxy_email="proxy_to_remove@test.com"))
+        _proxy_p = await get_or_create_person(db_session, "proxy_to_remove@test.com")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=_proxy_p.id))
         await db_session.commit()
         await db_session.refresh(lo)
 
@@ -2445,65 +2795,77 @@ class TestLotOwnerNames:
     async def test_add_lot_owner_with_name(
         self, client: AsyncClient, building: Building
     ):
-        """Add lot owner with given_name and surname; both are persisted and returned."""
-        response = await client.post(
+        """Add email to lot with given_name and surname; both are persisted on the Person."""
+        # First create the lot
+        create_resp = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners",
-            json={
-                "lot_number": "LON01",
-                "given_name": "Alice",
-                "surname": "Smith",
-                "emails": [],
-                "unit_entitlement": 100,
-            },
+            json={"lot_number": "LON01", "emails": [], "unit_entitlement": 100},
+        )
+        assert create_resp.status_code == 201
+        lot_id = create_resp.json()["id"]
+
+        # Add email with name via POST /owner-emails
+        response = await client.post(
+            f"/api/admin/lot-owners/{lot_id}/owner-emails",
+            json={"email": "lon01@test.com", "given_name": "Alice", "surname": "Smith"},
         )
         assert response.status_code == 201
         data = response.json()
-        assert data["given_name"] == "Alice"
-        assert data["surname"] == "Smith"
+        entry = next((e for e in data["owner_emails"] if e["email"] == "lon01@test.com"), None)
+        assert entry is not None
+        assert entry["given_name"] == "Alice"
+        assert entry["surname"] == "Smith"
 
     async def test_add_lot_owner_without_name(
         self, client: AsyncClient, building: Building
     ):
-        """Add lot owner without given_name/surname; fields are null."""
-        response = await client.post(
+        """Add email to lot without given_name/surname; name fields are null."""
+        create_resp = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners",
             json={"lot_number": "LON02", "emails": [], "unit_entitlement": 50},
         )
+        assert create_resp.status_code == 201
+        lot_id = create_resp.json()["id"]
+
+        response = await client.post(
+            f"/api/admin/lot-owners/{lot_id}/owner-emails",
+            json={"email": "lon02@test.com"},
+        )
         assert response.status_code == 201
         data = response.json()
-        assert data["given_name"] is None
-        assert data["surname"] is None
+        entry = data["owner_emails"][0]
+        assert entry["given_name"] is None
+        assert entry["surname"] is None
 
     async def test_update_lot_owner_given_name_and_surname(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):
-        """PATCH with given_name and surname persists and returns them."""
+        """PATCH /owner-emails/{id} with given_name and surname persists and returns them."""
         lo = LotOwner(building_id=building.id, lot_number="LON03", unit_entitlement=100)
         db_session.add(lo)
+        await db_session.flush()
+        em = await add_person_to_lot(db_session, lo, "lon03@test.com")
         await db_session.commit()
-        await db_session.refresh(lo)
 
         response = await client.patch(
-            f"/api/admin/lot-owners/{lo.id}",
+            f"/api/admin/lot-owners/{lo.id}/owner-emails/{em.id}",
             json={"given_name": "Bob", "surname": "Jones"},
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["given_name"] == "Bob"
-        assert data["surname"] == "Jones"
+        entry = next((e for e in data["owner_emails"] if str(e["id"]) == str(em.id)), None)
+        assert entry is not None
+        assert entry["given_name"] == "Bob"
+        assert entry["surname"] == "Jones"
 
     async def test_lot_owner_names_returned_in_list(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):
-        """List lot owners includes given_name and surname fields."""
-        lo = LotOwner(
-            building_id=building.id,
-            lot_number="LON04",
-            unit_entitlement=80,
-            given_name="Carol",
-            surname="White",
-        )
+        """List lot owners includes given_name and surname in owner_emails entries."""
+        lo = LotOwner(building_id=building.id, lot_number="LON04", unit_entitlement=80)
         db_session.add(lo)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lo, "lon04@test.com", given_name="Carol", surname="White")
         await db_session.commit()
 
         response = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
@@ -2511,16 +2873,17 @@ class TestLotOwnerNames:
         owners = response.json()
         named = [o for o in owners if o["lot_number"] == "LON04"]
         assert len(named) == 1
-        assert named[0]["given_name"] == "Carol"
-        assert named[0]["surname"] == "White"
+        entry = named[0]["owner_emails"][0]
+        assert entry["given_name"] == "Carol"
+        assert entry["surname"] == "White"
 
     async def test_csv_import_with_name_columns(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
-        """CSV import with given_name/surname columns imports names correctly."""
+        """CSV import with given_name/surname and email stores names on Person row."""
         csv_data = make_csv(
-            ["lot_number", "unit_entitlement", "given_name", "surname"],
-            [["LON05", "100", "Dave", "Brown"]],
+            ["lot_number", "unit_entitlement", "email", "given_name", "surname"],
+            [["LON05", "100", "lon05@test.com", "Dave", "Brown"]],
         )
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners/import",
@@ -2528,20 +2891,22 @@ class TestLotOwnerNames:
         )
         assert response.status_code == 200
 
-        # Verify name was stored
+        # Verify name was stored on the Person
         list_response = await client.get(
             f"/api/admin/buildings/{building.id}/lot-owners"
         )
         owners = list_response.json()
         lon05 = next((o for o in owners if o["lot_number"] == "LON05"), None)
         assert lon05 is not None
-        assert lon05["given_name"] == "Dave"
-        assert lon05["surname"] == "Brown"
+        entry = next((e for e in lon05["owner_emails"] if e["email"] == "lon05@test.com"), None)
+        assert entry is not None
+        assert entry["given_name"] == "Dave"
+        assert entry["surname"] == "Brown"
 
     async def test_csv_import_without_name_columns_names_are_null(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
-        """CSV import without given_name/surname columns succeeds; names remain null."""
+        """CSV import without name columns: lot created without any persons (no email col)."""
         csv_data = make_csv(
             ["lot_number", "unit_entitlement"],
             [["LON06", "100"]],
@@ -2558,20 +2923,20 @@ class TestLotOwnerNames:
         owners = list_response.json()
         lon06 = next((o for o in owners if o["lot_number"] == "LON06"), None)
         assert lon06 is not None
-        assert lon06["given_name"] is None
-        assert lon06["surname"] is None
+        # No owner_emails since no email column in CSV
+        assert lon06["owner_emails"] == []
 
     async def test_csv_import_updates_names_on_existing_lot(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):
-        """CSV import with name columns updates given_name/surname on existing lot."""
+        """CSV import with name and email columns creates/updates Person with name."""
         lo = LotOwner(building_id=building.id, lot_number="LON07", unit_entitlement=100)
         db_session.add(lo)
         await db_session.commit()
 
         csv_data = make_csv(
-            ["lot_number", "unit_entitlement", "given_name", "surname"],
-            [["LON07", "100", "Eve", "Green"]],
+            ["lot_number", "unit_entitlement", "email", "given_name", "surname"],
+            [["LON07", "100", "lon07@test.com", "Eve", "Green"]],
         )
         response = await client.post(
             f"/api/admin/buildings/{building.id}/lot-owners/import",
@@ -2585,8 +2950,10 @@ class TestLotOwnerNames:
         owners = list_response.json()
         lon07 = next((o for o in owners if o["lot_number"] == "LON07"), None)
         assert lon07 is not None
-        assert lon07["given_name"] == "Eve"
-        assert lon07["surname"] == "Green"
+        entry = next((e for e in lon07["owner_emails"] if e["email"] == "lon07@test.com"), None)
+        assert entry is not None
+        assert entry["given_name"] == "Eve"
+        assert entry["surname"] == "Green"
 
     async def test_set_proxy_with_name(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
@@ -2604,12 +2971,14 @@ class TestLotOwnerNames:
         assert response.status_code == 200
 
         # Verify LotProxy has the names
+        from sqlalchemy.orm import selectinload
         proxy_result = await db_session.execute(
-            select(LotProxy).where(LotProxy.lot_owner_id == lo.id)
+            select(LotProxy).where(LotProxy.lot_id == lo.id)
+            .options(selectinload(LotProxy.person))
         )
         proxy = proxy_result.scalar_one()
-        assert proxy.given_name == "Frank"
-        assert proxy.surname == "Black"
+        assert proxy.person.given_name == "Frank"
+        assert proxy.person.surname == "Black"
 
     async def test_set_proxy_with_name_updates_existing_proxy(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
@@ -2618,7 +2987,8 @@ class TestLotOwnerNames:
         lo = LotOwner(building_id=building.id, lot_number="LON09", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotProxy(lot_owner_id=lo.id, proxy_email="old@test.com"))
+        _proxy_p = await get_or_create_person(db_session, "old@test.com")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=_proxy_p.id))
         await db_session.commit()
         await db_session.refresh(lo)
 
@@ -2628,14 +2998,15 @@ class TestLotOwnerNames:
         )
         assert response.status_code == 200
 
-        from sqlalchemy.ext.asyncio import AsyncSession as _AS
+        from sqlalchemy.orm import selectinload
         proxy_result = await db_session.execute(
-            select(LotProxy).where(LotProxy.lot_owner_id == lo.id)
+            select(LotProxy).where(LotProxy.lot_id == lo.id)
+            .options(selectinload(LotProxy.person))
         )
         proxy = proxy_result.scalar_one()
-        assert proxy.given_name == "Grace"
-        assert proxy.surname == "Hall"
-        assert proxy.proxy_email == "new@test.com"
+        assert proxy.person.given_name == "Grace"
+        assert proxy.person.surname == "Hall"
+        assert proxy.person.email == "new@test.com"
 
     async def test_proxy_csv_import_with_names_on_existing_proxy(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
@@ -2644,7 +3015,8 @@ class TestLotOwnerNames:
         lo = LotOwner(building_id=building.id, lot_number="LON10", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotProxy(lot_owner_id=lo.id, proxy_email="old@test.com"))
+        _proxy_p = await get_or_create_person(db_session, "old@test.com")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=_proxy_p.id))
         await db_session.commit()
 
         csv_data = make_csv(
@@ -2657,13 +3029,15 @@ class TestLotOwnerNames:
         )
         assert response.status_code == 200
 
+        from sqlalchemy.orm import selectinload
         proxy_result = await db_session.execute(
-            select(LotProxy).where(LotProxy.lot_owner_id == lo.id)
+            select(LotProxy).where(LotProxy.lot_id == lo.id)
+            .options(selectinload(LotProxy.person))
         )
         proxy = proxy_result.scalar_one()
-        assert proxy.given_name == "Henry"
-        assert proxy.surname == "King"
-        assert proxy.proxy_email == "new@test.com"
+        assert proxy.person.given_name == "Henry"
+        assert proxy.person.surname == "King"
+        assert proxy.person.email == "new@test.com"
 
 
 # ---------------------------------------------------------------------------
@@ -2681,7 +3055,7 @@ class TestAdminImportRateLimitLotOwners:
         from app.rate_limiter import admin_import_limiter
         import time
 
-        admin_import_limiter._timestamps["admin"] = [time.monotonic() for _ in range(20)]
+        admin_import_limiter._timestamps["test-user-id"] = [time.monotonic() for _ in range(20)]
 
         csv_data = make_csv(
             ["Lot#", "UOE2", "Email"],
@@ -2711,13 +3085,7 @@ class TestOwnerEmailsField:
         lo = LotOwner(building_id=building.id, lot_number="OE01", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(
-            lot_owner_id=lo.id,
-            email="oe1@test.com",
-            given_name="Jane",
-            surname="Doe",
-        )
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "oe1@test.com", given_name="Jane", surname="Doe")
         await db_session.commit()
 
         response = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
@@ -2740,7 +3108,7 @@ class TestOwnerEmailsField:
         lo = LotOwner(building_id=building.id, lot_number="OE02", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="oe2@test.com"))
+        await add_person_to_lot(db_session, lo, "oe2@test.com")
         await db_session.commit()
 
         response = await client.get(f"/api/admin/lot-owners/{lo.id}")
@@ -2759,7 +3127,7 @@ class TestOwnerEmailsField:
         lo = LotOwner(building_id=building.id, lot_number="OE03", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="oe3@test.com"))
+        await add_person_to_lot(db_session, lo, "oe3@test.com")
         await db_session.commit()
 
         response = await client.get(f"/api/admin/lot-owners/{lo.id}")
@@ -2822,7 +3190,7 @@ class TestAddOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="AOE03", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="existing@test.com"))
+        await add_person_to_lot(db_session, lo, "existing@test.com")
         await db_session.commit()
 
         response = await client.post(
@@ -2901,7 +3269,7 @@ class TestAddOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="AOE08", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="dup@test.com"))
+        await add_person_to_lot(db_session, lo, "dup@test.com")
         await db_session.commit()
 
         response = await client.post(
@@ -2935,8 +3303,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE01", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="uoe1@test.com", given_name="Old", surname="Name")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "uoe1@test.com", given_name="Old", surname="Name")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -2957,8 +3324,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE02", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="old@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "old@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -2978,8 +3344,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE03", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="uoe3@test.com", given_name="John", surname="Old")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "uoe3@test.com", given_name="John", surname="Old")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3000,8 +3365,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE04", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="uoe4@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "uoe4@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3025,8 +3389,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE05", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="uoe5@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "uoe5@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3042,8 +3405,7 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE06", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="uoe6@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "uoe6@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3061,12 +3423,9 @@ class TestUpdateOwnerEmail:
         lo = LotOwner(building_id=building.id, lot_number="UOE07", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em1 = LotOwnerEmail(lot_owner_id=lo.id, email="first@test.com")
-        em2 = LotOwnerEmail(lot_owner_id=lo.id, email="second@test.com")
-        db_session.add(em1)
-        db_session.add(em2)
+        em1 = await add_person_to_lot(db_session, lo, "first@test.com")
+        em2 = await add_person_to_lot(db_session, lo, "second@test.com")
         await db_session.commit()
-        await db_session.refresh(em1)
 
         # Try to change em1's email to second@test.com — duplicate
         response = await client.patch(
@@ -3083,8 +3442,7 @@ class TestUpdateOwnerEmail:
         db_session.add(lo1)
         db_session.add(lo2)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo2.id, email="other@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo2, "other@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3133,8 +3491,7 @@ class TestRemoveOwnerEmailById:
         lo = LotOwner(building_id=building.id, lot_number="DOE01", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="doe1@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "doe1@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3149,12 +3506,9 @@ class TestRemoveOwnerEmailById:
         lo = LotOwner(building_id=building.id, lot_number="DOE02", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em1 = LotOwnerEmail(lot_owner_id=lo.id, email="keep@test.com")
-        em2 = LotOwnerEmail(lot_owner_id=lo.id, email="delete@test.com")
-        db_session.add(em1)
-        db_session.add(em2)
+        em1 = await add_person_to_lot(db_session, lo, "keep@test.com")
+        em2 = await add_person_to_lot(db_session, lo, "delete@test.com")
         await db_session.commit()
-        await db_session.refresh(em2)
 
         response = await client.delete(
             f"/api/admin/lot-owners/{lo.id}/owner-emails/{em2.id}"
@@ -3171,8 +3525,7 @@ class TestRemoveOwnerEmailById:
         lo = LotOwner(building_id=building.id, lot_number="DOE03", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo.id, email="gone@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo, "gone@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3205,8 +3558,7 @@ class TestRemoveOwnerEmailById:
         db_session.add(lo1)
         db_session.add(lo2)
         await db_session.flush()
-        em = LotOwnerEmail(lot_owner_id=lo2.id, email="other@test.com")
-        db_session.add(em)
+        em = await add_person_to_lot(db_session, lo2, "other@test.com")
         await db_session.commit()
         await db_session.refresh(em)
 
@@ -3294,3 +3646,589 @@ class TestOwnerEmailSchemas:
 
         with pytest.raises(ValidationError):
             UpdateOwnerEmailRequest(surname="S" * 256)
+
+    def test_update_owner_email_phone_number_only_valid(self):
+        from app.schemas.admin import UpdateOwnerEmailRequest
+
+        req = UpdateOwnerEmailRequest(phone_number="+61412345678")
+        assert req.phone_number == "+61412345678"
+        assert req.email is None
+
+    def test_update_owner_email_phone_number_too_long_raises(self):
+        from pydantic import ValidationError
+        from app.schemas.admin import UpdateOwnerEmailRequest
+
+        with pytest.raises(ValidationError):
+            UpdateOwnerEmailRequest(phone_number="0" * 21)
+
+    def test_add_owner_email_phone_number_accepted(self):
+        from app.schemas.admin import AddOwnerEmailRequest
+
+        req = AddOwnerEmailRequest(email="x@test.com", phone_number="+61400000000")
+        assert req.phone_number == "+61400000000"
+
+    def test_add_owner_email_phone_number_too_long_raises(self):
+        from pydantic import ValidationError
+        from app.schemas.admin import AddOwnerEmailRequest
+
+        with pytest.raises(ValidationError):
+            AddOwnerEmailRequest(email="x@test.com", phone_number="0" * 21)
+
+
+# ---------------------------------------------------------------------------
+# Phone number per LotOwnerEmail (per-contact)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestOwnerEmailPhoneNumber:
+    """phone_number lives on LotOwnerEmail, not LotOwner."""
+
+    # --- Happy path: owner_emails response includes phone_number field ---
+
+    async def test_owner_emails_response_includes_phone_number_field(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """GET /lot-owners/{id} returns phone_number in each owner_emails entry."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN01", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lo, "phn1@test.com", phone_number="+61412345678",)
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/lot-owners/{lo.id}")
+        assert response.status_code == 200
+        data = response.json()
+        entry = data["owner_emails"][0]
+        assert "phone_number" in entry
+        assert entry["phone_number"] == "+61412345678"
+
+    async def test_owner_emails_phone_number_null_when_not_set(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """owner_emails.phone_number is null when not set."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN02", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lo, "phn2@test.com")
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/lot-owners/{lo.id}")
+        assert response.status_code == 200
+        entry = response.json()["owner_emails"][0]
+        assert entry["phone_number"] is None
+
+    async def test_add_owner_email_with_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """POST /owner-emails with phone_number stores it on the email row."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN03", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/admin/lot-owners/{lo.id}/owner-emails",
+            json={"email": "phn3@test.com", "phone_number": "+61499000000"},
+        )
+        assert response.status_code == 201
+        entry = next(
+            (e for e in response.json()["owner_emails"] if e["email"] == "phn3@test.com"),
+            None,
+        )
+        assert entry is not None
+        assert entry["phone_number"] == "+61499000000"
+
+    async def test_add_owner_email_without_phone_number_defaults_to_null(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """POST /owner-emails without phone_number: phone_number is null."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN04", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/admin/lot-owners/{lo.id}/owner-emails",
+            json={"email": "phn4@test.com"},
+        )
+        assert response.status_code == 201
+        entry = response.json()["owner_emails"][0]
+        assert entry["phone_number"] is None
+
+    async def test_update_owner_email_sets_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PATCH /owner-emails/{id} with phone_number updates it."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN05", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        em = await add_person_to_lot(db_session, lo, "phn5@test.com")
+        await db_session.commit()
+        await db_session.refresh(em)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}/owner-emails/{em.id}",
+            json={"phone_number": "+61411111111"},
+        )
+        assert response.status_code == 200
+        entry = next(
+            (e for e in response.json()["owner_emails"] if str(e["id"]) == str(em.id)),
+            None,
+        )
+        assert entry is not None
+        assert entry["phone_number"] == "+61411111111"
+
+    async def test_update_owner_email_clears_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PATCH /owner-emails/{id} with phone_number=null clears it."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN06", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        em = await add_person_to_lot(db_session, lo, "phn6@test.com", phone_number="+61400000000")
+        await db_session.commit()
+        await db_session.refresh(em)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}/owner-emails/{em.id}",
+            json={"phone_number": None},
+        )
+        assert response.status_code == 200
+        entry = next(
+            (e for e in response.json()["owner_emails"] if str(e["id"]) == str(em.id)),
+            None,
+        )
+        assert entry is not None
+        assert entry["phone_number"] is None
+
+    # --- Input validation ---
+
+    async def test_update_owner_email_phone_number_too_long_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PATCH /owner-emails/{id} with phone_number > 20 chars returns 422."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN07", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        em = await add_person_to_lot(db_session, lo, "phn7@test.com")
+        await db_session.commit()
+        await db_session.refresh(em)
+
+        response = await client.patch(
+            f"/api/admin/lot-owners/{lo.id}/owner-emails/{em.id}",
+            json={"phone_number": "0" * 21},
+        )
+        assert response.status_code == 422
+
+    # --- Migration correctness: phone on email row, not lot owner ---
+
+    async def test_lot_owner_has_no_phone_number_field(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """GET /lot-owners/{id} response does not contain a top-level phone_number field."""
+        lo = LotOwner(building_id=building.id, lot_number="PHN08", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/lot-owners/{lo.id}")
+        assert response.status_code == 200
+        assert "phone_number" not in response.json()
+
+
+# ---------------------------------------------------------------------------
+# Coverage: get_or_create_person fill-blanks, lookup_person, update_person 404,
+# remove_person_from_lot 404
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestPersonServiceCoverage:
+    """Targeted tests to reach uncovered branches in admin_service."""
+
+    # --- get_or_create_person fill-blanks: existing person with NULL names ---
+
+    async def test_get_or_create_person_fills_blank_given_name(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """get_or_create_person fills given_name when it is currently NULL."""
+        from app.services.admin_service import get_or_create_person as svc_goc
+        # Create person with no name
+        p = await svc_goc("fillblank_gn@test.com", db_session)
+        assert p.given_name is None
+        # Call again with a name — should fill in
+        p2 = await svc_goc("fillblank_gn@test.com", db_session, given_name="Alice")
+        assert p2.given_name == "Alice"
+        assert p2.id == p.id
+
+    async def test_get_or_create_person_fills_blank_surname(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """get_or_create_person fills surname when it is currently NULL."""
+        from app.services.admin_service import get_or_create_person as svc_goc
+        p = await svc_goc("fillblank_sn@test.com", db_session)
+        assert p.surname is None
+        p2 = await svc_goc("fillblank_sn@test.com", db_session, surname="Smith")
+        assert p2.surname == "Smith"
+        assert p2.id == p.id
+
+    # --- lookup_person endpoint ---
+
+    async def test_lookup_person_returns_person_when_found(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """GET /api/admin/persons/lookup returns person when email matches."""
+        lo = LotOwner(building_id=building.id, lot_number="LKUP1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lo, "lookup_found@test.com")
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/admin/persons/lookup",
+            params={"email": "lookup_found@test.com"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["email"] == "lookup_found@test.com"
+
+    async def test_lookup_person_returns_404_when_not_found(
+        self, client: AsyncClient
+    ):
+        """GET /api/admin/persons/lookup returns 404 when email is not in DB."""
+        response = await client.get(
+            "/api/admin/persons/lookup",
+            params={"email": "nobody_here@test.com"},
+        )
+        assert response.status_code == 404
+
+    # --- update_person 404 ---
+
+    async def test_update_person_returns_404_for_nonexistent_id(
+        self, client: AsyncClient
+    ):
+        """PATCH /api/admin/persons/{id} returns 404 for an unknown person ID."""
+        response = await client.patch(
+            f"/api/admin/persons/{uuid.uuid4()}",
+            json={"given_name": "Ghost"},
+        )
+        assert response.status_code == 404
+
+    # --- remove_person_from_lot 404: person not linked to lot ---
+
+    async def test_remove_owner_email_from_wrong_lot_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """DELETE /lot-owners/{id}/owner-emails/{eid} returns 404 when person not linked to lot."""
+        lo1 = LotOwner(building_id=building.id, lot_number="RMWL1", unit_entitlement=100)
+        lo2 = LotOwner(building_id=building.id, lot_number="RMWL2", unit_entitlement=100)
+        db_session.add(lo1)
+        db_session.add(lo2)
+        await db_session.flush()
+        em2 = await add_person_to_lot(db_session, lo2, "rmwl_other@test.com")
+        await db_session.commit()
+
+        # Try to delete lo2's person via lo1's URL
+        response = await client.delete(
+            f"/api/admin/lot-owners/{lo1.id}/owner-emails/{em2.id}",
+        )
+        assert response.status_code == 404
+
+    # --- remove_email_from_lot_owner 404: email exists as Person but not linked to lot ---
+
+    async def test_remove_email_by_string_not_linked_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """DELETE /lot-owners/{id}/emails/{email} returns 404 when email exists but is not linked to lot."""
+        lo1 = LotOwner(building_id=building.id, lot_number="RMEL1", unit_entitlement=100)
+        lo2 = LotOwner(building_id=building.id, lot_number="RMEL2", unit_entitlement=100)
+        db_session.add(lo1)
+        db_session.add(lo2)
+        await db_session.flush()
+        # Email is linked to lo2, NOT lo1
+        await add_person_to_lot(db_session, lo2, "rmel_other@test.com")
+        await db_session.commit()
+
+        # Try to remove lo2's email via lo1's URL
+        response = await client.delete(
+            f"/api/admin/lot-owners/{lo1.id}/emails/rmel_other@test.com",
+        )
+        assert response.status_code == 404
+
+    # --- update_person happy path (covers router line 770) ---
+
+    async def test_update_person_returns_updated_person(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PATCH /api/admin/persons/{id} updates the person and returns PersonOut."""
+        from app.models.person import Person
+
+        person = Person(email="upd_person_hp@test.com", given_name="Old", surname="Name")
+        db_session.add(person)
+        await db_session.commit()
+        await db_session.refresh(person)
+
+        response = await client.patch(
+            f"/api/admin/persons/{person.id}",
+            json={"given_name": "New", "surname": "Updated"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["given_name"] == "New"
+        assert body["surname"] == "Updated"
+
+    # --- remove_person_from_lot happy path (covers router lines 783-784) ---
+
+    async def test_remove_person_from_lot_returns_lot_owner(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """DELETE /lot-owners/{id}/persons/{pid} removes the person link and returns LotOwnerOut."""
+        lo = LotOwner(building_id=building.id, lot_number="RPLHP1", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        person = await add_person_to_lot(db_session, lo, "rplhp_voter@test.com")
+        await db_session.commit()
+
+        response = await client.delete(
+            f"/api/admin/lot-owners/{lo.id}/persons/{person.id}",
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["id"] == str(lo.id)
+        # Person was removed — persons list should be empty
+        assert body["persons"] == []
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/persons/search — prefix search
+# ---------------------------------------------------------------------------
+
+
+class TestSearchPersons:
+    # --- Happy path ---
+
+    async def test_search_returns_matching_persons(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """GET /api/admin/persons/search?q=srch returns persons whose email starts with the prefix."""
+        p1 = Person(email="srch_alpha@test.com", given_name="Alpha", surname="Test")
+        p2 = Person(email="srch_beta@test.com", given_name="Beta", surname="Test")
+        p3 = Person(email="other_unrelated@test.com")
+        db_session.add_all([p1, p2, p3])
+        await db_session.commit()
+
+        response = await client.get("/api/admin/persons/search", params={"q": "srch_"})
+        assert response.status_code == 200
+        data = response.json()
+        emails = [p["email"] for p in data]
+        assert "srch_alpha@test.com" in emails
+        assert "srch_beta@test.com" in emails
+        assert "other_unrelated@test.com" not in emails
+
+    async def test_search_returns_empty_list_when_no_match(
+        self, client: AsyncClient
+    ):
+        """GET /api/admin/persons/search?q=nomatch returns []."""
+        response = await client.get("/api/admin/persons/search", params={"q": "zzz_nomatch_xyz_"})
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_search_respects_limit(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """GET /api/admin/persons/search?q=lim&limit=1 returns at most 1 result."""
+        p1 = Person(email="lim_one@test.com")
+        p2 = Person(email="lim_two@test.com")
+        db_session.add_all([p1, p2])
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/admin/persons/search", params={"q": "lim_", "limit": 1}
+        )
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+
+    async def test_search_is_case_insensitive(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """GET /api/admin/persons/search?q=UPPER_CI matches lowercase-stored emails."""
+        p = Person(email="upper_ci_test@test.com")
+        db_session.add(p)
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/admin/persons/search", params={"q": "UPPER_CI"}
+        )
+        assert response.status_code == 200
+        emails = [r["email"] for r in response.json()]
+        assert "upper_ci_test@test.com" in emails
+
+    async def test_search_returns_full_person_fields(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Search results include id, email, given_name, surname, phone_number."""
+        p = Person(
+            email="srch_full@test.com",
+            given_name="Full",
+            surname="Person",
+            phone_number="+61400000001",
+        )
+        db_session.add(p)
+        await db_session.commit()
+
+        response = await client.get(
+            "/api/admin/persons/search", params={"q": "srch_full"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+        match = next(r for r in data if r["email"] == "srch_full@test.com")
+        assert match["given_name"] == "Full"
+        assert match["surname"] == "Person"
+        assert match["phone_number"] == "+61400000001"
+
+    # --- Input validation ---
+
+    async def test_search_missing_q_returns_422(self, client: AsyncClient):
+        """GET /api/admin/persons/search without q returns 422."""
+        response = await client.get("/api/admin/persons/search")
+        assert response.status_code == 422
+
+    async def test_search_limit_above_20_returns_422(self, client: AsyncClient):
+        """GET /api/admin/persons/search?q=x&limit=21 returns 422 (max is 20)."""
+        response = await client.get(
+            "/api/admin/persons/search", params={"q": "x", "limit": 21}
+        )
+        assert response.status_code == 422
+
+    async def test_search_empty_q_returns_422(self, client: AsyncClient):
+        """GET /api/admin/persons/search?q= returns 422 (min_length=1)."""
+        response = await client.get("/api/admin/persons/search", params={"q": ""})
+        assert response.status_code == 422
+
+    async def test_search_whitespace_only_q_returns_empty_list(
+        self, client: AsyncClient
+    ):
+        """GET /api/admin/persons/search?q= (whitespace) returns [] (service early-return path)."""
+        response = await client.get("/api/admin/persons/search", params={"q": " "})
+        assert response.status_code == 200
+        assert response.json() == []
+
+
+# ---------------------------------------------------------------------------
+# proxy_phone_number in responses (new LotOwnerOut field)
+# ---------------------------------------------------------------------------
+
+
+class TestProxyPhoneNumber:
+    # --- Happy path ---
+
+    async def test_set_proxy_with_phone_returns_proxy_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PUT /lot-owners/{id}/proxy with phone_number fills proxy_phone_number in response."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN01", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.put(
+            f"/api/admin/lot-owners/{lo.id}/proxy",
+            json={"proxy_email": "pphn@test.com", "phone_number": "+61400000002"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["proxy_email"] == "pphn@test.com"
+        assert data["proxy_phone_number"] == "+61400000002"
+
+    async def test_set_proxy_without_phone_returns_null_proxy_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """PUT /lot-owners/{id}/proxy without phone_number returns proxy_phone_number=null."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN02", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        response = await client.put(
+            f"/api/admin/lot-owners/{lo.id}/proxy",
+            json={"proxy_email": "pphn_nophone@test.com"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["proxy_phone_number"] is None
+
+    async def test_get_lot_owner_returns_proxy_phone_number_when_set(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """GET /lot-owners/{id} includes proxy_phone_number when proxy person has a phone."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN03", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        person = Person(email="pphn_get@test.com", phone_number="+61400000003")
+        db_session.add(person)
+        await db_session.flush()
+        db_session.add(LotProxy(lot_id=lo.id, person_id=person.id))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/lot-owners/{lo.id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["proxy_phone_number"] == "+61400000003"
+
+    async def test_list_lot_owners_includes_proxy_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """GET /buildings/{id}/lot-owners includes proxy_phone_number for lots with proxy."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN04", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        person = Person(email="pphn_list@test.com", phone_number="+61400000004")
+        db_session.add(person)
+        await db_session.flush()
+        db_session.add(LotProxy(lot_id=lo.id, person_id=person.id))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        assert response.status_code == 200
+        owners = response.json()
+        target = next(o for o in owners if o["lot_number"] == "PPHN04")
+        assert target["proxy_phone_number"] == "+61400000004"
+
+    async def test_proxy_phone_not_overwritten_when_already_set(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """Fill-blanks: proxy phone not overwritten when person.phone_number already has a value."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN05", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.commit()
+
+        # First set: fill phone
+        r1 = await client.put(
+            f"/api/admin/lot-owners/{lo.id}/proxy",
+            json={"proxy_email": "pphn_nowrit@test.com", "phone_number": "+61400000005"},
+        )
+        assert r1.status_code == 200
+
+        # Second set (same person): try to overwrite phone
+        r2 = await client.put(
+            f"/api/admin/lot-owners/{lo.id}/proxy",
+            json={"proxy_email": "pphn_nowrit@test.com", "phone_number": "+61400000099"},
+        )
+        assert r2.status_code == 200
+        # Phone should still be the original value (fill-blanks policy)
+        assert r2.json()["proxy_phone_number"] == "+61400000005"
+
+    async def test_remove_proxy_returns_null_proxy_phone_number(
+        self, client: AsyncClient, db_session: AsyncSession, building: Building
+    ):
+        """DELETE /lot-owners/{id}/proxy returns proxy_phone_number=null after removal."""
+        lo = LotOwner(building_id=building.id, lot_number="PPHN06", unit_entitlement=100)
+        db_session.add(lo)
+        await db_session.flush()
+        person = Person(email="pphn_del@test.com", phone_number="+61400000006")
+        db_session.add(person)
+        await db_session.flush()
+        db_session.add(LotProxy(lot_id=lo.id, person_id=person.id))
+        await db_session.commit()
+
+        response = await client.delete(f"/api/admin/lot-owners/{lo.id}/proxy")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["proxy_phone_number"] is None

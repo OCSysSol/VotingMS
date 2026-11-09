@@ -26,10 +26,13 @@ from app.services.email_service import EmailService
 from app.schemas.admin import (
     AddEmailRequest,
     AddOwnerEmailRequest,
+    PersonOut,
     UpdateOwnerEmailRequest,
+    UpdatePersonRequest,
     AdminUserInviteRequest,
     AdminUserListOut,
     AdminUserOut,
+    BallotVerifyOut,
     GeneralMeetingBallotResetOut,
     GeneralMeetingCloseOut,
     GeneralMeetingCreate,
@@ -63,9 +66,24 @@ from app.schemas.admin import (
     ProxyImportResult,
     ResendReportOut,
     SetProxyRequest,
+    GeneralMeetingUpdate,
+    GeneralMeetingUpdateOut,
 )
-from app.schemas.config import FaviconUploadOut, LogoUploadOut, SmtpConfigOut, SmtpConfigUpdate, SmtpStatusOut, TenantConfigOut, TenantConfigUpdate
+from app.schemas.config import (
+    FaviconUploadOut,
+    LogoUploadOut,
+    SmtpConfigOut,
+    SmtpConfigUpdate,
+    SmtpStatusOut,
+    SmsConfigOut,
+    SmsConfigUpdate,
+    SmsTestRequest,
+    TenantConfigOut,
+    TenantConfigUpdate,
+)
+from app.services.sms_service import SmsDeliveryError, send as sms_send
 from app.services import admin_service
+from app.services.voting_service import compute_ballot_hash
 from app.services import config_service
 from app.services import smtp_config_service
 from app.services import blob_service
@@ -82,6 +100,7 @@ from app.rate_limiter import (
     admin_invite_limiter,
     get_client_ip,
     provision_limiter,
+    sms_test_rate_limiter,
     smtp_test_rate_limiter,
 )
 
@@ -310,8 +329,9 @@ async def import_buildings(
     request: Request,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
 ) -> BuildingImportResult:
-    admin_import_limiter.check("admin")
+    admin_import_limiter.check(current_user.user_id)
     fmt = _detect_file_format(file)
     content = await file.read()
     if len(content) > _MAX_IMPORT_BYTES:
@@ -340,6 +360,7 @@ async def create_building(
 
 
 _VALID_BUILDINGS_SORT_BY = {"name", "manager_email", "created_at"}
+_VALID_LOT_OWNERS_SORT_BY = {"lot_number", "unit_entitlement", "financial_position", "email", "proxy_email"}
 _VALID_SORT_DIRS = {"asc", "desc"}
 
 
@@ -500,9 +521,17 @@ async def list_lot_owners(
     building_id: uuid.UUID,
     limit: int = Query(default=20, le=1000),
     offset: int = Query(default=0, ge=0),
+    sort_by: str | None = Query(None),
+    sort_dir: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
-    owners = await admin_service.list_lot_owners(building_id, db, limit=limit, offset=offset)
+    if sort_by is not None and sort_by not in _VALID_LOT_OWNERS_SORT_BY:
+        raise HTTPException(status_code=400, detail="Invalid sort_by value")
+    if sort_dir is not None and sort_dir not in _VALID_SORT_DIRS:
+        raise HTTPException(status_code=400, detail="Invalid sort_dir value")
+    owners = await admin_service.list_lot_owners(
+        building_id, db, limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir
+    )
     return [LotOwnerOut(**o) for o in owners]
 
 
@@ -525,8 +554,9 @@ async def import_lot_owners(
     building_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
 ) -> LotOwnerImportResult:
-    admin_import_limiter.check("admin")
+    admin_import_limiter.check(current_user.user_id)
     fmt = _detect_file_format(file)
     content = await file.read()
     if len(content) > _MAX_IMPORT_BYTES:
@@ -551,8 +581,9 @@ async def import_proxy_nominations(
     building_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
 ) -> ProxyImportResult:
-    admin_import_limiter.check("admin")
+    admin_import_limiter.check(current_user.user_id)
     fmt = _detect_file_format(file)
     content = await file.read()
     if len(content) > _MAX_IMPORT_BYTES:
@@ -577,8 +608,9 @@ async def import_financial_positions(
     building_id: uuid.UUID,
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
 ) -> FinancialPositionImportResult:
-    admin_import_limiter.check("admin")
+    admin_import_limiter.check(current_user.user_id)
     fmt = _detect_file_format(file)
     content = await file.read()
     if len(content) > _MAX_IMPORT_BYTES:
@@ -671,9 +703,12 @@ async def add_owner_email_to_lot_owner(
     data: AddOwnerEmailRequest,
     db: AsyncSession = Depends(get_db),
 ) -> LotOwnerOut:
-    """Add an owner email (with optional name) to a lot owner."""
+    """Add an owner email (person) to a lot owner."""
     owner = await admin_service.add_owner_email_to_lot_owner(
-        lot_owner_id, data.email, data.given_name, data.surname, db
+        lot_owner_id, data.email, db,
+        given_name=data.given_name,
+        surname=data.surname,
+        phone_number=data.phone_number,
     )
     return LotOwnerOut(**owner)
 
@@ -689,9 +724,21 @@ async def update_owner_email(
     data: UpdateOwnerEmailRequest,
     db: AsyncSession = Depends(get_db),
 ) -> LotOwnerOut:
-    """Update the email address and/or name on an owner email record."""
+    """Update the email address, name, and/or phone on an owner email record."""
+    # phone_number=None in the request body means "no change requested" unless it is
+    # explicitly supplied as null.  We detect explicit null by checking the raw request
+    # dict (model_fields_set is not available on model_validate from dict in all Pydantic
+    # versions, so we use __pydantic_fields_set__).
+    phone_set = "phone_number" in data.model_fields_set
     owner = await admin_service.update_owner_email(
-        lot_owner_id, email_id, data.email, data.given_name, data.surname, db
+        lot_owner_id,
+        email_id,
+        data.email,
+        data.given_name,
+        data.surname,
+        db,
+        phone_number=data.phone_number if (phone_set and data.phone_number is not None) else None,
+        clear_phone=(phone_set and data.phone_number is None),
     )
     return LotOwnerOut(**owner)
 
@@ -711,6 +758,63 @@ async def remove_owner_email_by_id(
     return LotOwnerOut(**owner)
 
 
+@router.get(
+    "/persons/search",
+    response_model=list[PersonOut],
+)
+async def search_persons(
+    q: str = Query(..., min_length=1, max_length=254),
+    limit: int = Query(default=10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+) -> list[PersonOut]:
+    """Prefix-search persons by email. Returns up to `limit` (max 20) matches."""
+    persons = await admin_service.search_persons(q, db, limit=limit)
+    return [PersonOut.model_validate(p) for p in persons]
+
+
+@router.get(
+    "/persons/lookup",
+    response_model=PersonOut,
+)
+async def lookup_person(
+    email: str,
+    db: AsyncSession = Depends(get_db),
+) -> PersonOut:
+    """Look up a person by email address. Returns 404 if not found."""
+    person = await admin_service.lookup_person(email, db)
+    if person is None:
+        raise HTTPException(status_code=404, detail="Person not found")
+    return PersonOut.model_validate(person)
+
+
+@router.patch(
+    "/persons/{person_id}",
+    response_model=PersonOut,
+)
+async def update_person(
+    person_id: uuid.UUID,
+    data: UpdatePersonRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PersonOut:
+    """Update name, email, and/or phone on a person row."""
+    person = await admin_service.update_person(person_id, data, db)
+    return PersonOut.model_validate(person)
+
+
+@router.delete(
+    "/lot-owners/{lot_owner_id}/persons/{person_id}",
+    response_model=LotOwnerOut,
+)
+async def remove_person_from_lot(
+    lot_owner_id: uuid.UUID,
+    person_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> LotOwnerOut:
+    """Remove a person from a lot by person_id."""
+    owner = await admin_service.remove_person_from_lot(lot_owner_id, person_id, db)
+    return LotOwnerOut(**owner)
+
+
 @router.put(
     "/lot-owners/{lot_owner_id}/proxy",
     response_model=LotOwnerOut,
@@ -723,7 +827,9 @@ async def set_lot_owner_proxy(
     """Set or replace the proxy nomination for a lot owner."""
     owner = await admin_service.set_lot_owner_proxy(
         lot_owner_id, data.proxy_email, db,
-        given_name=data.given_name, surname=data.surname,
+        given_name=data.given_name,
+        surname=data.surname,
+        phone_number=data.phone_number,
     )
     return LotOwnerOut(**owner)
 
@@ -870,7 +976,7 @@ async def create_general_meeting(
     return GeneralMeetingOut(**meeting_dict)
 
 
-_VALID_MEETINGS_SORT_BY = {"title", "created_at", "meeting_at", "voting_closes_at", "status"}
+_VALID_MEETINGS_SORT_BY = {"title", "created_at", "meeting_at", "voting_closes_at", "status", "building_name"}
 
 
 @router.get("/general-meetings", response_model=list[GeneralMeetingListItem])
@@ -918,6 +1024,31 @@ async def get_general_meeting_detail(
     return GeneralMeetingDetail(**detail)
 
 
+@router.patch(
+    "/general-meetings/{general_meeting_id}",
+    response_model=GeneralMeetingUpdateOut,
+)
+async def update_general_meeting(
+    general_meeting_id: uuid.UUID,
+    data: GeneralMeetingUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingUpdateOut:
+    """Update the voting_closes_at timestamp for a non-closed meeting.
+
+    Returns 404 if the meeting does not exist.
+    Returns 409 if the meeting is already closed.
+    Returns 422 if voting_closes_at is not strictly after meeting_at.
+    """
+    meeting = await admin_service.update_general_meeting(general_meeting_id, data, db)
+    effective = get_effective_status(meeting)
+    effective_str = effective.value if hasattr(effective, "value") else effective
+    return GeneralMeetingUpdateOut(
+        id=meeting.id,
+        status=effective_str,
+        voting_closes_at=meeting.voting_closes_at,
+    )
+
+
 @router.put(
     "/general-meetings/{general_meeting_id}/motions/reorder",
     response_model=MotionReorderOut,
@@ -961,8 +1092,9 @@ async def close_general_meeting(
     general_meeting_id: uuid.UUID,
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
 ) -> GeneralMeetingCloseOut:
-    admin_close_limiter.check("admin")
+    admin_close_limiter.check(current_user.user_id)
     meeting = await admin_service.close_general_meeting(general_meeting_id, db)
     email_service = EmailService()
     base_url = str(request.base_url).rstrip("/")
@@ -1046,10 +1178,64 @@ async def enter_votes_for_meeting(
     Returns 422 if unknown lot_owner_ids or invalid votes are provided.
     """
     result = await admin_service.enter_votes_for_meeting(
-        general_meeting_id, data, db, admin_username=admin_user.email
+        general_meeting_id, data, db, admin_username=admin_user.email, admin_user_id=admin_user.user_id
     )
     return AdminVoteEntryResult(**result)
 
+
+
+
+@router.get(
+    "/general-meetings/{general_meeting_id}/verify-ballot/{ballot_id}",
+    response_model=BallotVerifyOut,
+)
+async def verify_ballot(
+    general_meeting_id: uuid.UUID,
+    ballot_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: BetterAuthUser = Depends(require_admin),
+) -> BallotVerifyOut:
+    """Verify the cryptographic hash of a submitted ballot (CODE-3).
+
+    Recomputes the hash from Vote rows and compares to the stored hash.
+    Returns 404 if the ballot does not exist for this meeting.
+    """
+    from sqlalchemy import select as _select
+    from app.models.ballot_submission import BallotSubmission as _BallotSubmission
+    from app.models.vote import Vote as _Vote, VoteStatus as _VoteStatus
+
+    sub_result = await db.execute(
+        _select(_BallotSubmission).where(
+            _BallotSubmission.id == ballot_id,
+            _BallotSubmission.general_meeting_id == general_meeting_id,
+        )
+    )
+    submission = sub_result.scalar_one_or_none()
+    if submission is None:
+        raise HTTPException(status_code=404, detail="Ballot not found")
+
+    votes_result = await db.execute(
+        _select(_Vote).where(
+            _Vote.general_meeting_id == general_meeting_id,
+            _Vote.lot_owner_id == submission.lot_owner_id,
+            _Vote.status == _VoteStatus.submitted,
+        )
+    )
+    votes = list(votes_result.scalars().all())
+
+    vote_choices = [
+        (str(v.motion_id), v.choice.value if v.choice else "none")
+        for v in votes
+    ]
+    computed = compute_ballot_hash(general_meeting_id, submission.lot_owner_id, vote_choices)
+    verified = computed == submission.ballot_hash
+
+    return BallotVerifyOut(
+        verified=verified,
+        ballot_id=ballot_id,
+        computed_hash=computed,
+        stored_hash=submission.ballot_hash,
+    )
 
 # ---------------------------------------------------------------------------
 # Tenant configuration
@@ -1222,6 +1408,65 @@ async def test_smtp_config(body: SmtpTestRequest, db: AsyncSession = Depends(get
             status_code=400,
             detail="SMTP connection test failed. Check settings and try again.",
         ) from exc
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# SMS configuration
+# ---------------------------------------------------------------------------
+
+
+def _check_sms_test_rate_limit() -> None:
+    """Raise 429 if more than 5 calls to /config/sms/test occurred in the last 60s."""
+    try:
+        sms_test_rate_limiter.check("sms_test")
+    except HTTPException as exc:
+        raise HTTPException(status_code=429, detail="Rate limit exceeded: max 5 test SMS per minute") from exc
+
+
+@router.get("/config/sms", response_model=SmsConfigOut)
+async def get_sms_config(db: AsyncSession = Depends(get_db)) -> SmsConfigOut:
+    """Return current SMS config — secrets are never included in the response."""
+    config = await smtp_config_service.get_smtp_config(db)
+    return smtp_config_service.build_sms_config_out(config)
+
+
+@router.put("/config/sms", response_model=SmsConfigOut)
+async def update_sms_config(
+    data: SmsConfigUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> SmsConfigOut:
+    """Save SMS configuration. Secrets are encrypted at rest."""
+    config = await smtp_config_service.update_sms_config(data, db)
+    return smtp_config_service.build_sms_config_out(config)
+
+
+@router.post("/config/sms/test")
+async def test_sms_config(body: SmsTestRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    """Send a test SMS to the supplied phone number using the current SMS configuration.
+
+    Rate limited to 5 requests per minute.
+    Returns {"ok": true} on success.
+    Returns 503 if SMS is not configured.
+    Returns 502 on delivery failure.
+    """
+    _check_sms_test_rate_limit()
+
+    config = await smtp_config_service.get_smtp_config(db)
+    if not config.sms_enabled or not config.sms_provider:
+        raise HTTPException(status_code=503, detail="SMS is not configured")
+
+    sms_kwargs = smtp_config_service.get_sms_send_kwargs(config)
+    try:
+        await sms_send(
+            to=body.to,
+            message="This is a test SMS from AGM Voting.",
+            **sms_kwargs,
+        )
+    except SmsDeliveryError as exc:
+        logger.error("sms_test_failed", error=str(exc))
+        raise HTTPException(status_code=502, detail="SMS delivery failed") from exc
 
     return {"ok": True}
 

@@ -1,16 +1,16 @@
 """
-SQLAlchemy model for the singleton SMTP configuration row.
+SQLAlchemy model for the singleton SMTP + SMS configuration row.
 
 The table enforces a single row via a CHECK constraint (id = 1).
-The smtp_password_enc column stores the AES-256-GCM encrypted password;
-it is never returned to clients.
+Encrypted fields (smtp_password_enc, sms_*_enc) store AES-256-GCM ciphertext;
+they are never returned to clients.
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import CheckConstraint, DateTime, Integer, String, func
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -32,3 +32,19 @@ class TenantSmtpConfig(Base):
         onupdate=func.now(),
         nullable=False,
     )
+
+    # SMS configuration fields
+    sms_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    sms_provider: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    sms_from_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    sms_webhook_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sms_webhook_secret_enc: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sms_smtp2go_api_key_enc: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sms_twilio_account_sid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sms_twilio_auth_token_enc: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sms_twilio_from_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    sms_clicksend_username: Mapped[Optional[str]] = mapped_column(String(254), nullable=True)
+    sms_clicksend_api_key_enc: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    sms_clicksend_from_number: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)

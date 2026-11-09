@@ -31,11 +31,13 @@ from app.models import (
     VoteStatus,
     get_effective_status,
 )
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
+from app.models.person import Person
 
 # Helpers and fixtures (make_csv, make_excel, meeting_dt, closing_dt, client, building)
 # are defined in conftest.py and automatically available to all test modules.
-from tests.conftest import meeting_dt, closing_dt
+from tests.conftest import meeting_dt, closing_dt, add_person_to_lot, get_or_create_person
 
 # ---------------------------------------------------------------------------
 # POST /api/admin/general-meetings
@@ -103,8 +105,7 @@ class TestCreateAGM:
         weight_list = list(weights.scalars().all())
         assert len(weight_list) == 1
         assert weight_list[0].unit_entitlement_snapshot == 123
-        # No voter_email on snapshot anymore
-        assert weight_list[0].lot_owner_id == lo.id
+        assert weight_list[0].lot_id == lo.id
 
     async def test_agm_with_multiple_motions(
         self, client: AsyncClient, db_session: AsyncSession
@@ -1209,10 +1210,10 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         # Add emails
-        db_session.add(LotOwnerEmail(lot_owner_id=lo1.id, email="yes@test.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo2.id, email="no@test.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo3.id, email="abs@test.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo4.id, email="absent@test.com"))
+        await add_person_to_lot(db_session, lo1, "yes@test.com")
+        await add_person_to_lot(db_session, lo2, "no@test.com")
+        await add_person_to_lot(db_session, lo3, "abs@test.com")
+        await add_person_to_lot(db_session, lo4, "absent@test.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1233,7 +1234,7 @@ class TestGetGeneralMeetingDetail:
         for lo in [lo1, lo2, lo3, lo4]:
             w = GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             )
             db_session.add(w)
@@ -1367,7 +1368,7 @@ class TestGetGeneralMeetingDetail:
 
         w = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         )
         db_session.add(w)
@@ -1401,8 +1402,7 @@ class TestGetGeneralMeetingDetail:
         )
         db_session.add(lo)
         await db_session.flush()
-        lo_email = LotOwnerEmail(lot_owner_id=lo.id, email="snap_tally@test.com")
-        db_session.add(lo_email)
+        await add_person_to_lot(db_session, lo, "snap_tally@test.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1422,7 +1422,7 @@ class TestGetGeneralMeetingDetail:
         # Snapshot at 500
         w = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=500,
         )
         db_session.add(w)
@@ -1465,8 +1465,8 @@ class TestGetGeneralMeetingDetail:
         lo2 = LotOwner(building_id=b.id, lot_number="TL2", unit_entitlement=200)
         db_session.add_all([lo1, lo2])
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo1.id, email="twolots@test.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo2.id, email="twolots@test.com"))
+        await add_person_to_lot(db_session, lo1, "twolots@test.com")
+        await add_person_to_lot(db_session, lo2, "twolots@test.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1486,7 +1486,7 @@ class TestGetGeneralMeetingDetail:
         for lo in [lo1, lo2]:
             w = GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             )
             db_session.add(w)
@@ -1546,7 +1546,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         for i, lo in enumerate(owners):
-            db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email=f"yes{i}@test.com"))
+            await add_person_to_lot(db_session, lo, f"yes{i}@test.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1566,7 +1566,7 @@ class TestGetGeneralMeetingDetail:
         for i, lo in enumerate(owners):
             w = GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             )
             db_session.add(w)
@@ -1610,7 +1610,7 @@ class TestGetGeneralMeetingDetail:
         )
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="nullchoice@test.com"))
+        await add_person_to_lot(db_session, lo, "nullchoice@test.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1629,7 +1629,7 @@ class TestGetGeneralMeetingDetail:
 
         w = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         )
         db_session.add(w)
@@ -1709,7 +1709,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         # Add an email so the batch fallback email query returns rows (covers line 1350-1351)
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="ef_voter@test.com"))
+        await add_person_to_lot(db_session, lo, "ef_voter@test.com")
 
         agm = GeneralMeeting(
             building_id=b.id,
@@ -1749,8 +1749,8 @@ class TestGetGeneralMeetingDetail:
         db_session.add_all([lo_normal, lo_arrear])
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo_normal.id, email="normal@ne.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo_arrear.id, email="arrear@ne.com"))
+        await add_person_to_lot(db_session, lo_normal, "normal@ne.com")
+        await add_person_to_lot(db_session, lo_arrear, "arrear@ne.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1770,7 +1770,7 @@ class TestGetGeneralMeetingDetail:
         for lo in [lo_normal, lo_arrear]:
             db_session.add(GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             ))
         await db_session.flush()
@@ -1822,7 +1822,7 @@ class TestGetGeneralMeetingDetail:
         lo = LotOwner(building_id=b.id, lot_number="RR403-1", unit_entitlement=75)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="against@rr403.com"))
+        await add_person_to_lot(db_session, lo, "against@rr403.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1843,7 +1843,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=75,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=75,
         ))
         await db_session.flush()
 
@@ -1882,10 +1882,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(
-            lot_owner_id=lo.id, email="jane@vn.com",
-            given_name="Jane", surname="Smith",
-        ))
+        await add_person_to_lot(db_session, lo, "jane@vn.com", given_name="Jane", surname="Smith")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1903,7 +1900,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=50,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=50,
         ))
         db_session.add(Vote(
             general_meeting_id=agm.id, motion_id=motion.id,
@@ -1936,7 +1933,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         # No given_name or surname set
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="anon@vn.com"))
+        await add_person_to_lot(db_session, lo, "anon@vn.com")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -1954,7 +1951,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=40,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=40,
         ))
         db_session.add(Vote(
             general_meeting_id=agm.id, motion_id=motion.id,
@@ -1986,10 +1983,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(
-            lot_owner_id=lo.id, email="fallback@vn.com",
-            given_name="Bob", surname="Jones",
-        ))
+        await add_person_to_lot(db_session, lo, "fallback@vn.com", given_name="Bob", surname="Jones")
         await db_session.flush()
 
         # No GeneralMeetingLotWeight rows — forces the fallback path
@@ -2041,16 +2035,12 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         # Lot owner has a regular email (different from the proxy)
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="owner@vp.com"))
+        await add_person_to_lot(db_session, lo, "owner@vp.com")
         await db_session.flush()
 
         # Proxy record with a name
-        proxy = LotProxy(
-            lot_owner_id=lo.id,
-            proxy_email="alice_proxy@vp.com",
-            given_name="Alice",
-            surname="Brown",
-        )
+        _proxy_alice = await get_or_create_person(db_session, "alice_proxy@vp.com", given_name="Alice", surname="Brown")
+        proxy = LotProxy(lot_id=lo.id, person_id=_proxy_alice.id)
         db_session.add(proxy)
         await db_session.flush()
 
@@ -2069,7 +2059,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=30,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=30,
         ))
         # For proxy submissions voter_email holds the proxy's email; proxy_email is also set.
         db_session.add(Vote(
@@ -2103,16 +2093,12 @@ class TestGetGeneralMeetingDetail:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="owner2@vp.com"))
+        await add_person_to_lot(db_session, lo, "owner2@vp.com")
         await db_session.flush()
 
         # Proxy record without a name
-        proxy = LotProxy(
-            lot_owner_id=lo.id,
-            proxy_email="noname_proxy@vp.com",
-            given_name=None,
-            surname=None,
-        )
+        _proxy_noname = await get_or_create_person(db_session, "noname_proxy@vp.com")
+        proxy = LotProxy(lot_id=lo.id, person_id=_proxy_noname.id)
         db_session.add(proxy)
         await db_session.flush()
 
@@ -2131,7 +2117,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=20,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=20,
         ))
         db_session.add(Vote(
             general_meeting_id=agm.id, motion_id=motion.id,
@@ -2164,15 +2150,11 @@ class TestGetGeneralMeetingDetail:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="fbowner@vp.com"))
+        await add_person_to_lot(db_session, lo, "fbowner@vp.com")
         await db_session.flush()
 
-        proxy = LotProxy(
-            lot_owner_id=lo.id,
-            proxy_email="fbproxy@vp.com",
-            given_name="Carol",
-            surname="White",
-        )
+        _proxy_carol = await get_or_create_person(db_session, "fbproxy@vp.com", given_name="Carol", surname="White")
+        proxy = LotProxy(lot_id=lo.id, person_id=_proxy_carol.id)
         db_session.add(proxy)
         await db_session.flush()
 
@@ -2231,14 +2213,8 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         # Two co-owners, each with a name
-        db_session.add(LotOwnerEmail(
-            lot_owner_id=lo.id, email="owner_a@cove.com",
-            given_name="Alice", surname="Alpha",
-        ))
-        db_session.add(LotOwnerEmail(
-            lot_owner_id=lo.id, email="owner_b@cove.com",
-            given_name="Bob", surname="Beta",
-        ))
+        await add_person_to_lot(db_session, lo, "owner_a@cove.com", given_name="Alice", surname="Alpha")
+        await add_person_to_lot(db_session, lo, "owner_b@cove.com", given_name="Bob", surname="Beta")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -2258,7 +2234,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=60,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=60,
         ))
         # Motion 1 voted by owner A
         db_session.add(Vote(
@@ -2311,10 +2287,7 @@ class TestGetGeneralMeetingDetail:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(
-            lot_owner_id=lo.id, email="solo@sve.com",
-            given_name="Solo", surname="Voter",
-        ))
+        await add_person_to_lot(db_session, lo, "solo@sve.com", given_name="Solo", surname="Voter")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -2332,7 +2305,7 @@ class TestGetGeneralMeetingDetail:
         await db_session.flush()
 
         db_session.add(GeneralMeetingLotWeight(
-            general_meeting_id=agm.id, lot_owner_id=lo.id, unit_entitlement_snapshot=40,
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=40,
         ))
         db_session.add(Vote(
             general_meeting_id=agm.id, motion_id=motion.id,
@@ -2664,13 +2637,11 @@ class TestMeetingStatusTransition:
         db_session.add(b)
         await db_session.flush()
 
-        from app.models.lot_owner_email import LotOwnerEmail
         lo = LotOwner(building_id=b.id, lot_number="T01", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
 
-        email = LotOwnerEmail(lot_owner_id=lo.id, email="voter.trans@test.com")
-        db_session.add(email)
+        await add_person_to_lot(db_session, lo, "voter.trans@test.com")
 
         agm = GeneralMeeting(
             building_id=b.id,
@@ -2684,7 +2655,7 @@ class TestMeetingStatusTransition:
 
         weight = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=100,
         )
         db_session.add(weight)
@@ -2704,8 +2675,6 @@ class TestMeetingStatusTransition:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """RR3-41: After open→closed transition, a new vote submission must return 403."""
-        from app.models.lot_owner_email import LotOwnerEmail
-
         agm, lo, motion = await self._setup_open_meeting_with_voter(db_session)
 
         # Close the meeting
@@ -3454,8 +3423,7 @@ class TestCloseAGMAbsentRecords:
             )
             db_session.add(lo)
             await db_session.flush()
-            lo_email = LotOwnerEmail(lot_owner_id=lo.id, email=f"voter{i+1}@{name}.test")
-            db_session.add(lo_email)
+            await add_person_to_lot(db_session, lo, f"voter{i+1}@{name}.test")
             lots.append(lo)
 
         agm = GeneralMeeting(
@@ -3475,7 +3443,7 @@ class TestCloseAGMAbsentRecords:
         for lo in lots:
             w = GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             )
             db_session.add(w)
@@ -3664,7 +3632,7 @@ class TestCloseAGMAbsentRecords:
         await db_session.flush()
         w = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=50,
         )
         db_session.add(w)
@@ -3697,9 +3665,10 @@ class TestCloseAGMAbsentRecords:
         db_session.add(lo)
         await db_session.flush()
         # One owner email
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="owner-pa@test.com"))
+        await add_person_to_lot(db_session, lo, "owner-pa@test.com")
         # Proxy is a different address
-        db_session.add(LotProxy(lot_owner_id=lo.id, proxy_email="proxy-pa@test.com"))
+        _proxy_person = await get_or_create_person(db_session, "proxy-pa@test.com")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=_proxy_person.id))
         agm = GeneralMeeting(
             building_id=b.id,
             title="Proxy Absent GeneralMeeting",
@@ -3711,7 +3680,7 @@ class TestCloseAGMAbsentRecords:
         await db_session.flush()
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=75,
         ))
         await db_session.commit()
@@ -3757,8 +3726,8 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add_all([lo_voted, lo_absent])
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo_voted.id, email=f"voted@{name}.test"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo_absent.id, email=f"absent@{name}.test"))
+        await add_person_to_lot(db_session, lo_voted, f"voted@{name}.test")
+        await add_person_to_lot(db_session, lo_absent, f"absent@{name}.test")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -3778,7 +3747,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         for lo in [lo_voted, lo_absent]:
             db_session.add(GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             ))
         await db_session.flush()
@@ -3850,7 +3819,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="voter@hidden.test"))
+        await add_person_to_lot(db_session, lo, "voter@hidden.test")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -3880,7 +3849,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
 
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         ))
         await db_session.flush()
@@ -3932,7 +3901,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="voter@newvis.test"))
+        await add_person_to_lot(db_session, lo, "voter@newvis.test")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -3963,7 +3932,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
 
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         ))
         await db_session.flush()
@@ -4019,7 +3988,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="voter@expabs.test"))
+        await add_person_to_lot(db_session, lo, "voter@expabs.test")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -4043,7 +4012,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
 
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         ))
         await db_session.flush()
@@ -4091,7 +4060,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="voter@regyes.test"))
+        await add_person_to_lot(db_session, lo, "voter@regyes.test")
         await db_session.flush()
 
         agm = GeneralMeeting(
@@ -4115,7 +4084,7 @@ class TestGetGeneralMeetingDetailAbsentBehaviour:
 
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=lo.unit_entitlement,
         ))
         await db_session.flush()
@@ -4276,7 +4245,7 @@ class TestDeleteGeneralMeeting:
         await db_session.flush()
         weight = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lot.id,
+            lot_id=lot.id,
             unit_entitlement_snapshot=10,
         )
         db_session.add(weight)
@@ -6238,8 +6207,7 @@ class TestConcurrentBallotSubmission:
             s.add(lo)
             await s.flush()
 
-            lo_email = LotOwnerEmail(lot_owner_id=lo.id, email=f"conc_{unique_suffix}@voter.com")
-            s.add(lo_email)
+            await add_person_to_lot(s, lo, f"conc_{unique_suffix}@voter.com")
 
             agm = GeneralMeeting(
                 building_id=b.id,
@@ -6254,7 +6222,7 @@ class TestConcurrentBallotSubmission:
             # Snapshot lot weight
             weight = GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=100,
             )
             s.add(weight)
@@ -6885,6 +6853,65 @@ class TestListGeneralMeetingsSort:
         test_titles = [t for t in titles if any(kw in t for kw in ("apple", "mango", "zebra"))]
         assert test_titles == sorted(test_titles)
 
+    # --- building_name sort ---
+
+    async def test_sort_by_building_name_asc_returns_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """sort_by=building_name&sort_dir=asc returns meetings in A→Z building name order."""
+        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraTower Sort", "manager_email": "zbsort@test.com"})
+        b_z_id = b_z_resp.json()["id"]
+        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaTower Sort", "manager_email": "absort@test.com"})
+        b_a_id = b_a_resp.json()["id"]
+        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoTower Sort", "manager_email": "mgsort@test.com"})
+        b_m_id = b_m_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_z_id, "Meeting Z-tower"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_a_id, "Meeting A-tower"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_m_id, "Meeting M-tower"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=building_name&sort_dir=asc")
+        assert response.status_code == 200
+        building_names = [m["building_name"].lower() for m in response.json()]
+        test_names = [n for n in building_names if any(kw in n for kw in ("zebratower", "alphatower", "mangotower"))]
+        assert test_names == sorted(test_names)
+
+    async def test_sort_by_building_name_desc_returns_reverse_alphabetical_order(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """sort_by=building_name&sort_dir=desc returns meetings in Z→A building name order."""
+        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraDesc Sort", "manager_email": "zds@test.com"})
+        b_z_id = b_z_resp.json()["id"]
+        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaDesc Sort", "manager_email": "ads@test.com"})
+        b_a_id = b_a_resp.json()["id"]
+        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoDesc Sort", "manager_email": "mds@test.com"})
+        b_m_id = b_m_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_z_id, "MeetingZDesc"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_a_id, "MeetingADesc"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b_m_id, "MeetingMDesc"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=building_name&sort_dir=desc")
+        assert response.status_code == 200
+        building_names = [m["building_name"].lower() for m in response.json()]
+        test_names = [n for n in building_names if any(kw in n for kw in ("zebradesc", "alphadesc", "mangodesc"))]
+        assert test_names == sorted(test_names, reverse=True)
+
+    async def test_sort_by_building_name_case_insensitive(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """building_name sort is case-insensitive."""
+        b1_resp = await client.post("/api/admin/buildings", json={"name": "zebra ci sort", "manager_email": "zci@test.com"})
+        b1_id = b1_resp.json()["id"]
+        b2_resp = await client.post("/api/admin/buildings", json={"name": "APPLE CI SORT", "manager_email": "aci@test.com"})
+        b2_id = b2_resp.json()["id"]
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b1_id, "CISortZebraMeeting"))
+        await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "CISortAppleMeeting"))
+
+        response = await client.get("/api/admin/general-meetings?sort_by=building_name&sort_dir=asc")
+        assert response.status_code == 200
+        building_names = [m["building_name"].lower() for m in response.json()]
+        test_names = [n for n in building_names if "ci sort" in n]
+        assert test_names == sorted(test_names)
+
 
 # ---------------------------------------------------------------------------
 # Slice 4 — Multi-choice pass/fail outcome algorithm
@@ -6916,8 +6943,7 @@ class TestMultiChoiceOutcome:
             lo = LotOwner(building_id=b.id, lot_number=str(i + 1), unit_entitlement=ent)
             db_session.add(lo)
             await db_session.flush()
-            from app.models.lot_owner_email import LotOwnerEmail
-            db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email=f"mc_lo{i}_{name}@test.com"))
+            await add_person_to_lot(db_session, lo, f"mc_lo{i}_{name}@test.com")
             lot_owners.append(lo)
 
         agm = GeneralMeeting(
@@ -6951,7 +6977,7 @@ class TestMultiChoiceOutcome:
         for lo in lot_owners:
             db_session.add(GeneralMeetingLotWeight(
                 general_meeting_id=agm.id,
-                lot_owner_id=lo.id,
+                lot_id=lo.id,
                 unit_entitlement_snapshot=lo.unit_entitlement,
             ))
 
@@ -7201,7 +7227,7 @@ class TestMultiChoiceOutcome:
         db_session.add(motion)
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=100,
         ))
         await db_session.commit()
@@ -7575,8 +7601,7 @@ class TestCloseMotion:
         lo = LotOwner(building_id=b.id, lot_number="PMW1", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        lo_email = LotOwnerEmail(lot_owner_id=lo.id, email="pmw_voter@test.com")
-        db_session.add(lo_email)
+        await add_person_to_lot(db_session, lo, "pmw_voter@test.com")
         agm = GeneralMeeting(
             building_id=b.id,
             title="PMW Submit Test Meeting",
@@ -7588,7 +7613,7 @@ class TestCloseMotion:
         await db_session.flush()
         weight = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=100,
         )
         db_session.add(weight)
@@ -7640,8 +7665,7 @@ class TestCloseMotion:
         lo = LotOwner(building_id=b.id, lot_number="PL1", unit_entitlement=50)
         db_session.add(lo)
         await db_session.flush()
-        lo_email = LotOwnerEmail(lot_owner_id=lo.id, email="pmw_list_voter@test.com")
-        db_session.add(lo_email)
+        await add_person_to_lot(db_session, lo, "pmw_list_voter@test.com")
         agm = GeneralMeeting(
             building_id=b.id,
             title="PMW List Test Meeting",
@@ -7773,7 +7797,7 @@ class TestAdminCloseMeetingRateLimit:
         import time
 
         # Exhaust the limit (30 req/min)
-        admin_close_limiter._timestamps["admin"] = [time.monotonic() for _ in range(30)]
+        admin_close_limiter._timestamps["test-user-id"] = [time.monotonic() for _ in range(30)]
 
         # Create an open meeting to close
         b = Building(name="Rate Limit Close Building", manager_email="rlc@test.com")
@@ -7793,3 +7817,232 @@ class TestAdminCloseMeetingRateLimit:
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert response.status_code == 429
         assert response.headers.get("Retry-After") == "60"
+
+
+# ---------------------------------------------------------------------------
+# PATCH /api/admin/general-meetings/{id} — edit voting close time (US-ECT-01)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestUpdateGeneralMeeting:
+    """Tests for PATCH /api/admin/general-meetings/{id}."""
+
+    async def _create_meeting(
+        self,
+        db_session: AsyncSession,
+        name: str,
+        status: GeneralMeetingStatus,
+        meeting_at_offset: int = -1,  # days from now
+        closing_at_offset: int = 2,   # days from now
+    ) -> GeneralMeeting:
+        b = Building(name=name, manager_email=f"ect_{name}@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title=f"ECT Test {name}",
+            status=status,
+            meeting_at=datetime.now(UTC) + timedelta(days=meeting_at_offset),
+            voting_closes_at=datetime.now(UTC) + timedelta(days=closing_at_offset),
+        )
+        db_session.add(agm)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        return agm
+
+    # --- Happy path ---
+
+    async def test_patch_open_meeting_updates_voting_closes_at(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on an open meeting with a future close time returns 200 with updated timestamp."""
+        agm = await self._create_meeting(db_session, "PatchOpenHappy", GeneralMeetingStatus.open)
+        new_close = datetime.now(UTC) + timedelta(days=10)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(agm.id)
+        assert data["status"] == "open"
+        # The returned voting_closes_at should match the new value
+        from datetime import timezone
+        returned_dt = datetime.fromisoformat(data["voting_closes_at"].replace("Z", "+00:00"))
+        assert abs((returned_dt - new_close).total_seconds()) < 2
+
+    async def test_patch_open_meeting_persists_to_db(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on an open meeting updates the DB record."""
+        agm = await self._create_meeting(db_session, "PatchOpenDB", GeneralMeetingStatus.open)
+        new_close = datetime.now(UTC) + timedelta(days=7)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 200
+        # Verify the DB was updated
+        result = await db_session.execute(
+            select(GeneralMeeting).where(GeneralMeeting.id == agm.id)
+        )
+        updated = result.scalar_one()
+        stored = updated.voting_closes_at
+        stored_naive = stored.replace(tzinfo=None) if stored.tzinfo else stored
+        target_naive = new_close.replace(tzinfo=None)
+        assert abs((stored_naive - target_naive).total_seconds()) < 2
+
+    async def test_patch_pending_meeting_updates_voting_closes_at(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on a pending meeting with a future close time returns 200."""
+        agm = await self._create_meeting(
+            db_session, "PatchPendingHappy", GeneralMeetingStatus.pending,
+            meeting_at_offset=1, closing_at_offset=2
+        )
+        new_close = datetime.now(UTC) + timedelta(days=5)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "pending"
+
+    async def test_patch_returns_effective_status(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH response includes effective status (derived from timestamps)."""
+        # Meeting with meeting_at in the past = open (even if stored as pending)
+        agm = await self._create_meeting(db_session, "PatchStatusOpen", GeneralMeetingStatus.open)
+        new_close = datetime.now(UTC) + timedelta(days=3)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 200
+        assert response.json()["status"] == "open"
+
+    # --- State / precondition errors ---
+
+    async def test_patch_closed_meeting_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on a closed meeting returns 409."""
+        agm = await self._create_meeting(db_session, "PatchClosed", GeneralMeetingStatus.closed)
+        new_close = datetime.now(UTC) + timedelta(days=5)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 409
+        assert "already closed" in response.json()["detail"].lower()
+
+    async def test_patch_time_expired_open_meeting_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on a meeting where voting_closes_at is in the past (effective closed) returns 409."""
+        agm = await self._create_meeting(
+            db_session, "PatchExpired", GeneralMeetingStatus.open,
+            meeting_at_offset=-5, closing_at_offset=-1  # closing in the past = effectively closed
+        )
+        new_close = datetime.now(UTC) + timedelta(days=5)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": new_close.isoformat()},
+        )
+        assert response.status_code == 409
+        assert "already closed" in response.json()["detail"].lower()
+
+    async def test_patch_not_found_returns_404(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH on a non-existent meeting ID returns 404."""
+        response = await client.patch(
+            f"/api/admin/general-meetings/{uuid.uuid4()}",
+            json={"voting_closes_at": (datetime.now(UTC) + timedelta(days=5)).isoformat()},
+        )
+        assert response.status_code == 404
+        assert "General Meeting not found" in response.json()["detail"]
+
+    # --- Input validation ---
+
+    async def test_patch_voting_closes_at_equal_to_meeting_at_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH where voting_closes_at == meeting_at returns 422."""
+        agm = await self._create_meeting(db_session, "PatchEqual422", GeneralMeetingStatus.open)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": agm.meeting_at.isoformat()},
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert "voting_closes_at" in detail
+
+    async def test_patch_voting_closes_at_before_meeting_at_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH where voting_closes_at < meeting_at returns 422."""
+        agm = await self._create_meeting(db_session, "PatchBefore422", GeneralMeetingStatus.open)
+        before_meeting = agm.meeting_at - timedelta(hours=1)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": before_meeting.isoformat()},
+        )
+        assert response.status_code == 422
+
+    async def test_patch_missing_voting_closes_at_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with missing voting_closes_at field returns 422."""
+        agm = await self._create_meeting(db_session, "PatchMissing422", GeneralMeetingStatus.open)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={},
+        )
+        assert response.status_code == 422
+
+    async def test_patch_invalid_datetime_format_returns_422(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with non-datetime value for voting_closes_at returns 422."""
+        agm = await self._create_meeting(db_session, "PatchInvalid422", GeneralMeetingStatus.open)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": "not-a-date"},
+        )
+        assert response.status_code == 422
+
+    # --- Authentication ---
+
+    async def test_patch_unauthenticated_returns_401(
+        self, db_session: AsyncSession
+    ):
+        """PATCH without admin credentials returns 401."""
+        from app.main import app as fastapi_app
+        agm = await self._create_meeting(db_session, "PatchUnauth", GeneralMeetingStatus.open)
+        async with AsyncClient(
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as unauthenticated_client:
+            response = await unauthenticated_client.patch(
+                f"/api/admin/general-meetings/{agm.id}",
+                json={"voting_closes_at": (datetime.now(UTC) + timedelta(days=5)).isoformat()},
+            )
+            assert response.status_code == 401
+
+    # --- Boundary values ---
+
+    async def test_patch_one_second_after_meeting_at_succeeds(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """PATCH with voting_closes_at exactly 1 second after meeting_at returns 200."""
+        agm = await self._create_meeting(db_session, "PatchBoundary1s", GeneralMeetingStatus.open)
+        one_second_after = agm.meeting_at + timedelta(seconds=1)
+        response = await client.patch(
+            f"/api/admin/general-meetings/{agm.id}",
+            json={"voting_closes_at": one_second_after.isoformat()},
+        )
+        assert response.status_code == 200

@@ -10,18 +10,20 @@ import asyncio
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
 from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.rate_limiter import ballot_submit_limiter
 
 from app.database import get_db
 from app.models.general_meeting import GeneralMeeting
-from app.models.lot_owner import LotOwner
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
 from app.models.lot_proxy import LotProxy
+from app.models.person import Person
 from app.models.motion import Motion
 from app.models.motion_option import MotionOption
 from app.models.session_record import SessionRecord
@@ -36,8 +38,10 @@ from app.schemas.voting import (
     SubmitResponse,
 )
 from app.services.auth_service import (
+    _TOKEN_MAX_AGE_SECONDS,
     _load_direct_lot_owner_ids,
     _load_proxy_lot_owner_ids,
+    extend_session,
     get_session,
 )
 from app.services.voting_service import (
@@ -181,28 +185,32 @@ async def _verify_lot_ownership(
       - a direct lot owner (LotOwnerEmail record linking email → lot in this building), or
       - a nominated proxy (LotProxy record linking proxy_email → lot in this building).
     """
-    # Check direct ownership
+    # Check direct ownership via lot_persons JOIN persons
     direct_result = await db.execute(
-        select(LotOwnerEmail)
-        .join(LotOwner, LotOwnerEmail.lot_owner_id == LotOwner.id)
+        select(lot_persons.c.lot_id)
+        .join(Person, Person.id == lot_persons.c.person_id)
+        .join(Lot, Lot.id == lot_persons.c.lot_id)
         .where(
-            LotOwnerEmail.email == voter_email,
-            LotOwnerEmail.lot_owner_id == lot_owner_id,
-            LotOwner.building_id == building_id,
+            Person.email == voter_email,
+            lot_persons.c.lot_id == lot_owner_id,
+            Lot.building_id == building_id,
         )
+        .limit(1)
     )
     if direct_result.scalar_one_or_none() is not None:
         return
 
-    # Check proxy ownership
+    # Check proxy ownership via LotProxy JOIN persons
     proxy_result = await db.execute(
-        select(LotProxy)
-        .join(LotOwner, LotProxy.lot_owner_id == LotOwner.id)
+        select(LotProxy.lot_id)
+        .join(Person, Person.id == LotProxy.person_id)
+        .join(Lot, Lot.id == LotProxy.lot_id)
         .where(
-            LotProxy.proxy_email == voter_email,
-            LotProxy.lot_owner_id == lot_owner_id,
-            LotOwner.building_id == building_id,
+            Person.email == voter_email,
+            LotProxy.lot_id == lot_owner_id,
+            Lot.building_id == building_id,
         )
+        .limit(1)
     )
     if proxy_result.scalar_one_or_none() is not None:
         return
@@ -217,6 +225,7 @@ async def _verify_lot_ownership(
 async def save_draft_endpoint(
     general_meeting_id: uuid.UUID,
     body: DraftSaveRequest,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     agm_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
@@ -252,7 +261,17 @@ async def save_draft_endpoint(
         choice=body.choice,
         lot_owner_id=body.lot_owner_id,
     )
+    new_token = await extend_session(db=db, session_record=session)
     await db.commit()
+    response.set_cookie(
+        key="agm_session",
+        value=new_token,
+        httponly=True,
+        secure=not settings.testing_mode,
+        samesite="lax",
+        max_age=_TOKEN_MAX_AGE_SECONDS,
+        path="/api",
+    )
     return DraftSaveResponse(saved=True)
 
 
@@ -292,6 +311,7 @@ async def submit_ballot_endpoint(
     general_meeting_id: uuid.UUID,
     body: SubmitBallotRequest,
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
     agm_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
@@ -310,7 +330,17 @@ async def submit_ballot_endpoint(
         inline_votes={item.motion_id: item.choice for item in body.votes},
         multi_choice_votes={item.motion_id: item.option_choices for item in body.multi_choice_votes},
     )
+    new_token = await extend_session(db=db, session_record=session)
     await db.commit()
+    response.set_cookie(
+        key="agm_session",
+        value=new_token,
+        httponly=True,
+        secure=not settings.testing_mode,
+        samesite="lax",
+        max_age=_TOKEN_MAX_AGE_SECONDS,
+        path="/api",
+    )
     return result
 
 

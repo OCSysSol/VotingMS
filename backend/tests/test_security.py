@@ -32,8 +32,11 @@ from app.models import (
     LotOwner,
     OTPRateLimit,
 )
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
+from app.models.person import Person
 from app.services.admin_service import _sanitise_description
+from tests.conftest import add_person_to_lot
 
 
 # ---------------------------------------------------------------------------
@@ -67,8 +70,7 @@ async def building_and_meeting(db_session: AsyncSession):
     db_session.add(lo)
     await db_session.flush()
 
-    lo_email = LotOwnerEmail(lot_owner_id=lo.id, email="sec_voter@test.com")
-    db_session.add(lo_email)
+    await add_person_to_lot(db_session, lo, "sec_voter@test.com")
 
     agm = GeneralMeeting(
         building_id=b.id,
@@ -140,6 +142,7 @@ class TestSecurityHeaders:
         assert "'unsafe-inline'" in csp
         assert "https://vercel.live" in csp
         assert "connect-src 'self' https://vercel.live wss://vercel.live https://*.vercel.live wss://*.vercel.live" in csp
+        assert "form-action 'self'" in csp
 
     async def test_csp_allows_google_fonts(self, client: AsyncClient):
         """CSP permits Google Fonts for font-src and style-src."""
@@ -147,6 +150,71 @@ class TestSecurityHeaders:
         csp = response.headers.get("Content-Security-Policy", "")
         assert "https://fonts.googleapis.com" in csp
         assert "https://fonts.gstatic.com" in csp
+
+    async def test_csp_object_src_none(self, client: AsyncClient):
+        """CSP includes object-src 'none' to disallow Flash/Java plugins (DAST rule 10055)."""
+        response = await client.get("/api/health")
+        csp = response.headers.get("Content-Security-Policy", "")
+        assert "object-src 'none'" in csp
+
+    async def test_csp_base_uri_self(self, client: AsyncClient):
+        """CSP includes base-uri 'self' to prevent base tag injection (DAST rule 10055)."""
+        response = await client.get("/api/health")
+        csp = response.headers.get("Content-Security-Policy", "")
+        assert "base-uri 'self'" in csp
+
+    async def test_csp_img_src_allows_vercel_blob(self, client: AsyncClient):
+        """CSP img-src allows Vercel Blob origin so tenant logo/favicon images load.
+
+        Logo and favicon URLs are uploaded to Vercel Blob (public.blob.vercel-storage.com)
+        and stored in tenant_config. Without this origin, the browser blocks all logo
+        and favicon images with a CSP violation. data: is required for inline SVG favicons
+        and base64-encoded image URIs.
+        """
+        response = await client.get("/api/health")
+        csp = response.headers.get("Content-Security-Policy", "")
+        assert "img-src" in csp
+        assert "https://*.public.blob.vercel-storage.com" in csp
+        assert "data:" in csp
+
+
+    async def test_permissions_policy_header_present(self, client: AsyncClient):
+        """Permissions-Policy header disables browser features not used by this app (DAST rule 10063)."""
+        response = await client.get("/api/health")
+        pp = response.headers.get("Permissions-Policy", "")
+        assert pp != "", "Permissions-Policy header must be present"
+        assert "camera=()" in pp
+        assert "microphone=()" in pp
+        assert "geolocation=()" in pp
+        assert "payment=()" in pp
+
+    async def test_cross_origin_embedder_policy_header_present(self, client: AsyncClient):
+        """Cross-Origin-Embedder-Policy header is set to credentialless (DAST rule 90004).
+
+        credentialless is chosen over require-corp because this app loads cross-origin
+        no-cors resources (CDN fonts, Vercel analytics scripts) that lack CORP headers.
+        credentialless allows those resources while still blocking credentialled embeds.
+        """
+        response = await client.get("/api/health")
+        coep = response.headers.get("Cross-Origin-Embedder-Policy", "")
+        assert coep == "credentialless"
+
+    async def test_cross_origin_opener_policy_header_present(self, client: AsyncClient):
+        """Cross-Origin-Opener-Policy: same-origin isolates the browsing context,
+        preventing cross-origin opener attacks (XS-Leaks, Spectre side-channels).
+        Bare https: in img-src was replaced with explicit Vercel live domains to
+        prevent CSP wildcard bypass via arbitrary HTTPS image URLs (DAST rule 10055).
+        """
+        response = await client.get("/api/health")
+        coop = response.headers.get("Cross-Origin-Opener-Policy", "")
+        assert coop == "same-origin"
+
+    async def test_cross_origin_resource_policy_header_present(self, client: AsyncClient):
+        """Cross-Origin-Resource-Policy: same-origin prevents cross-origin reads of
+        this application's resources, blocking speculative execution side-channel attacks.
+        """
+        response = await client.get("/api/health")
+        assert response.headers.get("Cross-Origin-Resource-Policy") == "same-origin"
 
     # --- Boundary values ---
 
@@ -194,34 +262,23 @@ class TestRestrictedCors:
         assert response.status_code == 200
 
     async def test_cors_allow_methods_excludes_wildcard(self):
-        """CORSMiddleware is configured with explicit method list, not wildcard."""
-        from app.main import app
+        """DynamicCORSMiddleware uses an explicit method list, not wildcard."""
+        from app.main import _CORS_ALLOW_METHODS
 
-        # Find the CORS middleware config
-        from starlette.middleware.cors import CORSMiddleware
-        for m in app.user_middleware:
-            if hasattr(m, "cls") and m.cls is CORSMiddleware:
-                kwargs = m.kwargs
-                methods = kwargs.get("allow_methods", [])
-                assert "*" not in methods
-                assert "GET" in methods
-                assert "POST" in methods
-                assert "DELETE" in methods
-                break
+        methods = [m.strip() for m in _CORS_ALLOW_METHODS.split(",")]
+        assert "*" not in methods
+        assert "GET" in methods
+        assert "POST" in methods
+        assert "DELETE" in methods
 
     async def test_cors_allow_headers_excludes_wildcard(self):
-        """CORSMiddleware is configured with explicit header list, not wildcard."""
-        from app.main import app
-        from starlette.middleware.cors import CORSMiddleware
+        """DynamicCORSMiddleware uses an explicit header list, not wildcard."""
+        from app.main import _CORS_ALLOW_HEADERS
 
-        for m in app.user_middleware:
-            if hasattr(m, "cls") and m.cls is CORSMiddleware:
-                kwargs = m.kwargs
-                headers = kwargs.get("allow_headers", [])
-                assert "*" not in headers
-                assert "Content-Type" in headers
-                assert "Authorization" in headers
-                break
+        headers = [h.strip() for h in _CORS_ALLOW_HEADERS.split(",")]
+        assert "*" not in headers
+        assert "Content-Type" in headers
+        assert "Authorization" in headers
 
     # --- Boundary values ---
 
@@ -236,6 +293,171 @@ class TestRestrictedCors:
         )
         assert response.status_code == 200
         assert "access-control-allow-origin" in response.headers
+
+
+# ---------------------------------------------------------------------------
+# DynamicCORSMiddleware unit tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestDynamicCORSMiddleware:
+    """Unit tests for DynamicCORSMiddleware._is_allowed_origin and dispatch."""
+
+    # --- Happy path ---
+
+    async def test_preflight_allowed_for_same_host_origin(self, client: AsyncClient):
+        """OPTIONS preflight returns 200 with CORS headers when Origin matches allowed_origin."""
+        response = await client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+        assert response.headers.get("access-control-allow-credentials") == "true"
+
+    async def test_preflight_includes_allow_methods(self, client: AsyncClient):
+        """OPTIONS preflight response includes Access-Control-Allow-Methods."""
+        response = await client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert response.status_code == 200
+        assert "GET" in response.headers.get("access-control-allow-methods", "")
+        assert "POST" in response.headers.get("access-control-allow-methods", "")
+        assert "DELETE" in response.headers.get("access-control-allow-methods", "")
+
+    async def test_preflight_includes_allow_headers(self, client: AsyncClient):
+        """OPTIONS preflight response includes Access-Control-Allow-Headers."""
+        response = await client.options(
+            "/api/health",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            },
+        )
+        assert response.status_code == 200
+        assert "Content-Type" in response.headers.get("access-control-allow-headers", "")
+
+    async def test_get_request_with_allowed_origin_has_acao_header(self, client: AsyncClient):
+        """GET with allowed Origin receives Access-Control-Allow-Origin response header."""
+        response = await client.get(
+            "/api/health",
+            headers={"Origin": "http://localhost:5173"},
+        )
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:5173"
+
+    async def test_request_without_origin_header_has_no_acao(self, client: AsyncClient):
+        """Requests without Origin header receive no CORS headers (same-origin or non-browser)."""
+        response = await client.get("/api/health")
+        assert "access-control-allow-origin" not in response.headers
+
+    # --- is_allowed_origin logic ---
+
+    def test_is_allowed_origin_matches_configured_allowed_origin(self):
+        """_is_allowed_origin returns True when origin equals settings.allowed_origin."""
+        from unittest.mock import MagicMock
+        from app.main import DynamicCORSMiddleware
+
+        mw = DynamicCORSMiddleware(app=MagicMock())
+        request = MagicMock()
+        request.headers = {}  # no x-forwarded-* headers
+        # settings.allowed_origin defaults to "http://localhost:5173"
+        assert mw._is_allowed_origin("http://localhost:5173", request) is True
+
+    def test_is_allowed_origin_returns_false_for_unknown_origin(self):
+        """_is_allowed_origin returns False for an unrecognised cross-origin value."""
+        from unittest.mock import MagicMock
+        from app.main import DynamicCORSMiddleware
+
+        mw = DynamicCORSMiddleware(app=MagicMock())
+        request = MagicMock()
+        request.headers = {}
+        assert mw._is_allowed_origin("https://evil.example.com", request) is False
+
+    def test_is_allowed_origin_matches_x_forwarded_host(self):
+        """_is_allowed_origin returns True when origin matches x-forwarded-proto + x-forwarded-host."""
+        from unittest.mock import MagicMock
+        from app.main import DynamicCORSMiddleware
+
+        mw = DynamicCORSMiddleware(app=MagicMock())
+        request = MagicMock()
+        request.headers = {
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "my-app.vercel.app",
+        }
+        assert mw._is_allowed_origin("https://my-app.vercel.app", request) is True
+
+    def test_is_allowed_origin_rejects_different_host(self):
+        """_is_allowed_origin returns False when origin doesn't match forwarded host."""
+        from unittest.mock import MagicMock
+        from app.main import DynamicCORSMiddleware
+
+        mw = DynamicCORSMiddleware(app=MagicMock())
+        request = MagicMock()
+        request.headers = {
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "my-app.vercel.app",
+        }
+        assert mw._is_allowed_origin("https://other-app.vercel.app", request) is False
+
+    def test_is_allowed_origin_falls_back_to_allowed_origin_setting(self):
+        """_is_allowed_origin allows origin matching settings.allowed_origin even when
+        x-forwarded-host is present and points to a different host (e.g. local dev
+        behind a proxy that sets x-forwarded-host)."""
+        from unittest.mock import MagicMock
+        from app.main import DynamicCORSMiddleware
+
+        mw = DynamicCORSMiddleware(app=MagicMock())
+        request = MagicMock()
+        # x-forwarded-host is set to some other host so derive_origin won't match
+        request.headers = {
+            "x-forwarded-proto": "https",
+            "x-forwarded-host": "proxy.internal",
+        }
+        # settings.allowed_origin defaults to "http://localhost:5173" in tests
+        # This exercises the explicit-override branch (line 86-87 in main.py)
+        assert mw._is_allowed_origin("http://localhost:5173", request) is True
+
+    # --- Preflight for disallowed origin ---
+
+    async def test_preflight_returns_400_for_disallowed_origin(self, client: AsyncClient):
+        """OPTIONS preflight returns 400 when origin is not allowed."""
+        response = await client.options(
+            "/api/health",
+            headers={
+                "Origin": "https://evil.example.com",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        assert response.status_code == 400
+        assert "access-control-allow-origin" not in response.headers
+
+    async def test_get_with_disallowed_origin_has_no_acao_header(self, client: AsyncClient):
+        """GET with a disallowed Origin header does not receive CORS response headers."""
+        response = await client.get(
+            "/api/health",
+            headers={"Origin": "https://evil.example.com"},
+        )
+        # Request proceeds (not blocked) but no CORS headers are added
+        assert "access-control-allow-origin" not in response.headers
+
+    # --- Middleware registration ---
+
+    def test_dynamic_cors_middleware_registered(self):
+        """DynamicCORSMiddleware is registered in the app middleware stack."""
+        from app.main import DynamicCORSMiddleware, app
+
+        middleware_classes = [m.cls for m in app.user_middleware if hasattr(m, "cls")]
+        assert DynamicCORSMiddleware in middleware_classes
 
 
 # ---------------------------------------------------------------------------
@@ -895,7 +1117,9 @@ class TestStructuredLoggingVotingService:
             GeneralMeetingStatus,
             LotOwner,
         )
-        from app.models.lot_owner_email import LotOwnerEmail
+        from app.models.lot import Lot
+        from app.models.lot_person import lot_persons
+        from app.models.person import Person
         from app.services.voting_service import submit_ballot
 
         building = Building(name=f"Log Test Bldg {uuid.uuid4().hex[:6]}", manager_email="m@e.com")
@@ -906,8 +1130,7 @@ class TestStructuredLoggingVotingService:
         db_session.add(lo)
         await db_session.flush()
 
-        email_rec = LotOwnerEmail(lot_owner_id=lo.id, email="logtest@example.com")
-        db_session.add(email_rec)
+        await add_person_to_lot(db_session, lo, "logtest@example.com")
 
         agm = GeneralMeeting(
             building_id=building.id,
@@ -921,7 +1144,7 @@ class TestStructuredLoggingVotingService:
 
         weight = GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=100,
         )
         db_session.add(weight)
@@ -999,7 +1222,9 @@ class TestStructuredLoggingAdminService:
             GeneralMeetingStatus,
             LotOwner,
         )
-        from app.models.lot_owner_email import LotOwnerEmail
+        from app.models.lot import Lot
+        from app.models.lot_person import lot_persons
+        from app.models.person import Person
         from app.services.admin_service import close_general_meeting
 
         building = Building(name=f"Close Log Bldg {uuid.uuid4().hex[:6]}", manager_email="m@e.com")
@@ -1010,7 +1235,7 @@ class TestStructuredLoggingAdminService:
         db_session.add(lo)
         await db_session.flush()
 
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="closetest@example.com"))
+        await add_person_to_lot(db_session, lo, "closetest@example.com")
 
         agm = GeneralMeeting(
             building_id=building.id,
@@ -1024,7 +1249,7 @@ class TestStructuredLoggingAdminService:
 
         db_session.add(GeneralMeetingLotWeight(
             general_meeting_id=agm.id,
-            lot_owner_id=lo.id,
+            lot_id=lo.id,
             unit_entitlement_snapshot=100,
         ))
         await db_session.flush()

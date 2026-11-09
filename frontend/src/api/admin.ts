@@ -208,12 +208,14 @@ export interface AddOwnerEmailRequest {
   email: string;
   given_name?: string | null;
   surname?: string | null;
+  phone_number?: string | null;
 }
 
 export interface UpdateOwnerEmailRequest {
   email?: string | null;
   given_name?: string | null;
   surname?: string | null;
+  phone_number?: string | null;
 }
 
 export async function addOwnerEmailToLotOwner(
@@ -270,10 +272,44 @@ export async function setLotOwnerProxy(
   proxyEmail: string,
   givenName?: string | null,
   surname?: string | null,
+  phoneNumber?: string | null,
 ): Promise<LotOwner> {
   return apiFetch<LotOwner>(`/api/admin/lot-owners/${lotOwnerId}/proxy`, {
     method: "PUT",
-    body: JSON.stringify({ proxy_email: proxyEmail, given_name: givenName, surname }),
+    body: JSON.stringify({ proxy_email: proxyEmail, given_name: givenName, surname, phone_number: phoneNumber }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Person search
+// ---------------------------------------------------------------------------
+
+export interface PersonOut {
+  id: string;
+  email: string;
+  given_name: string | null;
+  surname: string | null;
+  phone_number: string | null;
+}
+
+export async function searchPersons(q: string, limit = 10): Promise<PersonOut[]> {
+  const qs = new URLSearchParams({ q, limit: String(limit) });
+  return apiFetch<PersonOut[]>(`/api/admin/persons/search?${qs}`);
+}
+
+export interface PersonUpdateRequest {
+  given_name?: string | null;
+  surname?: string | null;
+  phone_number?: string | null;
+}
+
+export async function updatePerson(
+  personId: string,
+  data: PersonUpdateRequest
+): Promise<PersonOut> {
+  return apiFetch<PersonOut>(`/api/admin/persons/${personId}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
   });
 }
 
@@ -396,11 +432,13 @@ export async function importBuildings(file: File): Promise<BuildingImportResult>
 
 export async function listLotOwners(
   buildingId: string,
-  params?: { limit?: number; offset?: number }
+  params?: { limit?: number; offset?: number; sort_by?: string; sort_dir?: string }
 ): Promise<LotOwner[]> {
   const qs = new URLSearchParams();
   if (params?.limit !== undefined) qs.set("limit", String(params.limit));
   if (params?.offset !== undefined) qs.set("offset", String(params.offset));
+  if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
+  if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
   const query = qs.toString();
   return apiFetch<LotOwner[]>(
     `/api/admin/buildings/${buildingId}/lot-owners${query ? `?${query}` : ""}`
@@ -543,6 +581,29 @@ export async function deleteGeneralMeeting(meetingId: string): Promise<void> {
   return apiFetchVoid(`/api/admin/general-meetings/${meetingId}`, {
     method: "DELETE",
   });
+}
+
+export interface GeneralMeetingUpdateRequest {
+  voting_closes_at: string; // ISO 8601 UTC
+}
+
+export interface GeneralMeetingUpdateOut {
+  id: string;
+  status: string;
+  voting_closes_at: string;
+}
+
+export async function updateGeneralMeeting(
+  meetingId: string,
+  data: GeneralMeetingUpdateRequest
+): Promise<GeneralMeetingUpdateOut> {
+  return apiFetch<GeneralMeetingUpdateOut>(
+    `/api/admin/general-meetings/${meetingId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }
+  );
 }
 
 // ---------------------------------------------------------------------------

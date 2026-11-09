@@ -172,24 +172,30 @@ export default async function globalSetup(_config: FullConfig) {
   //
   // The bypass header is included because Vercel Deployment Protection is active.
   {
-    const provisionHeaders: HeadersInit = {
+    const provisionHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "X-Requested-With": "XMLHttpRequest",
     };
     if (BYPASS_TOKEN) provisionHeaders["x-vercel-protection-bypass"] = BYPASS_TOKEN;
+
+    const provisionUrl = BYPASS_TOKEN
+      ? `${baseURL}/api/admin/auth/provision?x-vercel-protection-bypass=${BYPASS_TOKEN}`
+      : `${baseURL}/api/admin/auth/provision`;
+
     try {
-      const provisionRes = await fetch(`${baseURL}/api/admin/auth/provision`, {
-        method: "POST",
+      const provisionRes = await page.request.post(provisionUrl, {
         headers: provisionHeaders,
-        body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" }),
+        data: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: "Admin" },
+        maxRedirects: 0,
       });
-      if (!provisionRes.ok && provisionRes.status !== 204) {
+      if (!provisionRes.ok() && provisionRes.status() !== 204) {
         // 4xx/5xx from the provision endpoint itself (not the upstream auth) is unexpected.
         // Log but do not throw — the sign-in below will surface any real auth failure.
-        console.warn(`[global-setup] provision endpoint returned ${provisionRes.status}`);
+        console.warn(`[global-setup] provision endpoint returned ${provisionRes.status()}: ${await provisionRes.text()}`);
       }
-    } catch {
+    } catch (err) {
       // Network errors during provisioning are non-fatal — sign-in will surface any real failure.
+      console.warn(`[global-setup] provision error:`, err);
     }
   }
 
@@ -202,8 +208,9 @@ export default async function globalSetup(_config: FullConfig) {
   } catch {
     const url = page.url();
     const content = await page.content();
+    const alertText = await page.locator('[role="alert"]').allTextContents().catch(() => []);
     throw new Error(
-      `Admin login failed — stuck at ${url}\nPage content (first 500 chars):\n${content.slice(0, 500)}`
+      `Admin login failed — stuck at ${url}\nAlerts: ${alertText.join(", ")}\nPage content (first 500 chars):\n${content.slice(0, 500)}`
     );
   }
   await context.storageState({ path: path.join(authDir, "admin.json") });

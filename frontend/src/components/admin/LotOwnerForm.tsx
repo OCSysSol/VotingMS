@@ -10,10 +10,13 @@ import {
   removeOwnerEmailById,
   setLotOwnerProxy,
   removeLotOwnerProxy,
+  updatePerson,
 } from "../../api/admin";
 import type { LotOwner, LotOwnerEmailEntry } from "../../types";
-import type { LotOwnerCreateRequest, LotOwnerUpdateRequest } from "../../api/admin";
+import type { LotOwnerCreateRequest, LotOwnerUpdateRequest, PersonOut } from "../../api/admin";
 import { isValidEmail } from "../../utils/validation";
+import PersonEmailAutocomplete from "./PersonEmailAutocomplete";
+import PersonConflictModal from "./PersonConflictModal";
 
 interface LotOwnerFormProps {
   buildingId: string;
@@ -49,20 +52,49 @@ function EditModal({
   const [newOwnerSurname, setNewOwnerSurname] = useState("");
   const [emailError, setEmailError] = useState<string | null>(null);
   const [emailsModified, setEmailsModified] = useState(false);
+  const [newOwnerPhone, setNewOwnerPhone] = useState("");
   // Inline edit state: which entry is being edited
   const [editingEmailId, setEditingEmailId] = useState<string | null>(null);
   const [editEmailValue, setEditEmailValue] = useState("");
   const [editGivenName, setEditGivenName] = useState("");
   const [editSurname, setEditSurname] = useState("");
+  const [editPhone, setEditPhone] = useState("");
   const [editError, setEditError] = useState<string | null>(null);
+  // Conflict modal state for inline edit
+  const [editConflictModalOpen, setEditConflictModalOpen] = useState(false);
+  const [editConflictEmail, setEditConflictEmail] = useState("");
+  const [editPendingEmailId, setEditPendingEmailId] = useState<string | null>(null);
+  // The stored person data used to detect conflicts during inline edit
+  const [editStoredPerson, setEditStoredPerson] = useState<LotOwnerEmailEntry | null>(null);
+  // Conflict modal state for add-owner sub-form
+  const [addOwnerConflictModalOpen, setAddOwnerConflictModalOpen] = useState(false);
+  // The autocomplete-suggested person for the add-owner sub-form (tracks id for PATCH)
+  const [addOwnerSuggestedPerson, setAddOwnerSuggestedPerson] = useState<PersonOut | null>(null);
+  // Pending mutation args held while the add-owner conflict modal is open
+  const [addOwnerPendingArgs, setAddOwnerPendingArgs] = useState<{
+    email: string; given_name: string | null; surname: string | null; phone_number: string | null;
+  } | null>(null);
 
   // Proxy management
   const [proxyEmail, setProxyEmail] = useState<string | null>(lotOwner.proxy_email ?? null);
-  const [newProxyEmail, setNewProxyEmail] = useState("");
   const [proxyGivenName, setProxyGivenName] = useState(lotOwner.proxy_given_name ?? "");
   const [proxySurname, setProxySurname] = useState(lotOwner.proxy_surname ?? "");
+  const [proxyPhone, setProxyPhone] = useState("");
+  const [newProxyEmail, setNewProxyEmail] = useState("");
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [proxyModified, setProxyModified] = useState(false);
+  // proxy_phone_number from the response (shown in display row)
+  const [proxyPhoneNumber, setProxyPhoneNumber] = useState<string | null>(
+    lotOwner.proxy_phone_number ?? null
+  );
+  // Conflict modal state for proxy sub-form
+  const [proxyConflictModalOpen, setProxyConflictModalOpen] = useState(false);
+  // The autocomplete-suggested person for the proxy sub-form (tracks id for PATCH)
+  const [proxySuggestedPerson, setProxySuggestedPerson] = useState<PersonOut | null>(null);
+  // Pending mutation args held while the proxy conflict modal is open
+  const [proxyPendingArgs, setProxyPendingArgs] = useState<{
+    email: string; givenName: string | null; surname: string | null; phoneNumber: string | null;
+  } | null>(null);
 
   const queryClient = useQueryClient();
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -76,31 +108,45 @@ function EditModal({
     setNewOwnerEmail("");
     setNewOwnerGivenName("");
     setNewOwnerSurname("");
+    setNewOwnerPhone("");
     setEmailError(null);
     setEmailsModified(false);
     setEditingEmailId(null);
     setEditEmailValue("");
     setEditGivenName("");
     setEditSurname("");
+    setEditPhone("");
     setEditError(null);
+    setEditConflictModalOpen(false);
+    setEditConflictEmail("");
+    setEditPendingEmailId(null);
+    setEditStoredPerson(null);
+    setAddOwnerConflictModalOpen(false);
+    setAddOwnerSuggestedPerson(null);
+    setAddOwnerPendingArgs(null);
     setProxyEmail(lotOwner.proxy_email ?? null);
     setNewProxyEmail("");
     setProxyGivenName(lotOwner.proxy_given_name ?? "");
     setProxySurname(lotOwner.proxy_surname ?? "");
+    setProxyPhone("");
+    setProxyPhoneNumber(lotOwner.proxy_phone_number ?? null);
     setProxyError(null);
     setProxyModified(false);
+    setProxyConflictModalOpen(false);
+    setProxySuggestedPerson(null);
+    setProxyPendingArgs(null);
   }, [lotOwner]);
 
-  // Close on Escape
+  // Close on Escape (only if no conflict modal is open)
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !editConflictModalOpen && !addOwnerConflictModalOpen && !proxyConflictModalOpen) {
         onCancel();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, editConflictModalOpen, addOwnerConflictModalOpen, proxyConflictModalOpen]);
 
   const editMutation = useMutation<LotOwner, Error, LotOwnerUpdateRequest>({
     mutationFn: (data) => updateLotOwner(lotOwner.id, data),
@@ -116,7 +162,7 @@ function EditModal({
   const addOwnerEmailMutation = useMutation<
     LotOwner,
     Error,
-    { email: string; given_name: string | null; surname: string | null }
+    { email: string; given_name: string | null; surname: string | null; phone_number?: string | null }
   >({
     mutationFn: (data) => addOwnerEmailToLotOwner(lotOwner.id, data),
     onSuccess: (updated) => {
@@ -124,6 +170,7 @@ function EditModal({
       setNewOwnerEmail("");
       setNewOwnerGivenName("");
       setNewOwnerSurname("");
+      setNewOwnerPhone("");
       setEmailError(null);
       setEmailsModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
@@ -136,18 +183,22 @@ function EditModal({
   const updateOwnerEmailMutation = useMutation<
     LotOwner,
     Error,
-    { emailId: string; email?: string | null; given_name?: string | null; surname?: string | null }
+    { emailId: string; email?: string | null; given_name?: string | null; surname?: string | null; phone_number?: string | null }
   >({
     mutationFn: ({ emailId, ...data }) => updateOwnerEmail(lotOwner.id, emailId, data),
     onSuccess: (updated) => {
       setOwnerEmails(updated.owner_emails);
       setEditingEmailId(null);
       setEditError(null);
+      setEditConflictModalOpen(false);
+      setEditPendingEmailId(null);
+      setEditStoredPerson(null);
       setEmailsModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
     },
     onError: (err) => {
       setEditError(err.message);
+      setEditConflictModalOpen(false);
     },
   });
 
@@ -164,13 +215,16 @@ function EditModal({
     },
   });
 
-  const setProxyMutation = useMutation<LotOwner, Error, { email: string; givenName: string | null; surname: string | null }>({
-    mutationFn: ({ email, givenName, surname }) => setLotOwnerProxy(lotOwner.id, email, givenName, surname),
+  const setProxyMutation = useMutation<LotOwner, Error, { email: string; givenName: string | null; surname: string | null; phoneNumber: string | null }>({
+    mutationFn: ({ email, givenName, surname, phoneNumber }) =>
+      setLotOwnerProxy(lotOwner.id, email, givenName, surname, phoneNumber),
     onSuccess: (updated) => {
       setProxyEmail(updated.proxy_email ?? null);
       setProxyGivenName(updated.proxy_given_name ?? "");
       setProxySurname(updated.proxy_surname ?? "");
+      setProxyPhoneNumber(updated.proxy_phone_number ?? null);
       setNewProxyEmail("");
+      setProxyPhone("");
       setProxyError(null);
       setProxyModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
@@ -186,6 +240,8 @@ function EditModal({
       setProxyEmail(null);
       setProxyGivenName("");
       setProxySurname("");
+      setProxyPhoneNumber(null);
+      setProxyPhone("");
       setProxyError(null);
       setProxyModified(true);
       void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", lotOwner.building_id] });
@@ -225,6 +281,21 @@ function EditModal({
     editMutation.mutate(updateData);
   }
 
+  function _addOwnerHasConflict(suggested: PersonOut | null): boolean {
+    if (!suggested) return false;
+    const submittedName = newOwnerGivenName.trim();
+    const submittedSurname = newOwnerSurname.trim();
+    const submittedPhone = newOwnerPhone.trim();
+    const suggestedName = suggested.given_name ?? "";
+    const suggestedSurname = suggested.surname ?? "";
+    const suggestedPhone = suggested.phone_number ?? "";
+    return (
+      (submittedName !== "" && submittedName !== suggestedName) ||
+      (submittedSurname !== "" && submittedSurname !== suggestedSurname) ||
+      (submittedPhone !== "" && submittedPhone !== suggestedPhone)
+    );
+  }
+
   function handleAddOwnerEmail() {
     setEmailError(null);
     const trimmedEmail = newOwnerEmail.trim().toLowerCase();
@@ -236,11 +307,42 @@ function EditModal({
       setEmailError("Please enter a valid email address.");
       return;
     }
-    addOwnerEmailMutation.mutate({
+    const args = {
       email: trimmedEmail,
       given_name: newOwnerGivenName.trim() || null,
       surname: newOwnerSurname.trim() || null,
-    });
+      phone_number: newOwnerPhone.trim() || null,
+    };
+    if (_addOwnerHasConflict(addOwnerSuggestedPerson)) {
+      setAddOwnerPendingArgs(args);
+      setAddOwnerConflictModalOpen(true);
+      return;
+    }
+    addOwnerEmailMutation.mutate(args);
+  }
+
+  async function handleAddOwnerConflictConfirm() {
+    if (!addOwnerPendingArgs || !addOwnerSuggestedPerson) return;
+    setAddOwnerConflictModalOpen(false);
+    try {
+      await updatePerson(addOwnerSuggestedPerson.id, {
+        given_name: addOwnerPendingArgs.given_name,
+        surname: addOwnerPendingArgs.surname,
+        phone_number: addOwnerPendingArgs.phone_number,
+      });
+    } catch {
+      setEmailError("Failed to update person record. Please try again.");
+      setAddOwnerPendingArgs(null);
+      return;
+    }
+    addOwnerEmailMutation.mutate(addOwnerPendingArgs);
+    setAddOwnerPendingArgs(null);
+    setAddOwnerSuggestedPerson(null);
+  }
+
+  function handleAddOwnerConflictCancel() {
+    setAddOwnerConflictModalOpen(false);
+    setAddOwnerPendingArgs(null);
   }
 
   function handleRemoveOwnerEmail(emailId: string) {
@@ -253,12 +355,33 @@ function EditModal({
     setEditEmailValue(entry.email ?? "");
     setEditGivenName(entry.given_name ?? "");
     setEditSurname(entry.surname ?? "");
+    setEditPhone(entry.phone_number ?? "");
+    setEditStoredPerson(entry);
     setEditError(null);
   }
 
   function handleCancelEdit() {
     setEditingEmailId(null);
+    setEditPhone("");
     setEditError(null);
+    setEditConflictModalOpen(false);
+    setEditPendingEmailId(null);
+    setEditStoredPerson(null);
+  }
+
+  function _hasConflict(): boolean {
+    if (!editStoredPerson) return false;
+    const submittedName = editGivenName.trim();
+    const submittedSurname = editSurname.trim();
+    const submittedPhone = editPhone.trim();
+    const storedName = editStoredPerson.given_name ?? "";
+    const storedSurname = editStoredPerson.surname ?? "";
+    const storedPhone = editStoredPerson.phone_number ?? "";
+    return (
+      (submittedName !== "" && submittedName !== storedName) ||
+      (submittedSurname !== "" && submittedSurname !== storedSurname) ||
+      (submittedPhone !== "" && submittedPhone !== storedPhone)
+    );
   }
 
   function handleSaveEdit(emailId: string) {
@@ -272,12 +395,54 @@ function EditModal({
       setEditError("Please enter a valid email address.");
       return;
     }
+
+    // Show conflict modal if name/phone differ from stored person
+    if (_hasConflict()) {
+      setEditConflictEmail(trimmedEmail);
+      setEditPendingEmailId(emailId);
+      setEditConflictModalOpen(true);
+      return;
+    }
+
     updateOwnerEmailMutation.mutate({
       emailId,
       email: trimmedEmail,
       given_name: editGivenName.trim() || null,
       surname: editSurname.trim() || null,
+      phone_number: editPhone.trim() || null,
     });
+  }
+
+  function handleConflictConfirm() {
+    if (!editPendingEmailId) return;
+    const trimmedEmail = editEmailValue.trim().toLowerCase();
+    updateOwnerEmailMutation.mutate({
+      emailId: editPendingEmailId,
+      email: trimmedEmail,
+      given_name: editGivenName.trim() || null,
+      surname: editSurname.trim() || null,
+      phone_number: editPhone.trim() || null,
+    });
+  }
+
+  function handleConflictCancel() {
+    setEditConflictModalOpen(false);
+    setEditPendingEmailId(null);
+  }
+
+  function _proxyHasConflict(suggested: PersonOut | null): boolean {
+    if (!suggested) return false;
+    const submittedName = proxyGivenName.trim();
+    const submittedSurname = proxySurname.trim();
+    const submittedPhone = proxyPhone.trim();
+    const suggestedName = suggested.given_name ?? "";
+    const suggestedSurname = suggested.surname ?? "";
+    const suggestedPhone = suggested.phone_number ?? "";
+    return (
+      (submittedName !== "" && submittedName !== suggestedName) ||
+      (submittedSurname !== "" && submittedSurname !== suggestedSurname) ||
+      (submittedPhone !== "" && submittedPhone !== suggestedPhone)
+    );
   }
 
   function handleSetProxy() {
@@ -285,11 +450,42 @@ function EditModal({
     const trimmed = newProxyEmail.trim();
     if (!trimmed) { setProxyError("Proxy email is required."); return; }
     if (!isValidEmail(trimmed)) { setProxyError("Please enter a valid email address."); return; }
-    setProxyMutation.mutate({
+    const args = {
       email: trimmed,
       givenName: proxyGivenName.trim() || null,
       surname: proxySurname.trim() || null,
-    });
+      phoneNumber: proxyPhone.trim() || null,
+    };
+    if (_proxyHasConflict(proxySuggestedPerson)) {
+      setProxyPendingArgs(args);
+      setProxyConflictModalOpen(true);
+      return;
+    }
+    setProxyMutation.mutate(args);
+  }
+
+  async function handleProxyConflictConfirm() {
+    if (!proxyPendingArgs || !proxySuggestedPerson) return;
+    setProxyConflictModalOpen(false);
+    try {
+      await updatePerson(proxySuggestedPerson.id, {
+        given_name: proxyPendingArgs.givenName,
+        surname: proxyPendingArgs.surname,
+        phone_number: proxyPendingArgs.phoneNumber,
+      });
+    } catch {
+      setProxyError("Failed to update person record. Please try again.");
+      setProxyPendingArgs(null);
+      return;
+    }
+    setProxyMutation.mutate(proxyPendingArgs);
+    setProxyPendingArgs(null);
+    setProxySuggestedPerson(null);
+  }
+
+  function handleProxyConflictCancel() {
+    setProxyConflictModalOpen(false);
+    setProxyPendingArgs(null);
   }
 
   function handleOverlayClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -307,323 +503,396 @@ function EditModal({
     removeProxyMutation.isPending;
 
   return (
-    <div
-      className="dialog-overlay"
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="edit-modal-title"
-    >
+    <>
       <div
-        className="dialog"
-        style={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}
+        className="dialog-overlay"
+        ref={overlayRef}
+        onClick={handleOverlayClick}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-modal-title"
       >
-        <h3
-          id="edit-modal-title"
-          className="admin-card__title"
-          style={{ marginBottom: 20 }}
+        <div
+          className="dialog"
+          style={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}
         >
-          Edit Lot Owner
-        </h3>
-
-        {/* Owner email list */}
-        <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field__label">Owners (name + email)</label>
-          <ul
-            style={{ listStyle: "none", padding: 0, margin: "0 0 10px" }}
-            aria-label="Owner email addresses"
+          <h3
+            id="edit-modal-title"
+            className="admin-card__title"
+            style={{ marginBottom: 20 }}
           >
-            {ownerEmails.map((entry) => (
-              <li
-                key={entry.id}
-                style={{
-                  padding: "8px 0",
-                  borderBottom: "1px solid var(--border-subtle)",
-                  fontSize: "0.875rem",
-                }}
-              >
-                {editingEmailId === entry.id ? (
-                  // Inline edit form
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input
-                        className="field__input"
-                        type="text"
-                        placeholder="Given name"
-                        value={editGivenName}
-                        onChange={(e) => setEditGivenName(e.target.value)}
-                        aria-label="Edit given name"
-                      />
-                      <input
-                        className="field__input"
-                        type="text"
-                        placeholder="Surname"
-                        value={editSurname}
-                        onChange={(e) => setEditSurname(e.target.value)}
-                        aria-label="Edit surname"
-                      />
-                    </div>
-                    <input
-                      className="field__input"
-                      type="email"
-                      placeholder="email@example.com"
-                      value={editEmailValue}
-                      onChange={(e) => setEditEmailValue(e.target.value)}
-                      aria-label="Edit email"
-                    />
-                    {editError && (
-                      <p className="field__error" role="alert" style={{ margin: 0 }}>{editError}</p>
-                    )}
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <button
-                        type="button"
-                        className="btn btn--primary"
-                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                        onClick={() => handleSaveEdit(entry.id)}
-                        disabled={isPending}
-                      >
-                        Save
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--secondary"
-                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                        onClick={handleCancelEdit}
-                        disabled={isPending}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  // Display row
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <span>
-                      {entry.given_name || entry.surname
-                        ? `${entry.given_name ?? ""} ${entry.surname ?? ""}`.trim()
-                        : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
-                      }
-                      {" "}
-                      <span style={{ color: "var(--text-secondary)" }}>{entry.email ?? ""}</span>
-                    </span>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <button
-                        type="button"
-                        className="btn btn--secondary"
-                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                        onClick={() => handleStartEdit(entry)}
-                        disabled={isPending}
-                        aria-label={`Edit ${entry.email ?? "owner"}`}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn--secondary"
-                        style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                        onClick={() => handleRemoveOwnerEmail(entry.id)}
-                        disabled={isPending}
-                        aria-label={`Remove ${entry.email ?? "owner"}`}
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </li>
-            ))}
-          </ul>
+            Edit Lot Owner
+          </h3>
 
-          {/* Add owner row */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
-            <div style={{ display: "flex", gap: 6 }}>
-              <input
-                id="add-owner-given-name"
-                className="field__input"
-                type="text"
-                placeholder="Given name (optional)"
-                value={newOwnerGivenName}
-                onChange={(e) => setNewOwnerGivenName(e.target.value)}
-                aria-label="New owner given name"
-              />
-              <input
-                id="add-owner-surname"
-                className="field__input"
-                type="text"
-                placeholder="Surname (optional)"
-                value={newOwnerSurname}
-                onChange={(e) => setNewOwnerSurname(e.target.value)}
-                aria-label="New owner surname"
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
+          {/* Owner email list */}
+          <div className="field" style={{ marginBottom: 20 }}>
+            <label className="field__label">Owners (name + email)</label>
+            <ul
+              style={{ listStyle: "none", padding: 0, margin: "0 0 10px" }}
+              aria-label="Owner email addresses"
+            >
+              {ownerEmails.map((entry) => (
+                <li
+                  key={entry.id}
+                  style={{
+                    padding: "8px 0",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    fontSize: "0.875rem",
+                  }}
+                >
+                  {editingEmailId === entry.id ? (
+                    // Inline edit form
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <input
+                        className="field__input"
+                        type="email"
+                        placeholder="email@example.com"
+                        value={editEmailValue}
+                        onChange={(e) => setEditEmailValue(e.target.value)}
+                        aria-label="Edit email"
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          className="field__input"
+                          type="text"
+                          placeholder="Given name"
+                          value={editGivenName}
+                          onChange={(e) => setEditGivenName(e.target.value)}
+                          aria-label="Edit given name"
+                        />
+                        <input
+                          className="field__input"
+                          type="text"
+                          placeholder="Surname"
+                          value={editSurname}
+                          onChange={(e) => setEditSurname(e.target.value)}
+                          aria-label="Edit surname"
+                        />
+                      </div>
+                      <input
+                        className="field__input"
+                        type="tel"
+                        placeholder="+61412345678 (optional)"
+                        value={editPhone}
+                        onChange={(e) => setEditPhone(e.target.value)}
+                        aria-label="Edit phone number"
+                      />
+                      {editError && (
+                        <p className="field__error" role="alert" style={{ margin: 0 }}>{editError}</p>
+                      )}
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => handleSaveEdit(entry.id)}
+                          disabled={isPending}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={handleCancelEdit}
+                          disabled={isPending}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // Display row
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>
+                        {entry.given_name || entry.surname
+                          ? `${entry.given_name ?? ""} ${entry.surname ?? ""}`.trim()
+                          : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
+                        }
+                        {" "}
+                        <span style={{ color: "var(--text-secondary)" }}>{entry.email ?? ""}</span>
+                        {entry.phone_number && (
+                          <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                            {entry.phone_number}
+                          </span>
+                        )}
+                      </span>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => handleStartEdit(entry)}
+                          disabled={isPending}
+                          aria-label={`Edit ${entry.email ?? "owner"}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => handleRemoveOwnerEmail(entry.id)}
+                          disabled={isPending}
+                          aria-label={`Remove ${entry.email ?? "owner"}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            {/* Add owner row — email first, then name/phone */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+              <PersonEmailAutocomplete
                 id="add-owner-email-input"
-                className="field__input"
-                type="email"
-                placeholder="email@example.com"
                 value={newOwnerEmail}
-                onChange={(e) => setNewOwnerEmail(e.target.value)}
-                aria-label="Add owner email"
+                onChange={(v) => { setNewOwnerEmail(v); setAddOwnerSuggestedPerson(null); }}
+                onSelect={(person) => {
+                  setNewOwnerEmail(person.email);
+                  setNewOwnerGivenName(person.given_name ?? "");
+                  setNewOwnerSurname(person.surname ?? "");
+                  setNewOwnerPhone(person.phone_number ?? "");
+                  setAddOwnerSuggestedPerson(person);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
                     handleAddOwnerEmail();
                   }
                 }}
+                placeholder="email@example.com"
+                aria-label="Add owner email"
+                disabled={isPending}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  id="add-owner-given-name"
+                  className="field__input"
+                  type="text"
+                  placeholder="Given name (optional)"
+                  value={newOwnerGivenName}
+                  onChange={(e) => setNewOwnerGivenName(e.target.value)}
+                  aria-label="New owner given name"
+                />
+                <input
+                  id="add-owner-surname"
+                  className="field__input"
+                  type="text"
+                  placeholder="Surname (optional)"
+                  value={newOwnerSurname}
+                  onChange={(e) => setNewOwnerSurname(e.target.value)}
+                  aria-label="New owner surname"
+                />
+              </div>
+              <input
+                id="add-owner-phone"
+                className="field__input"
+                type="tel"
+                placeholder="Phone number (optional)"
+                value={newOwnerPhone}
+                onChange={(e) => setNewOwnerPhone(e.target.value)}
+                aria-label="New owner phone number"
               />
               <button
                 type="button"
                 className="btn btn--secondary"
                 onClick={handleAddOwnerEmail}
                 disabled={isPending}
-                style={{ whiteSpace: "nowrap" }}
+                style={{ whiteSpace: "nowrap", alignSelf: "flex-start" }}
               >
                 Add owner
               </button>
             </div>
+            {emailError && (
+              <p className="field__error" style={{ marginTop: 6 }} role="alert">
+                {emailError}
+              </p>
+            )}
           </div>
-          {emailError && (
-            <p className="field__error" style={{ marginTop: 6 }} role="alert">
-              {emailError}
-            </p>
-          )}
-        </div>
 
-        {/* Proxy nomination */}
-        <div className="field" style={{ marginBottom: 20 }}>
-          <label className="field__label">Proxy</label>
-          {proxyEmail ? (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", fontSize: "0.875rem" }}>
-              <span>
-                {(proxyGivenName || proxySurname)
-                  ? `${proxyGivenName} ${proxySurname}`.trim()
-                  : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
-                }
-                {" "}
-                <span style={{ color: "var(--text-secondary)" }}>{proxyEmail}</span>
-              </span>
-              <button
-                type="button"
-                className="btn btn--secondary"
-                style={{ padding: "3px 10px", fontSize: "0.75rem" }}
-                onClick={() => { setProxyError(null); removeProxyMutation.mutate(); }}
-                disabled={isPending}
-              >
-                Remove proxy
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input
-                  className="field__input"
-                  type="text"
-                  placeholder="Given name (optional)"
-                  value={proxyGivenName}
-                  onChange={(e) => setProxyGivenName(e.target.value)}
-                  aria-label="Proxy given name"
-                />
-                <input
-                  className="field__input"
-                  type="text"
-                  placeholder="Surname (optional)"
-                  value={proxySurname}
-                  onChange={(e) => setProxySurname(e.target.value)}
-                  aria-label="Proxy surname"
-                />
+          {/* Proxy nomination */}
+          <div className="field" style={{ marginBottom: 20 }}>
+            <label className="field__label">Proxy</label>
+            {proxyEmail ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", fontSize: "0.875rem" }}>
+                <span>
+                  {(proxyGivenName || proxySurname)
+                    ? `${proxyGivenName} ${proxySurname}`.trim()
+                    : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
+                  }
+                  {" "}
+                  <span style={{ color: "var(--text-secondary)" }}>{proxyEmail}</span>
+                  {proxyPhoneNumber && (
+                    <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                      {proxyPhoneNumber}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                  onClick={() => { setProxyError(null); removeProxyMutation.mutate(); }}
+                  disabled={isPending}
+                >
+                  Remove proxy
+                </button>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {/* Email field first */}
+                <PersonEmailAutocomplete
                   id="set-proxy-input"
-                  className="field__input"
-                  type="email"
-                  placeholder="proxy@example.com"
                   value={newProxyEmail}
-                  onChange={(e) => setNewProxyEmail(e.target.value)}
+                  onChange={(v) => { setNewProxyEmail(v); setProxySuggestedPerson(null); }}
+                  onSelect={(person) => {
+                    setNewProxyEmail(person.email);
+                    setProxyGivenName(person.given_name ?? "");
+                    setProxySurname(person.surname ?? "");
+                    setProxyPhone(person.phone_number ?? "");
+                    setProxySuggestedPerson(person);
+                  }}
+                  placeholder="proxy@example.com"
                   aria-label="Set proxy email"
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleSetProxy(); } }}
+                  disabled={isPending}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Given name (optional)"
+                    value={proxyGivenName}
+                    onChange={(e) => setProxyGivenName(e.target.value)}
+                    aria-label="Proxy given name"
+                  />
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Surname (optional)"
+                    value={proxySurname}
+                    onChange={(e) => setProxySurname(e.target.value)}
+                    aria-label="Proxy surname"
+                  />
+                </div>
+                <input
+                  id="proxy-phone-input"
+                  className="field__input"
+                  type="tel"
+                  placeholder="Phone number (optional)"
+                  value={proxyPhone}
+                  onChange={(e) => setProxyPhone(e.target.value)}
+                  aria-label="Proxy phone number"
                 />
                 <button
                   type="button"
                   className="btn btn--secondary"
                   onClick={handleSetProxy}
                   disabled={isPending}
-                  style={{ whiteSpace: "nowrap" }}
+                  style={{ whiteSpace: "nowrap", alignSelf: "flex-start" }}
                 >
                   Set proxy
                 </button>
               </div>
-            </div>
-          )}
-          {proxyError && (
-            <p className="field__error" style={{ marginTop: 6 }} role="alert">{proxyError}</p>
-          )}
-        </div>
-
-        {/* Edit form */}
-        <form onSubmit={handleSubmit} className="admin-form">
-          {/* US-ACC-08: required field legend */}
-          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-            <span aria-hidden="true">*</span> Required field
-          </p>
-          <div className="field">
-            {/* US-ACC-08: visible * marker + aria-required */}
-            <label className="field__label field__label--required" htmlFor="lot-entitlement">
-              Unit Entitlement
-            </label>
-            <input
-              id="lot-entitlement"
-              className="field__input"
-              type="number"
-              value={unitEntitlement}
-              onChange={(e) => setUnitEntitlement(e.target.value)}
-              aria-required="true"
-            />
+            )}
+            {proxyError && (
+              <p className="field__error" style={{ marginTop: 6 }} role="alert">{proxyError}</p>
+            )}
           </div>
 
-          <div className="field">
-            <label className="field__label" htmlFor="lot-financial-position">
-              Financial Position
-            </label>
-            <select
-              id="lot-financial-position"
-              className="field__input"
-              value={financialPosition}
-              onChange={(e) => setFinancialPosition(e.target.value as "normal" | "in_arrear")}
-            >
-              <option value="normal">Normal</option>
-              <option value="in_arrear">In Arrear</option>
-            </select>
-          </div>
-
-          {formError && (
-            <p className="field__error" style={{ marginBottom: 12 }} role="alert">
-              {formError}
+          {/* Edit form */}
+          <form onSubmit={handleSubmit} className="admin-form">
+            {/* US-ACC-08: required field legend */}
+            <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
+              <span aria-hidden="true">*</span> Required field
             </p>
-          )}
+            <div className="field">
+              {/* US-ACC-08: visible * marker + aria-required */}
+              <label className="field__label field__label--required" htmlFor="lot-entitlement">
+                Unit Entitlement
+              </label>
+              <input
+                id="lot-entitlement"
+                className="field__input"
+                type="number"
+                value={unitEntitlement}
+                onChange={(e) => setUnitEntitlement(e.target.value)}
+                aria-required="true"
+              />
+            </div>
 
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button
-              type="submit"
-              className="btn btn--primary"
-              disabled={isPending}
-            >
-              {editMutation.isPending ? "Saving..." : "Save Changes"}
-            </button>
-            <button
-              type="button"
-              className="btn btn--secondary"
-              onClick={onCancel}
-              disabled={isPending}
-            >
-              Cancel
-            </button>
-          </div>
-        </form>
+            <div className="field">
+              <label className="field__label" htmlFor="lot-financial-position">
+                Financial Position
+              </label>
+              <select
+                id="lot-financial-position"
+                className="field__input"
+                value={financialPosition}
+                onChange={(e) => setFinancialPosition(e.target.value as "normal" | "in_arrear")}
+              >
+                <option value="normal">Normal</option>
+                <option value="in_arrear">In Arrear</option>
+              </select>
+            </div>
+
+            {formError && (
+              <p className="field__error" style={{ marginBottom: 12 }} role="alert">
+                {formError}
+              </p>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                type="submit"
+                className="btn btn--primary"
+                disabled={isPending}
+              >
+                {editMutation.isPending ? "Saving..." : "Save Changes"}
+              </button>
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={onCancel}
+                disabled={isPending}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
+
+      {/* Conflict modal — rendered outside the dialog to avoid z-index stacking issues */}
+      {editConflictModalOpen && (
+        <PersonConflictModal
+          email={editConflictEmail}
+          onConfirm={handleConflictConfirm}
+          onCancel={handleConflictCancel}
+        />
+      )}
+
+      {/* Add-owner conflict modal */}
+      {addOwnerConflictModalOpen && addOwnerPendingArgs && (
+        <PersonConflictModal
+          email={addOwnerPendingArgs.email}
+          onConfirm={() => { void handleAddOwnerConflictConfirm(); }}
+          onCancel={handleAddOwnerConflictCancel}
+        />
+      )}
+
+      {/* Proxy conflict modal */}
+      {proxyConflictModalOpen && proxyPendingArgs && (
+        <PersonConflictModal
+          email={proxyPendingArgs.email}
+          onConfirm={() => { void handleProxyConflictConfirm(); }}
+          onCancel={handleProxyConflictCancel}
+        />
+      )}
+    </>
   );
 }
 
@@ -847,3 +1116,6 @@ export default function LotOwnerForm({
     />
   );
 }
+
+// Re-export for tests that import directly from this module
+export { addEmailToLotOwner, removeEmailFromLotOwner };

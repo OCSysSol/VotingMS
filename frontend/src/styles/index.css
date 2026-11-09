@@ -208,14 +208,42 @@ button, input, select, textarea {
   box-shadow: 0 0 0 3px rgba(12,27,46,.1);
 }
 
-.field__input[aria-invalid="true"] {
+.field__input[aria-invalid="true"],
+.field__input--error {
   border-color: var(--red);
+}
+
+.field__input[aria-invalid="true"]:focus,
+.field__input--error:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.15);
 }
 
 .field__error {
   display: block;
   margin-top: 5px;
   font-size: 0.8125rem;
+  color: var(--red);
+}
+
+.field__input--textarea {
+  min-height: 52px;
+  line-height: 1.4;
+  font-family: inherit;
+}
+
+.field__counter {
+  font-size: 0.75rem;
+  margin-top: 2px;
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.field__counter--warning {
+  color: var(--amber);
+}
+
+.field__counter--error {
   color: var(--red);
 }
 
@@ -669,7 +697,7 @@ button, input, select, textarea {
 /* Per-option For/Against/Abstain row (Slice 3) */
 .mc-option-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 10px;
   padding: 10px 12px;
@@ -683,6 +711,9 @@ button, input, select, textarea {
   font-size: 0.95rem;
   color: var(--text-primary);
   flex: 1;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 
 .mc-option-row__buttons {
@@ -2523,4 +2554,32 @@ button, input, select, textarea {
 @media print {
   body > *:not(.qr-modal__print-area) { display: none !important; }
   .qr-modal__print-area { position: static !important; box-shadow: none !important; }
+}
+
+/* === CHANNEL MODAL INTERIOR CLASSES (ACCESSIBILITY-1) === */
+.channel-modal__heading {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.2rem;
+}
+.channel-modal__radiogroup {
+  margin-bottom: 16px;
+}
+.channel-modal__radio-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  margin-bottom: 12px;
+}
+.channel-modal__radio-label:last-child {
+  margin-bottom: 0;
+}
+.channel-modal__actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.channel-modal .field__error {
+  margin-bottom: 16px;
 }

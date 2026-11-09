@@ -296,6 +296,32 @@ class TestAuthProxyHappyPath:
         # Other response headers are preserved
         assert response.headers.get("x-custom") == "keep-me"
 
+    async def test_proxy_preserves_multiple_set_cookie_headers(self):
+        """proxy_auth preserves multiple Set-Cookie headers from httpx.Headers without comma-folding."""
+        import httpx
+
+        upstream = _make_upstream_response(
+            content=b'{"ok": true}',
+            headers=httpx.Headers([
+                ("content-type", "application/json"),
+                ("set-cookie", "__Secure-neon-auth.session_token=tok1; Path=/; HttpOnly; Secure; SameSite=Lax"),
+                ("set-cookie", "__Secure-neon-auth.session_data=dat1; Path=/; HttpOnly; Secure; SameSite=Lax"),
+            ]),
+        )
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client):
+            ms.neon_auth_base_url = "https://auth.example.com"
+            response = await proxy_auth(path="sign-in/email", request=request)
+
+        set_cookies = response.headers.getlist("set-cookie")
+        assert set_cookies == [
+            "__Secure-neon-auth.session_token=tok1; Path=/; HttpOnly; Secure; SameSite=Lax",
+            "__Secure-neon-auth.session_data=dat1; Path=/; HttpOnly; Secure; SameSite=Lax",
+        ]
+
     async def test_proxy_forwards_upstream_non_200_status(self):
         """proxy_auth transparently forwards non-200 upstream status codes."""
         upstream = _make_upstream_response(
@@ -773,3 +799,132 @@ class TestAuthProxyGetSessionRetry:
         assert response.status_code == 401
         assert mock_client.request.call_count == 1
         mock_sleep.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+
+class TestAuthProxyLogging:
+    """proxy_auth emits structured INFO and WARNING log lines."""
+
+    async def test_info_log_emitted_with_injected_origin(self):
+        """proxy_auth logs INFO with the injected origin when one is derived."""
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(
+            method="POST",
+            headers=[
+                ("x-forwarded-proto", "https"),
+                ("x-forwarded-host", "preview.example.com"),
+            ],
+        )
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.logger") as mock_logger:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            await proxy_auth(path="sign-in/email", request=request)
+
+        mock_logger.info.assert_called_once_with(
+            "auth_proxy: path=%s injected_origin=%s",
+            "sign-in/email",
+            "https://preview.example.com",
+        )
+
+    async def test_info_log_emitted_with_none_when_no_origin(self):
+        """proxy_auth logs INFO with 'none' when no origin can be derived."""
+        upstream = _make_upstream_response()
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="POST")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.utils.settings") as ms_utils, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.logger") as mock_logger:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            ms_utils.allowed_origin = ""
+            await proxy_auth(path="sign-in/email", request=request)
+
+        mock_logger.info.assert_called_once_with(
+            "auth_proxy: path=%s injected_origin=none",
+            "sign-in/email",
+        )
+
+    async def test_warning_log_emitted_on_4xx_response(self):
+        """proxy_auth logs WARNING when upstream returns a 4xx status."""
+        upstream = _make_upstream_response(
+            content=b'{"error":"forbidden"}',
+            status_code=403,
+        )
+        upstream.text = '{"error":"forbidden"}'
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(
+            method="POST",
+            headers=[
+                ("x-forwarded-proto", "https"),
+                ("x-forwarded-host", "preview.example.com"),
+            ],
+        )
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.logger") as mock_logger:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            await proxy_auth(path="sign-in/email", request=request)
+
+        mock_logger.warning.assert_called_once_with(
+            "auth_proxy: path=%s injected_origin=%s neon_auth_status=%d neon_auth_body=%.200s",
+            "sign-in/email",
+            "https://preview.example.com",
+            403,
+            '{"error":"forbidden"}',
+        )
+
+    async def test_warning_log_emitted_on_5xx_response(self):
+        """proxy_auth logs WARNING when upstream returns a 5xx status."""
+        upstream = _make_upstream_response(
+            content=b"Internal Server Error",
+            status_code=500,
+        )
+        upstream.text = "Internal Server Error"
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="GET")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.utils.settings") as ms_utils, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.logger") as mock_logger:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            ms_utils.allowed_origin = ""
+            await proxy_auth(path="get-session", request=request)
+
+        mock_logger.warning.assert_called_once_with(
+            "auth_proxy: path=%s injected_origin=%s neon_auth_status=%d neon_auth_body=%.200s",
+            "get-session",
+            "none",
+            500,
+            "Internal Server Error",
+        )
+
+    async def test_no_warning_log_on_2xx_response(self):
+        """proxy_auth does NOT log WARNING when upstream returns a 2xx status."""
+        upstream = _make_upstream_response(content=b'{"user":null}', status_code=200)
+        mock_client = _make_httpx_client(upstream)
+        request = _make_request(method="GET")
+
+        with patch("app.routers.auth_proxy.settings") as ms, \
+             patch("app.utils.settings") as ms_utils, \
+             patch("app.routers.auth_proxy.httpx.AsyncClient", return_value=mock_client), \
+             patch("app.routers.auth_proxy.logger") as mock_logger:
+            ms.neon_auth_base_url = "https://auth.example.com"
+            ms.allowed_origin = ""
+            ms_utils.allowed_origin = ""
+            await proxy_auth(path="get-session", request=request)
+
+        mock_logger.warning.assert_not_called()

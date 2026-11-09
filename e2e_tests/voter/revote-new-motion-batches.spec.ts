@@ -94,7 +94,7 @@ test.describe("US-FIX-NM01-B: lots unlock on every new motion batch", () => {
     // Both lots should be pre-selected — vote on the single motion
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(1, { timeout: 15000 });
-    await motionCards.first().getByRole("button", { name: "For" }).click();
+    await motionCards.first().getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -159,7 +159,7 @@ test.describe("US-FIX-NM01-B: lots unlock on every new motion batch", () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Motion 2 must be interactive (For button enabled)
-    const m2ForBtn = motionCards.filter({ hasText: MOTION2 }).getByRole("button", { name: "For" });
+    const m2ForBtn = motionCards.filter({ hasText: MOTION2 }).getByTestId("vote-btn-yes");
     await expect(m2ForBtn).not.toBeDisabled({ timeout: 10000 });
 
     // Submit ballot button must be visible (unvoted motion present)
@@ -185,7 +185,7 @@ test.describe("US-FIX-NM01-B: lots unlock on every new motion batch", () => {
     await expect(motionCards).toHaveCount(2, { timeout: 15000 });
 
     const m2Card = motionCards.filter({ hasText: MOTION2 });
-    await m2Card.getByRole("button", { name: "For" }).click();
+    await m2Card.getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -253,7 +253,7 @@ test.describe("US-FIX-NM01-B: lots unlock on every new motion batch", () => {
     ).toBeVisible({ timeout: 10000 });
 
     // Motion 3 must be interactive
-    const m3ForBtn = motionCards.filter({ hasText: MOTION3 }).getByRole("button", { name: "For" });
+    const m3ForBtn = motionCards.filter({ hasText: MOTION3 }).getByTestId("vote-btn-yes");
     await expect(m3ForBtn).not.toBeDisabled({ timeout: 10000 });
 
     // Submit ballot button must still be visible

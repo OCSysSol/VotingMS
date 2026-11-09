@@ -108,8 +108,8 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
 
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "For" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-yes").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -130,8 +130,8 @@ test.describe("WF3: Simple 3-lot voting lifecycle with tally verification", () =
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
 
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "Against" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-no").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -291,8 +291,8 @@ test.describe("WF4: Multi-lot voter — both lots submitted in one session", () 
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
 
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "For" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-yes").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -427,8 +427,8 @@ test.describe("WF5: Multi-lot voter — partial submission across two sessions",
     await sidebar.locator('.lot-selection__item', { hasText: `Lot ${LOT_B}` }).locator('input[type="checkbox"]').uncheck();
     await expect(sidebar.getByText("You are voting for 1 lot.")).toBeVisible();
 
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "For" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "Against" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-yes").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-no").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -465,8 +465,8 @@ test.describe("WF5: Multi-lot voter — partial submission across two sessions",
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
 
-    await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "Abstain" }).click();
-    await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+    await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-abstained").click();
+    await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
     await submitBallot(page);
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });
@@ -588,7 +588,7 @@ test.describe("WF6: Proxy voting with tally verification", () => {
 
       const motionCards = page.locator(".motion-card");
       await expect(motionCards).toHaveCount(1);
-      await motionCards.first().getByRole("button", { name: "For" }).click();
+      await motionCards.first().getByTestId("vote-btn-yes").click();
 
       await submitBallot(page);
       await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });
@@ -612,7 +612,7 @@ test.describe("WF6: Proxy voting with tally verification", () => {
     if (page.url().includes("/voting")) {
       const motionCards = page.locator(".motion-card");
       await expect(motionCards).toHaveCount(1);
-      await motionCards.first().getByRole("button", { name: "Against" }).click();
+      await motionCards.first().getByTestId("vote-btn-no").click();
 
       await submitBallot(page);
       await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });
@@ -731,8 +731,8 @@ test.describe("WF7: In-arrear mixed lots — not_eligible on General, normal on 
     const motionCards = page.locator(".motion-card");
     await expect(motionCards).toHaveCount(2);
     const generalCard = motionCards.filter({ hasText: MOTION1_TITLE });
-    await expect(generalCard.getByRole("button", { name: "For" })).toBeEnabled();
-    await expect(generalCard.getByRole("button", { name: "For" })).not.toHaveAttribute("aria-disabled");
+    await expect(generalCard.getByTestId("vote-btn-yes")).toBeEnabled();
+    await expect(generalCard.getByTestId("vote-btn-yes")).not.toHaveAttribute("aria-disabled");
 
     // The old in-arrear-notice element must NOT be present
     await expect(page.getByTestId("in-arrear-notice")).not.toBeVisible();
@@ -755,8 +755,8 @@ test.describe("WF7: In-arrear mixed lots — not_eligible on General, normal on 
       const motionCards = page.locator(".motion-card");
       await expect(motionCards).toHaveCount(2);
 
-      await motionCards.filter({ hasText: MOTION1_TITLE }).getByRole("button", { name: "For" }).click();
-      await motionCards.filter({ hasText: MOTION2_TITLE }).getByRole("button", { name: "For" }).click();
+      await motionCards.filter({ hasText: MOTION1_TITLE }).getByTestId("vote-btn-yes").click();
+      await motionCards.filter({ hasText: MOTION2_TITLE }).getByTestId("vote-btn-yes").click();
 
       await submitBallot(page);
       await expect(page).toHaveURL(/confirmation/, { timeout: 20000 });

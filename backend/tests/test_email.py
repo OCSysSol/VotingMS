@@ -37,19 +37,21 @@ from app.models import (
     EmailDelivery,
     EmailDeliveryStatus,
     LotOwner,
-    LotOwnerEmail,
     Motion,
     Vote,
     VoteChoice,
     VoteStatus,
 )
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
+from app.models.person import Person
 from app.services.email_service import (
     EmailService,
     SmtpNotConfiguredError,
     _TEMPLATES_DIR,
     _MAX_ATTEMPTS,
     _backoff_seconds,
-    _get_jinja_env,
+    _jinja_env,
     _send_with_limit,
     _try_acquire_email_lock,
 )
@@ -106,24 +108,26 @@ async def _create_motion(db: AsyncSession, agm: GeneralMeeting, order_index: int
     return motion
 
 
-async def _create_lot_owner(db: AsyncSession, building: Building, email: str, unit_entitlement: int = 100) -> LotOwner:
-    lo = LotOwner(
+async def _create_lot_owner(db: AsyncSession, building: Building, email: str, unit_entitlement: int = 100) -> Lot:
+    lo = Lot(
         building_id=building.id,
         lot_number=f"L{uuid.uuid4().hex[:6]}",
         unit_entitlement=unit_entitlement,
     )
     db.add(lo)
     await db.flush()
-    lo_email = LotOwnerEmail(lot_owner_id=lo.id, email=email)
-    db.add(lo_email)
+    p = Person(email=email)
+    db.add(p)
+    await db.flush()
+    await db.execute(lot_persons.insert().values(lot_id=lo.id, person_id=p.id))
     await db.flush()
     return lo
 
 
-async def _create_lot_weight(db: AsyncSession, agm: GeneralMeeting, lot_owner: LotOwner) -> GeneralMeetingLotWeight:
+async def _create_lot_weight(db: AsyncSession, agm: GeneralMeeting, lot_owner: Lot) -> GeneralMeetingLotWeight:
     w = GeneralMeetingLotWeight(
         general_meeting_id=agm.id,
-        lot_owner_id=lot_owner.id,
+        lot_id=lot_owner.id,
         unit_entitlement_snapshot=lot_owner.unit_entitlement,
     )
     db.add(w)
@@ -257,7 +261,7 @@ class TestBackoffSeconds:
 
 class TestEmailTemplateRendering:
     def _render_template(self, context: dict) -> str:
-        env = _get_jinja_env()
+        env = _jinja_env
         template = env.get_template("report_email.html")
         return template.render(**context)
 
@@ -1263,8 +1267,13 @@ class TestRequeuePendingOnStartup:
 
         assert trigger_mock.call_count == 3
 
-    async def test_gather_exceptions_are_logged_not_raised(self, db_session: AsyncSession, mocker):
-        """If a trigger_with_retry task raises, the error is logged and startup completes without raising."""
+    async def test_requeue_does_not_raise_when_trigger_fails(self, db_session: AsyncSession, mocker):
+        """requeue_pending_on_startup fires tasks via create_task and returns immediately without raising.
+
+        After SRE-2, tasks are fire-and-forget via asyncio.create_task. Errors inside
+        trigger_with_retry are handled within that coroutine — requeue_pending_on_startup
+        itself must never raise even if the task coroutine would fail.
+        """
         await self._clear_pending_deliveries(db_session)
         building = await _create_building(db_session)
         agm = await _create_agm(db_session, building)
@@ -1275,21 +1284,13 @@ class TestRequeuePendingOnStartup:
 
         mocker.patch.object(
             EmailService, "trigger_with_retry", new_callable=AsyncMock,
-            side_effect=Exception("unexpected gather error"),
-        )
-
-        import app.services.email_service as _email_svc
-        error_events: list[str] = []
-        mocker.patch.object(
-            _email_svc.logger, "error",
-            side_effect=lambda e, **kw: error_events.append(e),
+            side_effect=Exception("unexpected error"),
         )
 
         service = EmailService()
-        # Must not raise even though the task failed
+        # Must return immediately without raising even though the task would fail
         await service.requeue_pending_on_startup(db_session)
-
-        assert "startup_email_requeue_task_error" in error_events
+        # No assertion on error_events — tasks run asynchronously after this returns
 
 
 # ---------------------------------------------------------------------------

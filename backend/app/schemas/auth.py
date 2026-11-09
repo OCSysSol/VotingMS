@@ -1,7 +1,7 @@
 import uuid
-from typing import Optional
+from typing import Literal, Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class SessionRestoreRequest(BaseModel):
@@ -17,9 +17,11 @@ class SessionRestoreRequest(BaseModel):
 
 
 class OtpRequestBody(BaseModel):
-    email: str
+    email: str = Field(..., max_length=254)
     general_meeting_id: uuid.UUID
-    skip_email: bool = False
+    # channel is optional: when None, backend auto-selects enabled_channels[0].
+    # When supplied, backend enforces that it is in enabled_channels.
+    channel: Optional[Literal["email", "sms"]] = None
 
     @field_validator("email")
     @classmethod
@@ -31,12 +33,15 @@ class OtpRequestBody(BaseModel):
 
 class OtpRequestResponse(BaseModel):
     sent: bool
+    has_phone: bool = False
+    phone_hint: str | None = None
+    enabled_channels: list[str] = ["email"]
 
 
 class AuthVerifyRequest(BaseModel):
-    email: str
+    email: str = Field(..., max_length=254)
     general_meeting_id: uuid.UUID
-    code: str
+    code: str = Field(..., max_length=20)
 
     @field_validator("email")
     @classmethod

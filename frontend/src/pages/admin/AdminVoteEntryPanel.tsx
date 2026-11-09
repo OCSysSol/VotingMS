@@ -1019,6 +1019,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                               {motion.options.map((opt) => {
                                 const currentChoice = motionChoices[opt.id] ?? null;
+                                const truncatedOptText = opt.text.length > 80 ? `${opt.text.slice(0, 80)}...` : opt.text;
                                 return (
                                   <div key={opt.id}>
                                     <div
@@ -1026,6 +1027,8 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                                         fontSize: "0.72rem",
                                         color: "var(--text-secondary)",
                                         marginBottom: 2,
+                                        wordBreak: "break-word",
+                                        overflowWrap: "anywhere",
                                       }}
                                     >
                                       {opt.text}
@@ -1038,8 +1041,8 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                                         // Disable all buttons when this motion has a prior admin entry for this lot
                                         const isButtonDisabled = isMCPriorEntry || isForDisabled;
                                         const ariaLabel = isForDisabled
-                                          ? `For option ${opt.text} lot ${lo.lot_number} (limit reached)`
-                                          : `${choice === "for" ? "For" : choice === "against" ? "Against" : "Abstain"} option ${opt.text} lot ${lo.lot_number}`;
+                                          ? `For option ${truncatedOptText} lot ${lo.lot_number} (limit reached)`
+                                          : `${choice === "for" ? "For" : choice === "against" ? "Against" : "Abstain"} option ${truncatedOptText} lot ${lo.lot_number}`;
                                         return (
                                           <button
                                             key={choice}

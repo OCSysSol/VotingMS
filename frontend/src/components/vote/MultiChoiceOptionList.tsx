@@ -11,6 +11,14 @@ interface MultiChoiceOptionListProps {
   readOnly?: boolean;
 }
 
+/**
+ * Truncate long option text for screen reader aria-labels (max 80 chars + ...).
+ */
+export function truncateAriaText(text: string, maxLength = 80): string {
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}...`;
+}
+
 export function MultiChoiceOptionList({
   motion,
   optionChoices,
@@ -63,6 +71,7 @@ export function MultiChoiceOptionList({
         // RR4-35: For button is disabled when limit reached AND the option is not already selected For
         const isForDisabled = disabled || readOnly || (limitReached && !isForSelected);
         const isEffectivelyDisabled = disabled || readOnly;
+        const truncatedText = truncateAriaText(option.text);
 
         return (
           <div
@@ -71,15 +80,17 @@ export function MultiChoiceOptionList({
             data-testid={`mc-option-row-${option.id}`}
           >
             <span className="mc-option-row__text">{option.text}</span>
-            <div className="mc-option-row__buttons" role="group" aria-label={`Vote for ${option.text}`}>
+            <div className="mc-option-row__buttons" role="group" aria-label={`Vote for ${truncatedText}`}>
               <button
                 type="button"
                 className={`vote-btn vote-btn--yes${isForSelected ? " vote-btn--active" : ""}`}
                 aria-pressed={isForSelected}
+                aria-label={`For ${truncatedText}`}
                 disabled={isForDisabled}
                 aria-describedby={isForDisabled && limitReached && !disabled && !readOnly && !isForSelected ? limitMsgId : undefined}
                 onClick={() => handleOptionChoice(option.id, "for")}
                 data-testid={`mc-for-${option.id}`}
+                data-choice="yes"
               >
                 <span className="vote-btn__icon" aria-hidden="true">✓</span>
                 <span className="vote-btn__label">For</span>
@@ -88,9 +99,11 @@ export function MultiChoiceOptionList({
                 type="button"
                 className={`vote-btn vote-btn--no${isAgainstSelected ? " vote-btn--active" : ""}`}
                 aria-pressed={isAgainstSelected}
+                aria-label={`Against ${truncatedText}`}
                 disabled={isEffectivelyDisabled}
                 onClick={() => handleOptionChoice(option.id, "against")}
                 data-testid={`mc-against-${option.id}`}
+                data-choice="no"
               >
                 <span className="vote-btn__icon" aria-hidden="true">✗</span>
                 <span className="vote-btn__label">Against</span>
@@ -99,9 +112,11 @@ export function MultiChoiceOptionList({
                 type="button"
                 className={`vote-btn vote-btn--abstained${isAbstainSelected ? " vote-btn--active" : ""}`}
                 aria-pressed={isAbstainSelected}
+                aria-label={`Abstain for ${truncatedText}`}
                 disabled={isEffectivelyDisabled}
                 onClick={() => handleOptionChoice(option.id, "abstained")}
                 data-testid={`mc-abstain-${option.id}`}
+                data-choice="abstained"
               >
                 <span className="vote-btn__icon" aria-hidden="true">—</span>
                 <span className="vote-btn__label">Abstain</span>

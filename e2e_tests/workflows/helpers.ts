@@ -588,6 +588,7 @@ export async function goToAuthPage(page: Page, buildingName: string): Promise<vo
  * Fill and submit the auth form via the two-step OTP flow.
  *
  * Step 1: fill email, click "Send Verification Code".
+ * Step 1b (if voter has a phone number): channel selector appears — select email, click "Send code".
  * Step 2: retrieve OTP via `getOtp` callback, fill code field, click "Verify".
  *
  * The `getOtp` callback is typically `() => getTestOtp(api, email, meetingId)`.
@@ -606,7 +607,20 @@ export async function authenticateVoter(
   await page.context().clearCookies({ name: 'agm_session' });
   await page.getByLabel("Email address").fill(email);
   await page.getByRole("button", { name: "Send Verification Code" }).click();
-  await expect(page.getByLabel("Verification code")).toBeVisible({ timeout: 15000 });
+
+  // Wait for either the channel selector (has_phone: true) or the verification code
+  // input (has_phone: false) to appear after the API round-trip completes.
+  const channelSelector = page.getByRole("radiogroup", { name: "Verification channel" });
+  const codeInput = page.getByLabel("Verification code");
+  // Use .or() to race the two locators — Playwright stops tracking both once one resolves.
+  // Promise.race + waitFor leaves a dangling 15s action running that poisons later page actions.
+  await channelSelector.or(codeInput).waitFor({ state: "visible", timeout: 15000 });
+  const whichAppeared = (await channelSelector.isVisible()) ? "channel" : "code";
+  if (whichAppeared === "channel") {
+    await page.getByRole("radio", { name: "Email" }).check();
+    await page.getByRole("button", { name: "Send code" }).click();
+    await expect(codeInput).toBeVisible({ timeout: 15000 });
+  }
   const code = await getOtp();
   await page.getByLabel("Verification code").fill(code);
   await page.getByRole("button", { name: "Verify" }).click();

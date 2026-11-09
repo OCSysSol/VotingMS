@@ -12,7 +12,7 @@ This document covers all building management, lot owner management, CSV/Excel im
 - Support bulk import of lot owners (CSV/Excel) with upsert semantics that preserve existing AGM snapshots
 - Support financial positions (in-arrear/normal) per lot, bulk-importable and editable in the admin UI
 - Support proxy nominations per lot, bulk-importable and editable in the admin UI
-- Store optional given name and surname per owner email and proxy contact
+- Store person identity (name, email, phone) once per real-world person, shared across all lots they own or proxy for
 
 ---
 
@@ -641,14 +641,113 @@ This document covers all building management, lot owner management, CSV/Excel im
 
 ---
 
+---
+
+### US-PERS-01: Normalised persons model — identity stored once per real-world person
+
+**Status:** ✅ Implemented — branch: `feat/persons-refactor`, committed 2026-05-05
+
+**Description:** As a building manager, I want each real-world person's contact details (name, email, phone) to be stored exactly once so that updating a person's phone or name in one place is reflected everywhere — across all lots they own or proxy for — without requiring repeated manual updates.
+
+**Background:** The current model stores `(given_name, surname)` on each `lot_owner_emails` row and `(proxy_email, given_name, surname)` inline on each `lot_proxies` row. A person who owns three lots has their name stored three times. A proxy representing five lots has their email and name stored five times. Any update must touch all rows. This story replaces that model with a normalised `persons` table.
+
+**Acceptance Criteria:**
+
+- [ ] A `persons` table exists with columns: `id` (UUID PK), `email` (VARCHAR UNIQUE NOT NULL), `phone_number` (VARCHAR(20) nullable), `given_name` (VARCHAR nullable), `surname` (VARCHAR nullable), `created_at` (TIMESTAMPTZ)
+- [ ] The `lot_owner_emails` table is replaced by a `lot_persons` junction table: `(lot_id FK→lot_owners, person_id FK→persons)` with composite PK
+- [ ] `lot_owners.given_name` and `lot_owners.surname` columns are removed
+- [ ] `lot_proxies.proxy_email`, `lot_proxies.given_name`, `lot_proxies.surname` are replaced by `lot_proxies.person_id FK→persons`
+- [ ] `GET /api/admin/buildings/{id}/lot-owners` and `GET /api/admin/lot-owners/{id}` return a `persons` list field on each lot, where each entry has `{id, email, given_name, surname, phone_number}`
+- [ ] The backward-compatible `emails: string[]` and `owner_emails: [{id, email, given_name, surname, phone_number}]` computed fields are still returned so existing frontend code continues to work
+- [ ] Top-level `given_name` and `surname` fields are removed from `LotOwnerOut`
+- [ ] `POST /api/admin/lot-owners/{id}/owner-emails` accepts `{email}` only; service resolves or creates the person by email
+- [ ] `PATCH /api/admin/persons/{person_id}` updates `email`, `given_name`, `surname`, and/or `phone_number` on a person; returns 409 if email conflicts with another person
+- [ ] `DELETE /api/admin/lot-owners/{id}/persons/{person_id}` removes the `lot_persons` link; the `persons` row is retained
+- [ ] `GET /api/admin/persons/lookup?email={email}` returns `PersonOut` (200) if found, 404 if not found; admin-only
+- [ ] `PUT /api/admin/lot-owners/{id}/proxy` accepts `{proxy_email}` only (no name fields); service resolves or creates the person by email
+- [ ] Proxy name is displayed in the admin UI from `lot_owner.proxy_given_name` / `proxy_surname`, which are sourced from the linked person row
+- [ ] The admin lot owner edit modal "Add owner" email input shows a person autocomplete: if the typed email exists in `persons`, the name and phone are pre-filled as a read-only preview
+- [ ] **Import fill-blanks policy:** on CSV/Excel re-import, `persons.phone_number` is only written if the person currently has no phone; `persons.given_name`/`persons.surname` are only written if the person currently has both name fields NULL. CSV data never overwrites fields that are already set.
+- [ ] **Import reconciliation:** on re-import, `lot_persons` links for a lot are reconciled — new emails are linked, removed emails are unlinked, but the `persons` row is never deleted
+- [ ] **Multi-owner lots:** if a CSV has multiple rows for the same `lot_number` with different emails, all emails are linked as separate persons on that lot
+- [ ] **Lots with no email:** CSV rows with a blank email column are processed without creating a person; the lot is upserted with entitlement/financial data only
+- [ ] Authentication (`POST /api/auth/verify` and `POST /api/auth/request-otp`) resolves lots via `lot_persons JOIN persons` (owner path) and `lot_proxies JOIN persons` (proxy path)
+- [ ] OTP SMS delivery fetches phone from `persons.phone_number`
+- [ ] Alembic migration migrates all existing data from `lot_owner_emails` → `persons` + `lot_persons`, and from `lot_proxies.proxy_email` → `lot_proxies.person_id`, with no data loss
+- [ ] All existing voter, proxy-voter, in-arrear-lot, and admin E2E scenarios continue to pass after the migration
+- [ ] All tests pass at 100% coverage
+- [ ] Typecheck/lint passes
+
+---
+
+### US-FORM-UX-01: Email-first field order and person autocomplete in lot owner and proxy forms
+
+**Status:** ✅ Implemented — branch: `feat/lot-owner-form-ux`, committed 2026-05-05
+
+**Description:** As a building manager, I want the email field to appear first in the add/edit forms for lot owners and proxies, and I want the system to suggest matching existing persons as I type so I can quickly associate an existing person without re-entering their details.
+
+**Acceptance Criteria:**
+
+- [ ] In the "Add owner" sub-form inside the lot owner edit modal, the email input appears first (above given name, surname, phone)
+- [ ] In the add proxy section of the lot owner edit modal, the email input appears first (above given name and surname)
+- [ ] As the user types in the email field (owner or proxy), a dropdown suggests matching existing persons after a 300 ms debounce; each suggestion is displayed as `Given Surname <email>` (or just `<email>` if no name is stored)
+- [ ] The suggestion list shows at most 10 results
+- [ ] The autocomplete endpoint is `GET /api/admin/persons/search?q=<prefix>&limit=10` (admin-only); it returns persons whose email starts with the typed prefix (case-insensitive)
+- [ ] Selecting a suggestion auto-populates the name and phone fields with the person's stored values
+- [ ] Auto-populated name/phone fields remain editable; the user may change them before saving
+- [ ] If the user types an email that does not match any suggestion and submits, the form behaves as it does today (no autocomplete side-effects)
+- [ ] All existing form validation (email format, required fields) is unchanged
+- [ ] Keyboard navigation: Up/Down arrows move focus through suggestions; Enter selects; Escape closes the dropdown
+- [ ] Typecheck/lint passes; all tests pass at 100% coverage
+
+---
+
+### US-FORM-UX-02: Conflict warning when person details differ from stored record
+
+**Status:** ✅ Implemented — branch: `feat/lot-owner-form-ux`, committed 2026-05-05
+
+**Description:** As a building manager, I want the system to warn me before saving when the name or phone I have entered differs from the existing record for that email, so I know that saving will update the shared person record across all lots and proxies.
+
+**Acceptance Criteria:**
+
+- [ ] After the user submits the add-owner or set-proxy form and the submitted email matches an existing `persons` row whose `given_name`, `surname`, or `phone_number` differs from what was submitted, a confirmation modal is shown before the API call proceeds
+- [ ] The modal title is "Update person details?"
+- [ ] The modal body is "The name or phone number you entered is different from the existing record for [email]. Updating will apply to all lots and proxies linked to this person. Do you want to continue?"
+- [ ] The modal has two buttons: "Cancel" and "Update and save"
+- [ ] Clicking "Update and save" proceeds with the save (calling the existing add-owner or set-proxy endpoint, which will update the person's details)
+- [ ] Clicking "Cancel" closes the modal and returns to the form without making any API call
+- [ ] The conflict check is performed client-side against the person data retrieved during autocomplete (or from a lookup on submit if no autocomplete suggestion was selected)
+- [ ] If the email is new (no existing person row), no modal is shown and the form saves normally
+- [ ] If the email matches an existing person and the submitted name/phone match the stored values exactly, no modal is shown
+- [ ] Typecheck/lint passes; all tests pass at 100% coverage
+
+---
+
+### US-FORM-UX-03: Phone number field on proxy add/edit form
+
+**Status:** ✅ Implemented — branch: `feat/lot-owner-form-ux`, committed 2026-05-05
+
+**Description:** As a building manager, I want to enter and edit a phone number for a proxy contact directly in the add/edit proxy form, so proxy persons have a complete contact record consistent with lot owner persons.
+
+**Acceptance Criteria:**
+
+- [ ] The "Set proxy" section of the lot owner edit modal includes a "Phone number" input (optional), placed below the name fields and above the email field
+- [ ] When a proxy is already set, the displayed proxy row includes the phone number if one is stored; format: `Given Surname <email> phone`
+- [ ] The inline proxy edit state (shown when editing an existing proxy) includes the phone number field pre-filled with the stored value
+- [ ] `PUT /api/admin/lot-owners/{id}/proxy` request schema gains an optional `phone_number` field; the service writes it to the linked `persons` row using the fill-blanks policy (only if `persons.phone_number` is currently NULL)
+- [ ] The conflict warning modal (US-FORM-UX-02) considers `phone_number` changes when deciding whether to show
+- [ ] Typecheck/lint passes; all tests pass at 100% coverage
+
+---
+
 ## Functional Requirements
 
 - FR-1: A building record contains: name, manager email address, and associated lot owner records. Buildings can be created individually via a form or bulk-created/updated via CSV or Excel upload. Building names must be globally unique (case-insensitive).
-- FR-3: A lot owner record contains: building ID, lot number (string), unit entitlement (non-negative integer), financial position (`normal` | `in_arrear`), optional given name and surname. Lot number must be unique per building. Multiple lots may share the same email address within a building (multi-lot owners). Lot owner records cannot be deleted — only created or edited.
-- FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). Import performs a full replacement of existing records for the building. Changes do not affect the weight snapshot of any already-open meeting.
+- FR-3: A lot owner record contains: building ID, lot number (string), unit entitlement (non-negative integer), financial position (`normal` | `in_arrear`). Lot number must be unique per building. Multiple lots may share the same person (email) within a building (multi-lot owners). Lot owner records cannot be deleted — only created or edited.
+- FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). Import performs upsert semantics (never deletes lots). Changes do not affect the weight snapshot of any already-open meeting.
 - FR-V2: `LotOwner.financial_position` is a non-nullable enum: `'normal'` | `'in_arrear'`. Default is `'normal'`. Can be updated via import, manual edit, or admin form.
-- FR-V3: A new `lot_owner_emails` table stores zero or more email addresses per lot. Authentication looks up voters by email in `lot_owner_emails`, not in `lot_owners`.
-- Proxy nominations are building-scoped and apply to all meetings for that building until removed. One proxy per lot at a time.
+- FR-V3: A `persons` table stores one row per real-world person (unique by email). A `lot_persons` junction table links persons to lots. Authentication looks up voters by email in `persons JOIN lot_persons`, not in `lot_owner_emails`.
+- Proxy nominations are building-scoped and apply to all meetings for that building until removed. One proxy per lot at a time. Proxy contact details are stored on the `persons` row.
 - `financial_position_snapshot` on `GeneralMeetingLotWeight` is captured at meeting creation time and is unaffected by subsequent imports.
 
 ---

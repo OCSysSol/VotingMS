@@ -32,6 +32,48 @@ After merge, the `preview/<branch>` Neon branch must be deleted to avoid orphane
 
 ---
 
+## Security Headers
+
+Security headers are applied at two layers:
+
+1. **`vercel.json` (all routes)** — a `headers` entry with `source: "/(.*)"`  injects CSP, Permissions-Policy, and Cross-Origin-Embedder-Policy on every Vercel edge response, including frontend HTML pages served directly from the CDN. This ensures headers are present on all routes, not just API routes.
+2. **`SecurityHeadersMiddleware` in `backend/app/main.py` (API routes)** — applies the full `_SECURITY_HEADERS` dict to all FastAPI responses including error responses (500, 503) and CORS preflight responses. This acts as belt-and-suspenders for all `/api/*` responses that go through the Lambda.
+
+The two layers together ensure complete coverage: Vercel CDN responses (frontend pages) and Lambda responses (API) both carry the required headers.
+
+| Header | Value | Purpose |
+|---|---|---|
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` | Force HTTPS |
+| `X-Frame-Options` | `DENY` | Prevent clickjacking |
+| `X-Content-Type-Options` | `nosniff` | Prevent MIME sniffing |
+| `X-XSS-Protection` | `1; mode=block` | Legacy XSS filter |
+| `Referrer-Policy` | `strict-origin-when-cross-origin` | Limit referrer leakage |
+| `Content-Security-Policy` | See below | Restrict resource loading |
+| `Permissions-Policy` | `camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()` | Disable unused browser features (DAST rule 10063) |
+| `Cross-Origin-Embedder-Policy` | `unsafe-none` | Allow cross-origin resources without CORP requirement (DAST rule 90004) |
+
+**CSP directives:**
+- `default-src 'self'` — restrict all sources to same origin by default
+- `script-src 'self' 'unsafe-inline' https://vercel.live https://*.vercel.live` — `unsafe-inline` required for Vite module preload polyfill; vercel.live for preview widget
+- `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`
+- `font-src 'self' https://fonts.gstatic.com`
+- `img-src 'self' data: https:`
+- `connect-src 'self' https://vercel.live wss://vercel.live https://*.vercel.live wss://*.vercel.live`
+- `frame-src https://vercel.live https://*.vercel.live` — Vercel preview toolbar iframes
+- `frame-ancestors 'none'` — prevent this page from being framed
+- `object-src 'none'` — disallow Flash/Java plugins (DAST rule 10055)
+- `base-uri 'self'` — prevent base tag injection (DAST rule 10055)
+
+**ZAP DAST rules suppressed** (see `.github/zap-rules.tsv`):
+- `10049` — Non-Storable Content: API responses intentionally use `Cache-Control: no-store`
+- `10050` — Retrieved from Cache: CDN static assets, expected
+- `10109` — Modern Web Application: informational only
+- `90003` — Sub Resource Integrity Missing: Vercel-injected scripts, not under our control
+- `10020` — Missing Anti-clickjacking Header: handled by CSP `frame-ancestors`
+- `10038` — CSP Header Not Set: set by middleware, ZAP may not detect dynamically
+
+---
+
 ## Database Connection Pool
 
 **Settings (`backend/app/database.py`):**

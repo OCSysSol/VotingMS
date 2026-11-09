@@ -13,11 +13,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import openpyxl
 
 from app.models import Building, LotOwner
-from app.models.lot_owner_email import LotOwnerEmail
+from app.models.lot import Lot
+from app.models.lot_person import lot_persons
+from app.models.person import Person
 
 # Helpers and fixtures (make_csv, make_excel, client, building, building_with_owners)
 # are defined in conftest.py and automatically available to all test modules.
-from tests.conftest import make_csv, make_excel
+from tests.conftest import make_csv, make_excel, add_person_to_lot
 
 # ---------------------------------------------------------------------------
 # POST /api/admin/buildings/import
@@ -909,7 +911,7 @@ class TestArchiveBuilding:
         lo = LotOwner(building_id=b.id, lot_number="AO1", unit_entitlement=100)
         db_session.add(lo)
         await db_session.flush()
-        db_session.add(LotOwnerEmail(lot_owner_id=lo.id, email="lone@test.com"))
+        await add_person_to_lot(db_session, lo, "lone@test.com")
         await db_session.commit()
 
         await client.post(f"/api/admin/buildings/{b.id}/archive")
@@ -932,8 +934,8 @@ class TestArchiveBuilding:
         await db_session.flush()
 
         # Same email in both buildings
-        db_session.add(LotOwnerEmail(lot_owner_id=lo1.id, email="shared@test.com"))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo2.id, email="shared@test.com"))
+        await add_person_to_lot(db_session, lo1, "shared@test.com")
+        await add_person_to_lot(db_session, lo2, "shared@test.com")
         await db_session.commit()
 
         await client.post(f"/api/admin/buildings/{b1.id}/archive")
@@ -962,9 +964,9 @@ class TestArchiveBuilding:
         await db_session.flush()
 
         shared_email = "multishared@test.com"
-        db_session.add(LotOwnerEmail(lot_owner_id=lo1.id, email=shared_email))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo2.id, email=shared_email))
-        db_session.add(LotOwnerEmail(lot_owner_id=lo3.id, email=shared_email))
+        await add_person_to_lot(db_session, lo1, shared_email)
+        await add_person_to_lot(db_session, lo2, shared_email)
+        await add_person_to_lot(db_session, lo3, shared_email)
         await db_session.commit()
 
         # Must not raise MultipleResultsFound — must return HTTP 200
@@ -1308,6 +1310,58 @@ class TestDeleteBuilding:
     ):
         response = await client.delete(f"/api/admin/buildings/{uuid.uuid4()}")
         assert response.status_code == 404
+
+    # --- Orphan person cleanup ---
+
+    async def test_delete_building_removes_persons_only_linked_to_that_building(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Persons whose only lot_persons link is in the deleted building are removed."""
+        b = Building(name="Orphan Delete Building", manager_email="orphan@test.com")
+        b.is_archived = True
+        db_session.add(b)
+        await db_session.flush()
+        lo = LotOwner(building_id=b.id, lot_number="OP1", unit_entitlement=10)
+        db_session.add(lo)
+        await db_session.flush()
+        person = await add_person_to_lot(db_session, lo, "orphan.only@test.com")
+        await db_session.commit()
+        person_id = person.id
+
+        await client.delete(f"/api/admin/buildings/{b.id}")
+
+        result = await db_session.execute(select(Person).where(Person.id == person_id))
+        assert result.scalar_one_or_none() is None, (
+            "Person with no remaining lot_persons or lot_proxies should be deleted"
+        )
+
+    async def test_delete_building_does_not_remove_persons_linked_to_other_buildings(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Persons who own lots in another building are NOT deleted when this building is deleted."""
+        b_del = Building(name="Delete This Building", manager_email="del@test.com")
+        b_del.is_archived = True
+        b_keep = Building(name="Keep This Building", manager_email="keep@test.com")
+        db_session.add_all([b_del, b_keep])
+        await db_session.flush()
+
+        lo_del = LotOwner(building_id=b_del.id, lot_number="D1", unit_entitlement=10)
+        lo_keep = LotOwner(building_id=b_keep.id, lot_number="K1", unit_entitlement=10)
+        db_session.add_all([lo_del, lo_keep])
+        await db_session.flush()
+
+        # Same person linked to both buildings
+        person = await add_person_to_lot(db_session, lo_del, "shared.person@test.com")
+        await add_person_to_lot(db_session, lo_keep, "shared.person@test.com")
+        await db_session.commit()
+        person_id = person.id
+
+        await client.delete(f"/api/admin/buildings/{b_del.id}")
+
+        result = await db_session.execute(select(Person).where(Person.id == person_id))
+        assert result.scalar_one_or_none() is not None, (
+            "Person still linked to another building's lot must NOT be deleted"
+        )
 
 
 
@@ -1793,9 +1847,9 @@ class TestAdminImportRateLimitBuildings:
         from app.rate_limiter import admin_import_limiter
 
         # Exhaust the limit
-        admin_import_limiter._timestamps["admin"] = []
+        admin_import_limiter._timestamps["test-user-id"] = []
         for _ in range(20):
-            admin_import_limiter._timestamps["admin"].append(
+            admin_import_limiter._timestamps["test-user-id"].append(
                 __import__("time").monotonic()
             )
 

@@ -72,7 +72,8 @@ describe("SettingsPage", () => {
   it("renders form fields after config loads on UI & Theme tab", async () => {
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
-    expect(screen.getByLabelText("Logo URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument();
+    expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument();
     expect(screen.getByLabelText("Primary colour")).toBeInTheDocument();
     expect(screen.getByLabelText("Support email")).toBeInTheDocument();
   });
@@ -85,7 +86,8 @@ describe("SettingsPage", () => {
     );
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("App name")).toHaveValue("Test Corp"));
-    expect(screen.getByLabelText("Logo URL")).toHaveValue("https://example.com/logo.png");
+    // Logo URL is shown as a read-only "Current:" line, not an editable text input
+    await waitFor(() => expect(screen.getByText("Current: https://example.com/logo.png")).toBeInTheDocument());
     expect(screen.getByLabelText("Support email")).toHaveValue("help@test.com");
   });
 
@@ -211,14 +213,6 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("App name")).toHaveValue("Changed Name");
   });
 
-  it("updates logo URL field on user input", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Logo URL")).toBeInTheDocument());
-    await user.type(screen.getByLabelText("Logo URL"), "https://cdn.example.com/logo.png");
-    expect(screen.getByLabelText("Logo URL")).toHaveValue("https://cdn.example.com/logo.png");
-  });
-
   it("updates primary colour text field on user input", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -278,8 +272,9 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
   });
 
-  it("uploading a valid file populates the logo URL field with the returned URL", async () => {
+  it("uploading a valid file shows the returned URL as current logo and includes it in save payload", async () => {
     const user = userEvent.setup();
+    const spy = vi.spyOn(configApi, "updateAdminConfig");
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("Upload logo image")).toBeInTheDocument());
 
@@ -287,9 +282,15 @@ describe("SettingsPage", () => {
     const file = new File(["fake-png"], "logo.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Upload logo image"), file);
 
+    // Returned URL is displayed as read-only current value
     await waitFor(() =>
-      expect(screen.getByLabelText("Logo URL")).toHaveValue(blobUrl)
+      expect(screen.getByText(`Current: ${blobUrl}`)).toBeInTheDocument()
     );
+
+    // Saving includes the uploaded URL in the payload
+    await user.click(screen.getByTestId("branding-save-btn"));
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ logo_url: blobUrl }));
   });
 
   it("shows Uploading message during upload then hides it on success", async () => {
@@ -379,64 +380,43 @@ describe("SettingsPage", () => {
     expect(screen.queryByText("Uploading…")).not.toBeInTheDocument();
   });
 
-  // --- Favicon URL field ---
+  // --- Favicon current URL display ---
 
-  it("renders the favicon URL field after loading", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
-  });
-
-  it("populates favicon URL field with loaded config value", async () => {
+  it("shows current favicon URL as read-only text when favicon_url is set", async () => {
     server.use(
       http.get(`${BASE}/api/admin/config`, () =>
         HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
       )
     );
     renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
+    await waitFor(() => expect(screen.getByText("Current: https://example.com/fav.png")).toBeInTheDocument());
   });
 
-  it("does not show favicon preview when favicon_url is null", async () => {
+  it("does not show current favicon URL text when favicon_url is null", async () => {
     server.use(
       http.get(`${BASE}/api/admin/config`, () =>
         HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: null, primary_colour: "#005f73", support_email: "" })
       )
     );
     renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
+    expect(screen.queryByText(/^Current: /)).not.toBeInTheDocument();
   });
 
-  it("updates favicon URL field on user input", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
-    await user.type(screen.getByLabelText("Favicon URL"), "https://cdn.example.com/fav.ico");
-    expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://cdn.example.com/fav.ico");
-  });
-
-  it("clears favicon_url to null when field is cleared", async () => {
-    const user = userEvent.setup();
+  it("includes favicon_url in save payload when loaded from config", async () => {
     server.use(
       http.get(`${BASE}/api/admin/config`, () =>
         HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: "https://example.com/fav.png", primary_colour: "#005f73", support_email: "" })
       )
     );
-    renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toHaveValue("https://example.com/fav.png"));
-    await user.clear(screen.getByLabelText("Favicon URL"));
-    expect(screen.getByLabelText("Favicon URL")).toHaveValue("");
-  });
-
-  it("includes favicon_url in save payload", async () => {
     const user = userEvent.setup();
     const spy = vi.spyOn(configApi, "updateAdminConfig");
     renderPage();
-    await waitFor(() => expect(screen.getByLabelText("Favicon URL")).toBeInTheDocument());
-    await user.type(screen.getByLabelText("Favicon URL"), "https://cdn.example.com/fav.ico");
+    await waitFor(() => expect(screen.getByText("Current: https://example.com/fav.png")).toBeInTheDocument());
     await user.click(screen.getByTestId("branding-save-btn"));
     await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
     expect(spy).toHaveBeenCalledWith(
-      expect.objectContaining({ favicon_url: "https://cdn.example.com/fav.ico" })
+      expect.objectContaining({ favicon_url: "https://example.com/fav.png" })
     );
   });
 
@@ -447,8 +427,9 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
   });
 
-  it("uploading a valid favicon file populates the favicon URL field with the returned URL", async () => {
+  it("uploading a valid favicon file shows the returned URL as current favicon and includes it in save payload", async () => {
     const user = userEvent.setup();
+    const spy = vi.spyOn(configApi, "updateAdminConfig");
     renderPage();
     await waitFor(() => expect(screen.getByLabelText("Upload favicon image")).toBeInTheDocument());
 
@@ -456,9 +437,15 @@ describe("SettingsPage", () => {
     const file = new File(["fake-png"], "favicon.png", { type: "image/png" });
     await user.upload(screen.getByLabelText("Upload favicon image"), file);
 
+    // Returned URL is displayed as read-only current value
     await waitFor(() =>
-      expect(screen.getByLabelText("Favicon URL")).toHaveValue(blobUrl)
+      expect(screen.getByText(`Current: ${blobUrl}`)).toBeInTheDocument()
     );
+
+    // Saving includes the uploaded URL in the payload
+    await user.click(screen.getByTestId("branding-save-btn"));
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(expect.objectContaining({ favicon_url: blobUrl }));
   });
 
   it("shows Uploading message during favicon upload then hides it on success", async () => {
@@ -2090,5 +2077,632 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(screen.getByRole("tablist")).toBeInTheDocument());
     const tablist = screen.getByRole("tablist");
     expect(tablist).toHaveStyle({ overflowX: "auto" });
+  });
+
+  // --- SMS tab ---
+
+  it("renders SMS tab button", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+  });
+
+  it("clicking SMS tab activates it and shows SMS settings panel", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    expect(screen.getByRole("tab", { name: "SMS" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel", { name: /SMS/i })).not.toHaveAttribute("hidden");
+  });
+
+  it("SMS panel has 'SMS Settings' heading", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    expect(screen.getByText("SMS Settings")).toBeInTheDocument();
+  });
+
+  it("SMS panel renders Enable SMS OTP checkbox unchecked by default", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const checkbox = screen.getByLabelText("Enable SMS OTP");
+    expect(checkbox).not.toBeChecked();
+  });
+
+  it("SMS panel renders provider select with correct options", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const select = screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement;
+    const options = Array.from(select.options).map((o) => o.value);
+    expect(options).toContain("");
+    expect(options).toContain("smtp2go");
+    expect(options).toContain("twilio");
+    expect(options).toContain("clicksend");
+    expect(options).toContain("webhook");
+  });
+
+  it("selecting smtp2go provider shows smtp2go-specific fields", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "smtp2go");
+    expect(screen.getByLabelText("API key")).toBeInTheDocument();
+    expect(screen.getByLabelText("Sender number")).toBeInTheDocument();
+  });
+
+  it("selecting twilio provider shows twilio-specific fields", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "twilio");
+    expect(screen.getByLabelText("Account SID")).toBeInTheDocument();
+    expect(screen.getByLabelText("Auth token")).toBeInTheDocument();
+    expect(screen.getByLabelText("From number")).toBeInTheDocument();
+  });
+
+  it("selecting clicksend provider shows clicksend-specific fields", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "clicksend");
+    expect(within(smsPanel).getByLabelText("Username")).toBeInTheDocument();
+    expect(within(smsPanel).getByLabelText("API key")).toBeInTheDocument();
+    expect(within(smsPanel).getByLabelText("From number")).toBeInTheDocument();
+  });
+
+  it("selecting webhook provider shows webhook-specific fields", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "webhook");
+    expect(screen.getByLabelText("Webhook URL")).toBeInTheDocument();
+    expect(screen.getByLabelText("Webhook secret (optional)")).toBeInTheDocument();
+  });
+
+  it("smtp2go fields are NOT shown when no provider is selected", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    expect(screen.queryByLabelText("API key")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Sender number")).not.toBeInTheDocument();
+  });
+
+  it("twilio fields are NOT shown when smtp2go is selected", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "smtp2go");
+    expect(screen.queryByLabelText("Account SID")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Auth token")).not.toBeInTheDocument();
+  });
+
+  it("saves SMS settings and shows success message", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => {
+      expect(screen.getByText("SMS settings saved.")).toBeInTheDocument();
+    });
+  });
+
+  it("SMS settings save: UI has NOT transitioned while pending, HAS transitioned after complete", async () => {
+    let resolveRequest!: (value: Response) => void;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, () =>
+        new Promise<Response>((resolve) => { resolveRequest = resolve; })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    // Button should show Saving… while pending
+    expect(screen.getByTestId("sms-save-btn")).toHaveTextContent("Saving…");
+    expect(screen.queryByText("SMS settings saved.")).not.toBeInTheDocument();
+    // Resolve the request
+    await act(async () => {
+      resolveRequest(HttpResponse.json({
+        sms_enabled: false,
+        sms_provider: null,
+        sms_smtp2go_api_key_is_set: false,
+        sms_from_number: null,
+        sms_twilio_account_sid: null,
+        sms_twilio_auth_token_is_set: false,
+        sms_twilio_from_number: null,
+        sms_clicksend_username: null,
+        sms_clicksend_api_key_is_set: false,
+        sms_clicksend_from_number: null,
+        sms_webhook_url: null,
+        sms_webhook_secret_is_set: false,
+      }) as unknown as Response);
+    });
+    await waitFor(() => expect(screen.getByText("SMS settings saved.")).toBeInTheDocument());
+  });
+
+  it("shows error when SMS save fails", async () => {
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({ detail: "Save failed" }, { status: 500 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => {
+      expect(screen.getByText(/500/)).toBeInTheDocument();
+    });
+  });
+
+  it("test SMS section is NOT shown when sms_enabled is false", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    expect(screen.queryByText("Send test SMS")).not.toBeInTheDocument();
+  });
+
+  it("test SMS section IS shown when sms_enabled checkbox is checked", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    // The test section heading "Send test SMS" and the button both appear; check the button
+    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeInTheDocument();
+  });
+
+  it("test SMS section shows phone input and send button", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    expect(screen.getByLabelText("Phone number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeInTheDocument();
+  });
+
+  it("Send test SMS button is disabled when phone input is empty", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeDisabled();
+  });
+
+  it("Send test SMS calls endpoint and shows success message", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await waitFor(() => {
+      expect(screen.getByText("Test SMS sent to +61412345678")).toBeInTheDocument();
+    });
+  });
+
+  it("Send test SMS shows error message on failure", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/config/sms/test`, () =>
+        HttpResponse.json({ detail: "Send failed" }, { status: 500 })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await waitFor(() => {
+      expect(screen.getByText(/500/)).toBeInTheDocument();
+    });
+  });
+
+  it("SMS settings loaded from API on mount: enabled checkbox reflects fixture", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "twilio",
+          sms_smtp2go_api_key_is_set: false,
+          sms_from_number: null,
+          sms_twilio_account_sid: "AC123",
+          sms_twilio_auth_token_is_set: true,
+          sms_twilio_from_number: "+61400000000",
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    expect(screen.getByLabelText("Enable SMS OTP")).toBeChecked();
+    expect(screen.getByRole("combobox", { name: "Provider" })).toHaveValue("twilio");
+    expect(screen.getByLabelText("Account SID")).toHaveValue("AC123");
+    expect(screen.getByLabelText("From number")).toHaveValue("+61400000000");
+  });
+
+  it("SMS save with twilio provider: includes twilio fields in payload", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "twilio",
+          sms_smtp2go_api_key_is_set: false,
+          sms_from_number: null,
+          sms_twilio_account_sid: "AC999",
+          sms_twilio_auth_token_is_set: true,
+          sms_twilio_from_number: "+61411111111",
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "twilio");
+    await user.type(screen.getByLabelText("Account SID"), "AC999");
+    await user.type(screen.getByLabelText("Auth token"), "secret-token");
+    await user.type(screen.getByLabelText("From number"), "+61411111111");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_provider).toBe("twilio");
+    expect(capturedBody?.sms_twilio_account_sid).toBe("AC999");
+    expect(capturedBody?.sms_twilio_auth_token).toBe("secret-token");
+    expect(capturedBody?.sms_twilio_from_number).toBe("+61411111111");
+  });
+
+  it("SMS save with smtp2go provider: includes smtp2go fields in payload", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400001111",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "smtp2go");
+    await user.type(screen.getByLabelText("API key"), "my-api-key");
+    await user.type(screen.getByLabelText("Sender number"), "+61400001111");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_provider).toBe("smtp2go");
+    expect(capturedBody?.sms_smtp2go_api_key).toBe("my-api-key");
+    expect(capturedBody?.sms_from_number).toBe("+61400001111");
+  });
+
+  it("SMS save with clicksend provider: includes clicksend fields in payload", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "clicksend",
+          sms_smtp2go_api_key_is_set: false,
+          sms_from_number: null,
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: "user@example.com",
+          sms_clicksend_api_key_is_set: true,
+          sms_clicksend_from_number: "+61400002222",
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.click(within(smsPanel).getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "clicksend");
+    await user.type(within(smsPanel).getByLabelText("Username"), "user@example.com");
+    await user.type(within(smsPanel).getByLabelText("API key"), "cs-api-key");
+    await user.type(within(smsPanel).getByLabelText("From number"), "+61400002222");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_provider).toBe("clicksend");
+    expect(capturedBody?.sms_clicksend_username).toBe("user@example.com");
+    expect(capturedBody?.sms_clicksend_api_key).toBe("cs-api-key");
+    expect(capturedBody?.sms_clicksend_from_number).toBe("+61400002222");
+  });
+
+  it("SMS save with webhook provider: includes webhook fields in payload", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "webhook",
+          sms_smtp2go_api_key_is_set: false,
+          sms_from_number: null,
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: "https://example.com/sms",
+          sms_webhook_secret_is_set: true,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "webhook");
+    await user.type(screen.getByLabelText("Webhook URL"), "https://example.com/sms");
+    await user.type(screen.getByLabelText("Webhook secret (optional)"), "my-secret");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_provider).toBe("webhook");
+    expect(capturedBody?.sms_webhook_url).toBe("https://example.com/sms");
+    expect(capturedBody?.sms_webhook_secret).toBe("my-secret");
+  });
+
+  it("getSmsConfig load failure shows error message", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({ detail: "Server error" }, { status: 500 })
+      )
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Failed to load settings.")).toBeInTheDocument();
+    });
+  });
+
+  it("SMS save with smtp2go: omits api_key from payload when field is empty", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true, sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true, sms_from_number: "+61400001111",
+          sms_twilio_account_sid: null, sms_twilio_auth_token_is_set: false, sms_twilio_from_number: null,
+          sms_clicksend_username: null, sms_clicksend_api_key_is_set: false, sms_clicksend_from_number: null,
+          sms_webhook_url: null, sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.click(within(smsPanel).getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "smtp2go");
+    // Leave API key empty — tests the falsy branch
+    await user.type(within(smsPanel).getByLabelText("Sender number"), "+61400001111");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_smtp2go_api_key).toBeUndefined();
+  });
+
+  it("SMS save with twilio: omits auth_token from payload when field is empty", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true, sms_provider: "twilio",
+          sms_smtp2go_api_key_is_set: false, sms_from_number: null,
+          sms_twilio_account_sid: "AC123", sms_twilio_auth_token_is_set: true, sms_twilio_from_number: "+61400001111",
+          sms_clicksend_username: null, sms_clicksend_api_key_is_set: false, sms_clicksend_from_number: null,
+          sms_webhook_url: null, sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.click(within(smsPanel).getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "twilio");
+    await user.type(within(smsPanel).getByLabelText("Account SID"), "AC123");
+    // Leave auth token empty — tests the falsy branch
+    await user.type(within(smsPanel).getByLabelText("From number"), "+61400001111");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_twilio_auth_token).toBeUndefined();
+  });
+
+  it("SMS save with clicksend: omits api_key from payload when field is empty", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true, sms_provider: "clicksend",
+          sms_smtp2go_api_key_is_set: false, sms_from_number: null,
+          sms_twilio_account_sid: null, sms_twilio_auth_token_is_set: false, sms_twilio_from_number: null,
+          sms_clicksend_username: "user@example.com", sms_clicksend_api_key_is_set: false, sms_clicksend_from_number: "+61400002222",
+          sms_webhook_url: null, sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.click(within(smsPanel).getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "clicksend");
+    await user.type(within(smsPanel).getByLabelText("Username"), "user@example.com");
+    // Leave API key empty — tests the falsy branch
+    await user.type(within(smsPanel).getByLabelText("From number"), "+61400002222");
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_clicksend_api_key).toBeUndefined();
+  });
+
+  it("SMS save with webhook: omits secret from payload when field is empty", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          sms_enabled: true, sms_provider: "webhook",
+          sms_smtp2go_api_key_is_set: false, sms_from_number: null,
+          sms_twilio_account_sid: null, sms_twilio_auth_token_is_set: false, sms_twilio_from_number: null,
+          sms_clicksend_username: null, sms_clicksend_api_key_is_set: false, sms_clicksend_from_number: null,
+          sms_webhook_url: "https://example.com/sms", sms_webhook_secret_is_set: false,
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const smsPanel = screen.getByRole("tabpanel", { name: /SMS/i });
+    await user.click(within(smsPanel).getByLabelText("Enable SMS OTP"));
+    await user.selectOptions(within(smsPanel).getByRole("combobox", { name: "Provider" }), "webhook");
+    await user.type(within(smsPanel).getByLabelText("Webhook URL"), "https://example.com/sms");
+    // Leave secret empty — tests the falsy branch
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(capturedBody).not.toBeNull());
+    expect(capturedBody?.sms_webhook_secret).toBeUndefined();
+  });
+
+  it("SMS save error uses fallback message for non-Error thrown value", async () => {
+    vi.spyOn(configApi, "updateSmsConfig").mockRejectedValueOnce("string-error");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => {
+      expect(screen.getByText("Failed to save SMS settings.")).toBeInTheDocument();
+    });
+  });
+
+  it("Send test SMS error uses fallback message for non-Error thrown value", async () => {
+    vi.spyOn(configApi, "testSmsConfig").mockRejectedValueOnce("string-error");
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByLabelText("Enable SMS OTP"));
+    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await waitFor(() => {
+      expect(screen.getByText("Test SMS failed.")).toBeInTheDocument();
+    });
+  });
+
+  it("provider select renders with null provider (shows empty string value)", async () => {
+    // Fixture default: sms_provider is null — select should show empty option
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const select = screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement;
+    expect(select.value).toBe("");
+  });
+
+  it("provider select: selecting empty option resets provider to null", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "twilio");
+    // Now select the blank option again — should reset to null
+    await user.selectOptions(screen.getByRole("combobox", { name: "Provider" }), "");
+    const select = screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement;
+    expect(select.value).toBe("");
+    // Twilio fields should be gone
+    expect(screen.queryByLabelText("Account SID")).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// OTP fields pass-through (values loaded from API are sent back on save)
+// ---------------------------------------------------------------------------
+
+describe("SettingsPage — OTP field pass-through", () => {
+  beforeEach(() => {
+    resetConfigFixture();
+  });
+
+  it("save passes otp_email_enabled and otp_sms_enabled from loaded config to API", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config`, () =>
+        HttpResponse.json({ app_name: "Test", logo_url: "", favicon_url: null, primary_colour: "#005f73", support_email: "", otp_email_enabled: false, otp_sms_enabled: true })
+      )
+    );
+    const user = userEvent.setup();
+    const spy = vi.spyOn(configApi, "updateAdminConfig");
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("branding-save-btn")).toBeInTheDocument());
+    await user.click(screen.getByTestId("branding-save-btn"));
+    await waitFor(() => expect(screen.getByText("Settings saved.")).toBeInTheDocument());
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({ otp_email_enabled: false, otp_sms_enabled: true })
+    );
+  });
+
+  it("UI & Theme tab does not render OTP channel checkboxes", async () => {
+    renderPage();
+    await waitFor(() => expect(screen.getByLabelText("App name")).toBeInTheDocument());
+    expect(screen.queryByLabelText("Enable email OTP verification")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Enable SMS OTP verification")).not.toBeInTheDocument();
   });
 });

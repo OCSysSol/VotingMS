@@ -2547,6 +2547,290 @@ describe("Bulk motion visibility", () => {
     await user.click(screen.getByRole("button", { name: "Save Changes" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Option limit cannot exceed the number of options.");
   });
+
+  it("shows validation error and character counters when Add Motion option exceeds 1000 characters", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    const opt1 = screen.getByLabelText("Option 1");
+    fireEvent.change(opt1, { target: { value: "A".repeat(1001) } });
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    // Check live character counters
+    const counter1 = screen.getByTestId("add-motion-option-1-counter");
+    expect(counter1).toHaveTextContent("1001/1000");
+    expect(counter1).toHaveClass("field__counter--error");
+
+    const counter2 = screen.getByTestId("add-motion-option-2-counter");
+    expect(counter2).toHaveTextContent("3/1000");
+    expect(counter2).not.toHaveClass("field__counter--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Option 1 exceeds the 1,000 character limit/i);
+  });
+
+  it("shows validation error when Add Motion has whitespace-only option", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+    await user.type(screen.getByLabelText("Option 3"), "   ");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Option text must not be empty.");
+  });
+
+  it("surfaces formatted 422 error from server when Add Motion option validation fails", async () => {
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:id/motions", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.type(screen.getByLabelText("Title *"), "Election");
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("option text must not exceed 1000 characters");
+    });
+  });
+
+  it("shows validation error and character counters when Edit Motion option exceeds 1000 characters", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    const opt1 = screen.getByLabelText("Option 1");
+    fireEvent.change(opt1, { target: { value: "A".repeat(1001) } });
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    // Check live character counters
+    const counter1 = screen.getByTestId("edit-motion-option-1-counter");
+    expect(counter1).toHaveTextContent("1001/1000");
+    expect(counter1).toHaveClass("field__counter--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(/Option 1 exceeds the 1,000 character limit/i);
+  });
+
+  it("shows validation error when Edit Motion has whitespace-only option", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+    await user.type(screen.getByLabelText("Option 3"), "   ");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Option text must not be empty.");
+  });
+
+  it("surfaces formatted 422 error from server when Edit Motion option validation fails", async () => {
+    server.use(
+      http.patch("http://localhost/api/admin/motions/:id", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const checkbox = screen.getByLabelText("Multi-choice question format");
+    await user.click(checkbox);
+    await user.type(screen.getByLabelText("Option 1"), "Alice");
+    await user.type(screen.getByLabelText("Option 2"), "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("option text must not exceed 1000 characters");
+    });
+  });
+
+  it("shows live character counters and validates field limits in Add Motion modal", async () => {
+    const user = userEvent.setup();
+    renderPage("agm1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Add Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Add Motion" }));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Add Motion" })).toBeInTheDocument();
+    });
+
+    const titleInput = screen.getByLabelText("Title *");
+    const descInput = screen.getByLabelText("Description");
+    const numInput = screen.getByLabelText("Motion number (optional)");
+
+    // Initial counters
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveTextContent("0/500");
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveTextContent("0/5000");
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveTextContent("0/50");
+
+    // Title limit check (> 500)
+    fireEvent.change(titleInput, { target: { value: "T".repeat(501) } });
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveTextContent("501/500");
+    expect(screen.getByTestId("add-motion-title-counter")).toHaveClass("field__counter--error");
+    expect(titleInput).toHaveAttribute("aria-invalid", "true");
+    expect(titleInput).toHaveClass("field__input--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title exceeds the 500 character limit (501/500 characters).");
+
+    // Reset Title to valid
+    fireEvent.change(titleInput, { target: { value: "Valid Title" } });
+
+    // Motion number limit check (> 50)
+    fireEvent.change(numInput, { target: { value: "N".repeat(51) } });
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveTextContent("51/50");
+    expect(screen.getByTestId("add-motion-number-counter")).toHaveClass("field__counter--error");
+    expect(numInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Motion number exceeds the 50 character limit (51/50 characters).");
+
+    // Reset Motion number to valid
+    fireEvent.change(numInput, { target: { value: "1" } });
+
+    // Description limit check (> 5000)
+    fireEvent.change(descInput, { target: { value: "D".repeat(5001) } });
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveTextContent("5001/5000");
+    expect(screen.getByTestId("add-motion-desc-counter")).toHaveClass("field__counter--error");
+    expect(descInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Motion" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Description exceeds the 5,000 character limit (5,001/5000 characters).");
+  });
+
+  it("shows live character counters and validates field limits in Edit Motion modal", async () => {
+    const user = userEvent.setup();
+    renderPage("agm-hidden-motion");
+    await waitFor(() => {
+      expect(screen.getByText("Hidden Motion")).toBeInTheDocument();
+    });
+    const editButton = screen.getByRole("button", { name: "Edit" });
+    await user.click(editButton);
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: "Edit Motion" })).toBeInTheDocument();
+    });
+
+    const titleInput = screen.getByLabelText("Title");
+    const descInput = screen.getByLabelText("Description");
+    const numInput = screen.getByLabelText("Motion number (optional)");
+
+    // Title limit check (> 500)
+    fireEvent.change(titleInput, { target: { value: "T".repeat(501) } });
+    expect(screen.getByTestId("modal-edit-title-counter")).toHaveTextContent("501/500");
+    expect(screen.getByTestId("modal-edit-title-counter")).toHaveClass("field__counter--error");
+    expect(titleInput).toHaveAttribute("aria-invalid", "true");
+    expect(titleInput).toHaveClass("field__input--error");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title exceeds the 500 character limit (501/500 characters).");
+
+    // Empty Title check
+    fireEvent.change(titleInput, { target: { value: "   " } });
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Title is required");
+
+    // Reset Title to valid
+    fireEvent.change(titleInput, { target: { value: "Valid Title" } });
+
+    // Motion number limit check (> 50)
+    fireEvent.change(numInput, { target: { value: "N".repeat(51) } });
+    expect(screen.getByTestId("modal-edit-number-counter")).toHaveTextContent("51/50");
+    expect(screen.getByTestId("modal-edit-number-counter")).toHaveClass("field__counter--error");
+    expect(numInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Motion number exceeds the 50 character limit (51/50 characters).");
+
+    // Reset Motion number to valid
+    fireEvent.change(numInput, { target: { value: "1" } });
+
+    // Description limit check (> 5000)
+    fireEvent.change(descInput, { target: { value: "D".repeat(5001) } });
+    expect(screen.getByTestId("modal-edit-desc-counter")).toHaveTextContent("5001/5000");
+    expect(screen.getByTestId("modal-edit-desc-counter")).toHaveClass("field__counter--error");
+    expect(descInput).toHaveAttribute("aria-invalid", "true");
+
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Description exceeds the 5,000 character limit (5,001/5000 characters).");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -2845,5 +3129,188 @@ describe("Admin In-Person Vote Entry", () => {
     expect(screen.queryByRole("button", { name: /Results Report/ })).not.toBeInTheDocument();
     // But the heading should be there
     expect(screen.getByRole("heading", { name: "Results Report" })).toBeInTheDocument();
+  });
+
+  // ---------------------------------------------------------------------------
+  // US-ECT-01: Edit close time inline form
+  // ---------------------------------------------------------------------------
+
+  it("shows Edit button next to Voting closes for open meeting", async () => {
+    renderPage(); // agm1 is open
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+  });
+
+  it("shows Edit button next to Voting closes for pending meeting", async () => {
+    renderPage("agm-pending");
+    await waitFor(() => {
+      expect(screen.getByText("2026 AGM")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+  });
+
+  it("does NOT show Edit button for closed meeting", async () => {
+    renderPage("agm2");
+    await waitFor(() => {
+      expect(screen.getByText("2023 AGM")).toBeInTheDocument();
+    });
+    expect(screen.queryByRole("button", { name: "Edit close time" })).not.toBeInTheDocument();
+  });
+
+  it("clicking Edit shows datetime input pre-filled with current voting_closes_at", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    const input = screen.getByLabelText("New voting close time");
+    expect(input).toBeInTheDocument();
+    // Input should be pre-filled (non-empty)
+    expect((input as HTMLInputElement).value).not.toBe("");
+  });
+
+  it("clicking Cancel collapses form and shows original value, no API call made", async () => {
+    const user = userEvent.setup();
+    let patchCalled = false;
+    server.use(
+      http.patch("http://localhost/api/admin/general-meetings/agm1", () => {
+        patchCalled = true;
+        return HttpResponse.json({ id: "agm1", status: "open", voting_closes_at: "2025-01-01T00:00:00Z" });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    expect(screen.getByLabelText("New voting close time")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    // Form collapsed
+    expect(screen.queryByLabelText("New voting close time")).not.toBeInTheDocument();
+    // Edit button back
+    expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    // No API call
+    expect(patchCalled).toBe(false);
+  });
+
+  it("client-side validation: shows error and no API call when new time <= meeting_at", async () => {
+    const user = userEvent.setup();
+    let patchCalled = false;
+    server.use(
+      http.patch("http://localhost/api/admin/general-meetings/agm1", () => {
+        patchCalled = true;
+        return HttpResponse.json({ id: "agm1", status: "open", voting_closes_at: "2020-01-01T00:00:00Z" });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    // Set a datetime before meeting_at (2024-06-01T10:00:00Z)
+    const input = screen.getByLabelText("New voting close time");
+    await user.clear(input);
+    await user.type(input, "2024-01-01T08:00");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Validation error visible
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("alert").textContent).toContain("meeting start time");
+    // No API call made
+    expect(patchCalled).toBe(false);
+  });
+
+  it("successful save invalidates query and collapses form", async () => {
+    const user = userEvent.setup();
+    const newClose = "2030-06-01T15:00:00.000Z";
+    server.use(
+      http.patch("http://localhost/api/admin/general-meetings/agm1", async ({ request }) => {
+        const body = await request.json() as { voting_closes_at: string };
+        return HttpResponse.json({ id: "agm1", status: "open", voting_closes_at: body.voting_closes_at });
+      }),
+      http.get("http://localhost/api/admin/general-meetings/agm1", () => {
+        return HttpResponse.json({
+          ...ADMIN_MEETING_DETAIL,
+          voting_closes_at: newClose,
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    const input = screen.getByLabelText("New voting close time");
+    await user.clear(input);
+    await user.type(input, "2030-06-01T15:00");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Form collapses after success
+    await waitFor(() => {
+      expect(screen.queryByLabelText("New voting close time")).not.toBeInTheDocument();
+    });
+    // Edit button visible again
+    expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+  });
+
+  it("API error on save shows error message, form stays open", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.patch("http://localhost/api/admin/general-meetings/agm1", () => {
+        return HttpResponse.json({ detail: "Server error" }, { status: 500 });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    const input = screen.getByLabelText("New voting close time");
+    await user.clear(input);
+    await user.type(input, "2030-06-01T15:00");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Error message shown
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+    // Form stays open
+    expect(screen.getByLabelText("New voting close time")).toBeInTheDocument();
+  });
+
+  it("Save button is disabled and shows Saving... while request is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveRequest!: () => void;
+    server.use(
+      http.patch("http://localhost/api/admin/general-meetings/agm1", () => {
+        return new Promise<Response>((resolve) => {
+          resolveRequest = () =>
+            resolve(
+              HttpResponse.json({ id: "agm1", status: "open", voting_closes_at: "2030-06-01T15:00:00Z" })
+            );
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit close time" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit close time" }));
+    const input = screen.getByLabelText("New voting close time");
+    await user.clear(input);
+    await user.type(input, "2030-06-01T15:00");
+    // Click save — request is pending
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // While in-flight: button shows "Saving..." and is disabled
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Saving..." })).toBeDisabled();
+    });
+    // Now resolve the request
+    resolveRequest();
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: "Saving..." })).not.toBeInTheDocument();
+    });
   });
 });

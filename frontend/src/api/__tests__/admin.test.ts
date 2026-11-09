@@ -16,6 +16,9 @@ import {
   importProxyNominations,
   importFinancialPositions,
   closeMotion,
+  searchPersons,
+  updatePerson,
+  updateGeneralMeeting,
 } from "../admin";
 
 const BASE = "http://localhost";
@@ -766,5 +769,210 @@ describe("closeMotion", () => {
       )
     );
     await expect(closeMotion("m-notfound")).rejects.toThrow("404");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// searchPersons
+// ---------------------------------------------------------------------------
+describe("searchPersons", () => {
+  // --- Happy path ---
+
+  it("returns matching persons for a given prefix query", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/persons/search`, ({ request }) => {
+        const url = new URL(request.url);
+        const q = url.searchParams.get("q") ?? "";
+        if (q.startsWith("alice")) {
+          return HttpResponse.json([
+            { id: "p1", email: "alice@example.com", given_name: "Alice", surname: "Smith", phone_number: null },
+          ]);
+        }
+        return HttpResponse.json([]);
+      })
+    );
+    const result = await searchPersons("alice");
+    expect(result).toHaveLength(1);
+    expect(result[0].email).toBe("alice@example.com");
+    expect(result[0].given_name).toBe("Alice");
+    expect(result[0].surname).toBe("Smith");
+    expect(result[0].phone_number).toBeNull();
+  });
+
+  it("returns empty array when no persons match", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/persons/search`, () => HttpResponse.json([]))
+    );
+    const result = await searchPersons("zzz");
+    expect(result).toEqual([]);
+  });
+
+  it("sends q and limit query params", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/persons/search`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await searchPersons("bob", 5);
+    expect(capturedUrl).toContain("q=bob");
+    expect(capturedUrl).toContain("limit=5");
+  });
+
+  it("uses default limit=10 when not specified", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/persons/search`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await searchPersons("test");
+    expect(capturedUrl).toContain("limit=10");
+  });
+
+  // --- Error handling ---
+
+  it("throws on server error (500)", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/persons/search`, () =>
+        HttpResponse.json({ detail: "Internal server error" }, { status: 500 })
+      )
+    );
+    await expect(searchPersons("x")).rejects.toThrow("500");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updatePerson
+// ---------------------------------------------------------------------------
+
+describe("updatePerson", () => {
+  // --- Happy path ---
+
+  it("sends PATCH request and returns updated person", async () => {
+    const personId = "p-abc-123";
+    server.use(
+      http.patch(`${BASE}/api/admin/persons/${personId}`, async ({ request }) => {
+        const body = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          id: personId,
+          email: "alice@example.com",
+          given_name: body.given_name ?? "Alice",
+          surname: body.surname ?? "Smith",
+          phone_number: body.phone_number ?? null,
+        });
+      })
+    );
+    const result = await updatePerson(personId, { given_name: "Alicia", surname: "Smith" });
+    expect(result.id).toBe(personId);
+    expect(result.given_name).toBe("Alicia");
+    expect(result.surname).toBe("Smith");
+  });
+
+  it("sends only the provided fields", async () => {
+    const personId = "p-xyz-456";
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.patch(`${BASE}/api/admin/persons/${personId}`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ id: personId, email: "bob@example.com", given_name: null, surname: null, phone_number: "+61412345678" });
+      })
+    );
+    await updatePerson(personId, { phone_number: "+61412345678" });
+    expect(capturedBody).toEqual({ phone_number: "+61412345678" });
+  });
+
+  // --- Error handling ---
+
+  it("throws on 404 not found", async () => {
+    const personId = "p-not-found";
+    server.use(
+      http.patch(`${BASE}/api/admin/persons/${personId}`, () =>
+        HttpResponse.json({ detail: "Person not found" }, { status: 404 })
+      )
+    );
+    await expect(updatePerson(personId, { given_name: "Test" })).rejects.toThrow("404");
+  });
+
+  it("throws on server error (500)", async () => {
+    const personId = "p-err-500";
+    server.use(
+      http.patch(`${BASE}/api/admin/persons/${personId}`, () =>
+        HttpResponse.json({ detail: "Internal server error" }, { status: 500 })
+      )
+    );
+    await expect(updatePerson(personId, {})).rejects.toThrow("500");
+  });
+});
+
+describe("updateGeneralMeeting", () => {
+  const meetingId = "meeting-abc-123";
+  const newCloseTime = "2026-12-31T10:00:00.000Z";
+
+  // --- Happy path ---
+
+  it("sends PATCH request and returns updated meeting", async () => {
+    server.use(
+      http.patch(`${BASE}/api/admin/general-meetings/${meetingId}`, async ({ request }) => {
+        const body = await request.json() as { voting_closes_at: string };
+        return HttpResponse.json({
+          id: meetingId,
+          status: "open",
+          voting_closes_at: body.voting_closes_at,
+        });
+      })
+    );
+    const result = await updateGeneralMeeting(meetingId, { voting_closes_at: newCloseTime });
+    expect(result.id).toBe(meetingId);
+    expect(result.status).toBe("open");
+    expect(result.voting_closes_at).toBe(newCloseTime);
+  });
+
+  it("sends the correct request body", async () => {
+    let capturedBody: Record<string, unknown> = {};
+    server.use(
+      http.patch(`${BASE}/api/admin/general-meetings/${meetingId}`, async ({ request }) => {
+        capturedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ id: meetingId, status: "open", voting_closes_at: newCloseTime });
+      })
+    );
+    await updateGeneralMeeting(meetingId, { voting_closes_at: newCloseTime });
+    expect(capturedBody).toEqual({ voting_closes_at: newCloseTime });
+  });
+
+  // --- Error handling ---
+
+  it("throws on 404 not found", async () => {
+    server.use(
+      http.patch(`${BASE}/api/admin/general-meetings/not-found-id`, () =>
+        HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 })
+      )
+    );
+    await expect(updateGeneralMeeting("not-found-id", { voting_closes_at: newCloseTime })).rejects.toThrow("404");
+  });
+
+  it("throws on 409 already closed", async () => {
+    server.use(
+      http.patch(`${BASE}/api/admin/general-meetings/closed-id`, () =>
+        HttpResponse.json({ detail: "Meeting is already closed" }, { status: 409 })
+      )
+    );
+    await expect(updateGeneralMeeting("closed-id", { voting_closes_at: newCloseTime })).rejects.toThrow("409");
+  });
+
+  it("throws on 422 validation error", async () => {
+    server.use(
+      http.patch(`${BASE}/api/admin/general-meetings/invalid-id`, () =>
+        HttpResponse.json(
+          { detail: "voting_closes_at must be after meeting_at" },
+          { status: 422 }
+        )
+      )
+    );
+    await expect(
+      updateGeneralMeeting("invalid-id", { voting_closes_at: "2020-01-01T00:00:00Z" })
+    ).rejects.toThrow("422");
   });
 });

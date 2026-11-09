@@ -1,4 +1,5 @@
 import type { MotionType } from "../../types";
+import { MOTION_LIMITS, getCounterClass } from "../../utils/validation";
 
 export interface MotionFormEntry {
   title: string;
@@ -69,33 +70,60 @@ export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
             <label className="field__label" htmlFor={`motion-title-${index}`}>Title</label>
             <input
               id={`motion-title-${index}`}
-              className="field__input"
+              className={`field__input${motion.title.length > MOTION_LIMITS.TITLE.MAX ? " field__input--error" : ""}`}
               type="text"
               value={motion.title}
               onChange={(e) => updateMotion(index, "title", e.target.value)}
+              aria-invalid={motion.title.length > MOTION_LIMITS.TITLE.MAX}
+              aria-describedby={`motion-title-counter-${index}`}
             />
+            <div
+              id={`motion-title-counter-${index}`}
+              className={getCounterClass(motion.title.length, MOTION_LIMITS.TITLE.MAX, MOTION_LIMITS.TITLE.WARN)}
+              data-testid={`motion-${index + 1}-title-counter`}
+            >
+              {motion.title.length}/{MOTION_LIMITS.TITLE.MAX}
+            </div>
           </div>
           <div className="field" style={{ marginBottom: 8 }}>
             <label className="field__label" htmlFor={`motion-number-${index}`}>Motion number (optional)</label>
             <input
               id={`motion-number-${index}`}
-              className="field__input"
+              className={`field__input${(motion.motion_number?.length ?? 0) > MOTION_LIMITS.MOTION_NUMBER.MAX ? " field__input--error" : ""}`}
               type="text"
               value={motion.motion_number ?? ""}
               onChange={(e) => updateMotion(index, "motion_number", e.target.value)}
               placeholder="e.g. 1, SR-1"
+              aria-invalid={(motion.motion_number?.length ?? 0) > MOTION_LIMITS.MOTION_NUMBER.MAX}
+              aria-describedby={`motion-number-counter-${index}`}
             />
+            <div
+              id={`motion-number-counter-${index}`}
+              className={getCounterClass(motion.motion_number?.length ?? 0, MOTION_LIMITS.MOTION_NUMBER.MAX, MOTION_LIMITS.MOTION_NUMBER.WARN)}
+              data-testid={`motion-${index + 1}-number-counter`}
+            >
+              {motion.motion_number?.length ?? 0}/{MOTION_LIMITS.MOTION_NUMBER.MAX}
+            </div>
           </div>
           <div className="field" style={{ marginBottom: 8 }}>
             <label className="field__label" htmlFor={`motion-desc-${index}`}>Description</label>
             <textarea
               id={`motion-desc-${index}`}
-              className="field__input"
+              className={`field__input${motion.description.length > MOTION_LIMITS.DESCRIPTION.MAX ? " field__input--error" : ""}`}
               value={motion.description}
               onChange={(e) => updateMotion(index, "description", e.target.value)}
               rows={3}
               style={{ resize: "vertical" }}
+              aria-invalid={motion.description.length > MOTION_LIMITS.DESCRIPTION.MAX}
+              aria-describedby={`motion-desc-counter-${index}`}
             />
+            <div
+              id={`motion-desc-counter-${index}`}
+              className={getCounterClass(motion.description.length, MOTION_LIMITS.DESCRIPTION.MAX, MOTION_LIMITS.DESCRIPTION.WARN)}
+              data-testid={`motion-${index + 1}-desc-counter`}
+            >
+              {motion.description.length}/{MOTION_LIMITS.DESCRIPTION.MAX}
+            </div>
           </div>
           <div className="field" style={{ marginBottom: 8 }}>
             <label className="field__label" htmlFor={`motion-type-${index}`}>Motion Type</label>
@@ -135,28 +163,42 @@ export default function MotionEditor({ motions, onChange }: MotionEditorProps) {
               </div>
               <div style={{ marginBottom: 8 }}>
                 <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                {(motion.options ?? [{ text: "" }, { text: "" }]).map((opt, oi) => (
-                  <div key={oi} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                    <input
-                      aria-label={`Motion ${index + 1} option ${oi + 1}`}
-                      className="field__input"
-                      type="text"
-                      value={opt.text}
-                      onChange={(e) => updateOption(index, oi, e.target.value)}
-                      placeholder={`Option ${oi + 1}`}
-                    />
-                    {(motion.options ?? []).length > 2 && (
-                      <button
-                        type="button"
-                        className="btn btn--danger btn--sm"
-                        aria-label={`Remove motion ${index + 1} option ${oi + 1}`}
-                        onClick={() => removeOption(index, oi)}
-                      >
-                        ✕
-                      </button>
-                    )}
-                  </div>
-                ))}
+                {(motion.options ?? [{ text: "" }, { text: "" }]).map((opt, oi) => {
+                  const len = opt.text.length;
+                  const isOverLimit = len > MOTION_LIMITS.OPTION_TEXT.MAX;
+                  const counterId = `motion-${index + 1}-option-${oi + 1}-counter`;
+                  const counterClass = getCounterClass(len, MOTION_LIMITS.OPTION_TEXT.MAX, MOTION_LIMITS.OPTION_TEXT.WARN);
+                  return (
+                    <div key={oi} style={{ marginBottom: 8 }}>
+                      <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                        <textarea
+                          aria-label={`Motion ${index + 1} option ${oi + 1}`}
+                          className={`field__input field__input--textarea${isOverLimit ? " field__input--error" : ""}`}
+                          rows={2}
+                          style={{ resize: "vertical" }}
+                          value={opt.text}
+                          onChange={(e) => updateOption(index, oi, e.target.value)}
+                          placeholder={`Option ${oi + 1}`}
+                          aria-invalid={isOverLimit}
+                          aria-describedby={counterId}
+                        />
+                        {(motion.options ?? []).length > 2 && (
+                          <button
+                            type="button"
+                            className="btn btn--danger btn--sm"
+                            aria-label={`Remove motion ${index + 1} option ${oi + 1}`}
+                            onClick={() => removeOption(index, oi)}
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+                      <div id={counterId} className={counterClass} data-testid={counterId}>
+                        {len}/{MOTION_LIMITS.OPTION_TEXT.MAX}
+                      </div>
+                    </div>
+                  );
+                })}
                 <button
                   type="button"
                   className="btn btn--secondary btn--sm"

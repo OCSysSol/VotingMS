@@ -118,3 +118,7 @@ smtp_test_rate_limiter = RateLimiter(max_requests=5, window_seconds=60)
 # Provision endpoint: 5 calls per 60 seconds per IP.
 # Guards the debug-only admin provisioning endpoint against abuse.
 provision_limiter = RateLimiter(max_requests=5, window_seconds=60)
+
+# SMS test: 5 calls per 60-second sliding window (server-wide).
+# Same pattern as smtp_test_rate_limiter — protects against SMS cost abuse.
+sms_test_rate_limiter = RateLimiter(max_requests=5, window_seconds=60)

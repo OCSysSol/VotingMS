@@ -357,4 +357,133 @@ describe("CreateGeneralMeetingForm", () => {
       expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/agm-new");
     });
   });
+
+  it("shows error when multi-choice option text exceeds 1,000 characters", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    fireEvent.change(optionInputs[0], { target: { value: "A".repeat(1001) } });
+    await user.type(optionInputs[1], "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText(/Motion 1, Option 1 exceeds the 1,000 character limit/i)).toBeInTheDocument();
+  });
+
+  it("shows error when multi-choice option text is whitespace-only", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(optionInputs[0], "Alice");
+    await user.type(optionInputs[1], "Bob");
+    await user.click(screen.getByRole("button", { name: "+ Add option" }));
+
+    const updatedOptionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(updatedOptionInputs[2], "   ");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText(/Motion 1, Option 3: option text must not be empty/i)).toBeInTheDocument();
+  });
+
+  it("shows error when motion title exceeds 500 characters", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const titleInput = screen.getByLabelText("Title", { selector: "#motion-title-0" });
+    fireEvent.change(titleInput, { target: { value: "T".repeat(501) } });
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText("Motion 1: Title exceeds the 500 character limit (501/500 characters).")).toBeInTheDocument();
+  });
+
+  it("shows error when motion number exceeds 50 characters", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Valid Title");
+    const numInput = screen.getByLabelText("Motion number (optional)", { selector: "#motion-number-0" });
+    fireEvent.change(numInput, { target: { value: "N".repeat(51) } });
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText("Motion 1: Motion number exceeds the 50 character limit (51/50 characters).")).toBeInTheDocument();
+  });
+
+  it("shows error when motion description exceeds 5,000 characters", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Valid Title");
+    const descInput = screen.getByLabelText("Description", { selector: "#motion-desc-0" });
+    fireEvent.change(descInput, { target: { value: "D".repeat(5001) } });
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    expect(screen.getByText("Motion 1: Description exceeds the 5,000 character limit (5,001/5000 characters).")).toBeInTheDocument();
+  });
+
+  it("surfaces formatted 422 error from server when option validation fails", async () => {
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings", () => {
+        return HttpResponse.json(
+          { detail: [{ loc: ["body", "motions", 0, "options", 0, "text"], msg: "Value error, option text must not exceed 1000 characters" }] },
+          { status: 422 }
+        );
+      })
+    );
+
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const multiChoiceCheckboxes = screen.getAllByRole("checkbox");
+    await user.click(multiChoiceCheckboxes[0]);
+    await user.type(screen.getByLabelText("Title", { selector: "#motion-title-0" }), "Election");
+
+    const optionInputs = screen.getAllByPlaceholderText(/Option [0-9]+/);
+    await user.type(optionInputs[0], "Alice");
+    await user.type(optionInputs[1], "Bob");
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    await waitFor(() => {
+      expect(screen.getByText("Motion 1, Option 1: Option text - option text must not exceed 1000 characters")).toBeInTheDocument();
+    });
+  });
+
+  it("submits successfully when imported motions have null motion_number and no options", async () => {
+    const motions = [
+      { title: "Imported Motion 1", description: "", motion_number: null, motion_type: "general" as const },
+    ];
+    mockParse.mockResolvedValue({ motions });
+
+    const user = userEvent.setup();
+    renderComponent();
+    await fillAndSubmit(user);
+
+    const file = new File([""], "motions.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    await user.upload(screen.getByLabelText("Upload motions (CSV or Excel)"), file);
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Imported Motion 1")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/agm-new");
+    });
+  });
 });

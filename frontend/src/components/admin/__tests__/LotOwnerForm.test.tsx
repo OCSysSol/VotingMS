@@ -23,7 +23,7 @@ const existingLotOwner: LotOwner = {
   lot_number: "1A",
   given_name: null,
   surname: null,
-  owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: null, surname: null }],
+  owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: null, surname: null, phone_number: null }],
   emails: ["owner1@example.com"],
   unit_entitlement: 100,
   financial_position: "normal",
@@ -1281,9 +1281,24 @@ describe("LotOwnerForm - EditModal owner_emails management", () => {
     await user.clear(screen.getByLabelText("Edit given name"));
     await user.type(screen.getByLabelText("Edit given name"), "Jane");
     await user.click(screen.getByRole("button", { name: "Save" }));
+    // Changing the name triggers the conflict modal — confirm to proceed
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
     await waitFor(() => {
       expect(screen.queryByLabelText("Edit given name")).not.toBeInTheDocument();
     });
+  });
+
+  it("typing in Edit surname field updates the surname value", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    const surnameInput = screen.getByLabelText("Edit surname");
+    await user.clear(surnameInput);
+    await user.type(surnameInput, "Jones");
+    expect(surnameInput).toHaveValue("Jones");
   });
 
   it("shows validation error in inline edit when email is empty", async () => {
@@ -1421,8 +1436,643 @@ describe("LotOwnerForm - EditModal owner_emails management", () => {
     await user.clear(screen.getByLabelText("Edit given name"));
     await user.type(screen.getByLabelText("Edit given name"), "Robert");
     await user.click(screen.getByRole("button", { name: "Save" }));
+    // Changing the name (Bob → Robert) triggers the conflict modal — confirm to proceed
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
     await waitFor(() => {
       expect(screen.getByText("Robert")).toBeInTheDocument();
     });
+  });
+
+  it("selecting a person from add-owner autocomplete fills given name, surname, and phone fields", async () => {
+    // Cover onSelect on the add-owner PersonEmailAutocomplete (lines 542-545) — non-null path
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p1", email: "jane@example.com", given_name: "Jane", surname: "Smith", phone_number: "+61400999888" },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(existingLotOwner);
+    const emailInput = screen.getByLabelText("Add owner email");
+    rtlFireEvent.change(emailInput, { target: { value: "jane" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Jane Smith <jane@example.com>"));
+    expect(screen.getByLabelText("New owner given name")).toHaveValue("Jane");
+    expect(screen.getByLabelText("New owner surname")).toHaveValue("Smith");
+    expect(screen.getByLabelText("New owner phone number")).toHaveValue("+61400999888");
+  });
+
+  it("selecting a person with null name/phone from add-owner autocomplete leaves fields empty", async () => {
+    // Cover onSelect null-path: given_name ?? "" and surname ?? "" and phone_number ?? ""
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p2", email: "anon@example.com", given_name: null, surname: null, phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(existingLotOwner);
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "anon" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("anon@example.com"));
+    expect(screen.getByLabelText("New owner given name")).toHaveValue("");
+    expect(screen.getByLabelText("New owner surname")).toHaveValue("");
+    expect(screen.getByLabelText("New owner phone number")).toHaveValue("");
+  });
+
+  it("typing in new owner phone number field updates the value", async () => {
+    // Cover onChange on new-owner phone number field (line 583)
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(existingLotOwner);
+    const phoneInput = screen.getByLabelText("New owner phone number");
+    rtlFireEvent.change(phoneInput, { target: { value: "+61400111999" } });
+    expect(phoneInput).toHaveValue("+61400111999");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Edit modal — phone number field (SMS OTP)
+// Phone is now per-contact (per LotOwnerEmail), not per LotOwner.
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - Edit modal phone number (per email row)", () => {
+  const ownerWithPhone: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith", phone_number: "+61400000000" },
+    ],
+  };
+
+  it("renders phone number field in inline email edit form", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    expect(screen.getByLabelText("Edit phone number")).toBeInTheDocument();
+  });
+
+  it("edit phone number field has type=tel", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    expect(screen.getByLabelText("Edit phone number")).toHaveAttribute("type", "tel");
+  });
+
+  it("edit phone number field is empty when email row has no phone", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    expect(screen.getByLabelText("Edit phone number")).toHaveValue("");
+  });
+
+  it("edit phone number field is pre-populated when email row has a phone", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithPhone);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    expect(screen.getByLabelText("Edit phone number")).toHaveValue("+61400000000");
+  });
+
+  it("renders phone number in the add-owner phone field", () => {
+    renderEditForm(existingLotOwner);
+    expect(screen.getByLabelText("New owner phone number")).toBeInTheDocument();
+    expect(screen.getByLabelText("New owner phone number")).toHaveAttribute("type", "tel");
+  });
+
+  it("displays phone number in email row display view when present", () => {
+    renderEditForm(ownerWithPhone);
+    expect(screen.getByText("+61400000000")).toBeInTheDocument();
+  });
+
+  it("does not display phone number in display view when absent", () => {
+    renderEditForm(existingLotOwner);
+    // No phone shown — the owner_emails entry has phone_number: null
+    expect(screen.queryByText(/\+61/)).not.toBeInTheDocument();
+  });
+
+  it("saves email edit with phone number and closes the inline edit form", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    const phoneInput = screen.getByLabelText("Edit phone number");
+    await user.type(phoneInput, "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Entering a new phone where none existed triggers the conflict modal — confirm to proceed
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    // After confirming, the inline edit form should close
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Edit phone number")).not.toBeInTheDocument();
+    });
+  });
+
+  it("resets edit phone field when cancel is clicked", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithPhone);
+    await user.click(screen.getByRole("button", { name: /Edit owner1@example.com/i }));
+    const phoneInput = screen.getByLabelText("Edit phone number");
+    expect(phoneInput).toHaveValue("+61400000000");
+    // Use getAllByRole because the modal also has a "Cancel" button in the footer
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    await user.click(cancelButtons[0]);
+    // After cancel, inline edit is gone
+    expect(screen.queryByLabelText("Edit phone number")).not.toBeInTheDocument();
+  });
+
+  it("no changes to lot owner fields shows 'No changes detected'", async () => {
+    const user = userEvent.setup();
+    renderEditForm(existingLotOwner);
+    // Submit without any changes to unit entitlement or financial position
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    expect(screen.getByText("No changes detected.")).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Proxy autocomplete onSelect + proxy phone field (new UX features)
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - proxy autocomplete onSelect and proxy phone", () => {
+  it("selecting a person from proxy autocomplete fills given name, surname, and phone fields", async () => {
+    // Use real timers — waitFor is incompatible with fake timers (it uses setInterval)
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p1", email: "proxy@example.com", given_name: "Jane", surname: "Doe", phone_number: "+61400000001" },
+        ])
+      )
+    );
+
+    renderEditForm(lotOwnerWithoutProxy);
+
+    const proxyEmailInput = screen.getByLabelText("Set proxy email");
+    // fireEvent.change triggers the debounce without userEvent typing delays
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    rtlFireEvent.change(proxyEmailInput, { target: { value: "proxy" } });
+
+    // Wait for the 300ms debounce + fetch to complete
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+
+    const option = screen.getByText("Jane Doe <proxy@example.com>");
+    rtlFireEvent.mouseDown(option);
+
+    // After selection, name and phone fields should be populated
+    await waitFor(() => {
+      expect(screen.getByLabelText("Proxy given name")).toHaveValue("Jane");
+      expect(screen.getByLabelText("Proxy surname")).toHaveValue("Doe");
+      expect(screen.getByLabelText("Proxy phone number")).toHaveValue("+61400000001");
+    });
+  });
+
+  it("selecting a proxy person with null name/phone leaves proxy name fields empty", async () => {
+    // Cover null-path of onSelect: given_name ?? "" and surname ?? "" and phone_number ?? "" (lines 640-642)
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p2", email: "anon@proxy.com", given_name: null, surname: null, phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(lotOwnerWithoutProxy);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "anon" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("anon@proxy.com"));
+    expect(screen.getByLabelText("Proxy given name")).toHaveValue("");
+    expect(screen.getByLabelText("Proxy surname")).toHaveValue("");
+    expect(screen.getByLabelText("Proxy phone number")).toHaveValue("");
+  });
+
+  it("typing in proxy phone field updates the phone value", async () => {
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(lotOwnerWithoutProxy);
+    const phoneInput = screen.getByLabelText("Proxy phone number");
+    rtlFireEvent.change(phoneInput, { target: { value: "+61412000000" } });
+    expect(phoneInput).toHaveValue("+61412000000");
+  });
+
+  it("sets proxy with phone number — shows phone in proxy display row after set", async () => {
+    server.use(
+      http.put("http://localhost/api/admin/lot-owners/:lotOwnerId/proxy", async ({ request, params }) => {
+        const body = await request.json() as { proxy_email?: string; given_name?: string | null; surname?: string | null; phone_number?: string | null };
+        const updated: LotOwner = {
+          ...lotOwnerWithoutProxy,
+          id: params.lotOwnerId as string,
+          proxy_email: body?.proxy_email ?? null,
+          proxy_given_name: body?.given_name ?? null,
+          proxy_surname: body?.surname ?? null,
+          proxy_phone_number: body?.phone_number ?? null,
+        };
+        return HttpResponse.json(updated);
+      })
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    renderEditForm(lotOwnerWithoutProxy);
+    // Use fireEvent.change to avoid triggering debounce timers for each keystroke
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "proxy@example.com" } });
+    rtlFireEvent.change(screen.getByLabelText("Proxy phone number"), { target: { value: "+61400111222" } });
+    rtlFireEvent.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByText("+61400111222")).toBeInTheDocument();
+    });
+  });
+
+  it("setLotOwnerProxy API function sends phone_number in request body", async () => {
+    let capturedBody: unknown;
+    server.use(
+      http.put("http://localhost/api/admin/lot-owners/:lotOwnerId/proxy", async ({ request, params }) => {
+        capturedBody = await request.json();
+        const body = capturedBody as { proxy_email?: string; phone_number?: string | null };
+        const updated: LotOwner = {
+          ...lotOwnerWithoutProxy,
+          id: params.lotOwnerId as string,
+          proxy_email: body?.proxy_email ?? null,
+          proxy_phone_number: body?.phone_number ?? null,
+        };
+        return HttpResponse.json(updated);
+      })
+    );
+    const result = await setLotOwnerProxy("lo1", "proxy@example.com", "Jane", "Doe", "+61400000002");
+    expect((capturedBody as Record<string, unknown>)?.phone_number).toBe("+61400000002");
+    expect(result.proxy_phone_number).toBe("+61400000002");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PersonConflictModal — cancel path in EditModal context
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - conflict modal cancel path", () => {
+  const ownerWithNames: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" },
+    ],
+  };
+
+  it("cancelling the conflict modal keeps the inline edit form open", async () => {
+    const user = userEvent.setup();
+    renderEditForm(ownerWithNames);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    // Change the name to trigger conflict detection
+    await user.clear(screen.getByLabelText("Edit given name"));
+    await user.type(screen.getByLabelText("Edit given name"), "Jane");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    // Conflict modal should appear
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    // Click Cancel in the conflict modal
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    // The conflict modal Cancel is a separate dialog button
+    const conflictCancel = cancelButtons.find((btn) => {
+      const dialog = btn.closest('[aria-labelledby="conflict-modal-title"]');
+      return dialog !== null;
+    });
+    await user.click(conflictCancel!);
+    // Conflict modal should be gone
+    expect(screen.queryByRole("button", { name: "Update and save" })).not.toBeInTheDocument();
+    // Inline edit form should still be visible
+    expect(screen.getByLabelText("Edit given name")).toBeInTheDocument();
+  });
+
+  it("Escape key does not close main modal when conflict modal is open", async () => {
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    renderEditForm(ownerWithNames, vi.fn(), onCancel);
+    await user.click(screen.getByRole("button", { name: "Edit owner1@example.com" }));
+    await user.clear(screen.getByLabelText("Edit given name"));
+    await user.type(screen.getByLabelText("Edit given name"), "Jane");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    // Press Escape — should NOT close the main modal when conflict modal is open
+    await user.keyboard("{Escape}");
+    expect(onCancel).not.toHaveBeenCalled();
+    // Conflict modal is still visible (Escape handled by PersonConflictModal itself which calls onCancel on the conflict modal)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Add-owner sub-form conflict modal
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - add-owner conflict modal", () => {
+  const ownerForAddConflict: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [{ id: "em1", email: "owner1@example.com", given_name: null, surname: null }],
+  };
+
+  it("shows conflict modal when add-owner form values differ from autocomplete suggestion", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-suggest-1", email: "alice@example.com", given_name: "Alice", surname: "Smith", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(ownerForAddConflict);
+    // Select person from autocomplete
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "alice" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Alice Smith <alice@example.com>"));
+    // Change the given name to something different from the suggestion
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "Alicia");
+    // Click Add owner — should show conflict modal
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+  });
+
+  it("cancelling add-owner conflict modal closes modal and keeps form", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-suggest-2", email: "bob@example.com", given_name: "Bob", surname: "Jones", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(ownerForAddConflict);
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "bob" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Bob Jones <bob@example.com>"));
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "Robert");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    // Click Cancel in conflict modal
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    const conflictCancel = cancelButtons.find((btn) =>
+      btn.closest('[aria-labelledby="conflict-modal-title"]') !== null
+    );
+    await user.click(conflictCancel!);
+    // Conflict modal should be gone
+    expect(screen.queryByRole("button", { name: "Update and save" })).not.toBeInTheDocument();
+    // Add-owner form should still be visible
+    expect(screen.getByLabelText("Add owner email")).toBeInTheDocument();
+  });
+
+  it("confirming add-owner conflict modal calls updatePerson then addOwnerEmail", async () => {
+    let patchedPersonId: string | undefined;
+    let patchedBody: Record<string, unknown> | undefined;
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-suggest-3", email: "carol@example.com", given_name: "Carol", surname: "Lee", phone_number: null },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", async ({ request, params }) => {
+        patchedPersonId = params.personId as string;
+        patchedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ id: patchedPersonId, email: "carol@example.com", given_name: patchedBody.given_name, surname: "Lee", phone_number: null });
+      }),
+      http.post("http://localhost/api/admin/lot-owners/:lotOwnerId/emails", async () => {
+        return HttpResponse.json({
+          ...ownerForAddConflict,
+          owner_emails: [
+            ...ownerForAddConflict.owner_emails,
+            { id: "em-new", email: "carol@example.com", given_name: "Caroline", surname: "Lee", phone_number: null },
+          ],
+          emails: [...ownerForAddConflict.emails, "carol@example.com"],
+        });
+      })
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(ownerForAddConflict);
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "carol" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Carol Lee <carol@example.com>"));
+    // Change given name to trigger conflict
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "Caroline");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    // updatePerson should have been called with the new name
+    await waitFor(() => {
+      expect(patchedPersonId).toBe("p-suggest-3");
+      expect(patchedBody?.given_name).toBe("Caroline");
+    });
+  });
+
+  it("shows error when updatePerson fails during add-owner conflict confirm", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-suggest-4", email: "dave@example.com", given_name: "Dave", surname: "Brown", phone_number: null },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () =>
+        HttpResponse.json({ detail: "Internal error" }, { status: 500 })
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(ownerForAddConflict);
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "dave" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Dave Brown <dave@example.com>"));
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "David");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(screen.getByText("Failed to update person record. Please try again.")).toBeInTheDocument();
+    });
+  });
+
+  it("Escape does not close main modal when add-owner conflict modal is open", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-suggest-5", email: "eve@example.com", given_name: "Eve", surname: "White", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    renderEditForm(ownerForAddConflict, vi.fn(), onCancel);
+    rtlFireEvent.change(screen.getByLabelText("Add owner email"), { target: { value: "eve" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Eve White <eve@example.com>"));
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "Eva");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.keyboard("{Escape}");
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Proxy sub-form conflict modal
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - proxy conflict modal", () => {
+  it("shows conflict modal when proxy form values differ from autocomplete suggestion", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-proxy-1", email: "proxy1@example.com", given_name: "Frank", surname: "Green", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(lotOwnerWithoutProxy);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "frank" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Frank Green <proxy1@example.com>"));
+    // Change name to differ from suggestion
+    await user.clear(screen.getByLabelText("Proxy given name"));
+    await user.type(screen.getByLabelText("Proxy given name"), "Francis");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+  });
+
+  it("cancelling proxy conflict modal closes modal and keeps form", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-proxy-2", email: "proxy2@example.com", given_name: "Grace", surname: "Hall", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(lotOwnerWithoutProxy);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "grace" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Grace Hall <proxy2@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy given name"));
+    await user.type(screen.getByLabelText("Proxy given name"), "Gracie");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    const cancelButtons = screen.getAllByRole("button", { name: "Cancel" });
+    const conflictCancel = cancelButtons.find((btn) =>
+      btn.closest('[aria-labelledby="conflict-modal-title"]') !== null
+    );
+    await user.click(conflictCancel!);
+    expect(screen.queryByRole("button", { name: "Update and save" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Set proxy email")).toBeInTheDocument();
+  });
+
+  it("confirming proxy conflict modal calls updatePerson then setProxy", async () => {
+    let patchedPersonId: string | undefined;
+    let patchedBody: Record<string, unknown> | undefined;
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-proxy-3", email: "proxy3@example.com", given_name: "Henry", surname: "King", phone_number: null },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", async ({ request, params }) => {
+        patchedPersonId = params.personId as string;
+        patchedBody = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ id: patchedPersonId, email: "proxy3@example.com", given_name: patchedBody.given_name, surname: "King", phone_number: null });
+      }),
+      http.put("http://localhost/api/admin/lot-owners/:lotOwnerId/proxy", async () => {
+        return HttpResponse.json({
+          ...lotOwnerWithoutProxy,
+          proxy_email: "proxy3@example.com",
+          proxy_given_name: "Harry",
+          proxy_surname: "King",
+          proxy_phone_number: null,
+        });
+      })
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(lotOwnerWithoutProxy);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "henry" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Henry King <proxy3@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy given name"));
+    await user.type(screen.getByLabelText("Proxy given name"), "Harry");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(patchedPersonId).toBe("p-proxy-3");
+      expect(patchedBody?.given_name).toBe("Harry");
+    });
+  });
+
+  it("shows error when updatePerson fails during proxy conflict confirm", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-proxy-4", email: "proxy4@example.com", given_name: "Iris", surname: "Lane", phone_number: null },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () =>
+        HttpResponse.json({ detail: "Internal error" }, { status: 500 })
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderEditForm(lotOwnerWithoutProxy);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "iris" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Iris Lane <proxy4@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy given name"));
+    await user.type(screen.getByLabelText("Proxy given name"), "Irene");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(screen.getByText("Failed to update person record. Please try again.")).toBeInTheDocument();
+    });
+  });
+
+  it("Escape does not close main modal when proxy conflict modal is open", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          { id: "p-proxy-5", email: "proxy5@example.com", given_name: "Jack", surname: "May", phone_number: null },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    const onCancel = vi.fn();
+    renderEditForm(lotOwnerWithoutProxy, vi.fn(), onCancel);
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), { target: { value: "jack" } });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Jack May <proxy5@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy given name"));
+    await user.type(screen.getByLabelText("Proxy given name"), "Jackson");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument();
+    });
+    await user.keyboard("{Escape}");
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

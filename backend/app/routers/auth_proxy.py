@@ -20,7 +20,10 @@ from fastapi import APIRouter, Request
 from fastapi.responses import Response
 
 from app.config import settings
+from app.logging_config import get_logger
 from app.utils import derive_origin
+
+logger = get_logger(__name__)
 
 # Neon Auth is serverless; cold starts can cause transient non-200s on get-session.
 # Retry this path to avoid redirecting the user to the login page mid-session.
@@ -97,6 +100,9 @@ async def proxy_auth(path: str, request: Request) -> Response:
     origin = derive_origin(request)
     if origin:
         headers["origin"] = origin
+        logger.info("auth_proxy: path=%s injected_origin=%s", path, origin)
+    else:
+        logger.info("auth_proxy: path=%s injected_origin=none", path)
 
     body = await request.body()
 
@@ -133,16 +139,33 @@ async def proxy_auth(path: str, request: Request) -> Response:
 
     assert resp is not None  # loop always executes at least once
 
-    # Forward response headers except transfer-encoding (incompatible with
-    # buffered Response — httpx already decoded any chunked transfer encoding).
-    resp_headers = {
-        k: v
-        for k, v in resp.headers.items()
-        if k.lower() not in ("transfer-encoding",)
-    }
+    if resp.status_code >= 400:
+        logger.warning(
+            "auth_proxy: path=%s injected_origin=%s neon_auth_status=%d neon_auth_body=%.200s",
+            path,
+            origin or "none",
+            resp.status_code,
+            resp.text,
+        )
 
-    return Response(
+    # Forward response headers except transfer-encoding and content-length
+    # (httpx already decoded any chunked/compressed transfer encoding, and
+    # Response recalculates content-length from resp.content).
+    # Use multi_items() so multiple Set-Cookie headers from Neon Auth (e.g.
+    # session_token and session_data on sign-in / sign-out) are preserved as
+    # separate Set-Cookie headers instead of being comma-folded.
+    response = Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=resp_headers,
     )
+    header_items = (
+        resp.headers.multi_items()
+        if hasattr(resp.headers, "multi_items")
+        else resp.headers.items()
+    )
+    for k, v in header_items:
+        if k.lower() not in ("transfer-encoding", "content-length"):
+            response.headers.append(k, v)
+
+    return response
+

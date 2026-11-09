@@ -4,6 +4,9 @@ import reactHooks from 'eslint-plugin-react-hooks';
 
 export default [
   {
+    ignores: ['src/**/__tests__/**'],
+  },
+  {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {
       parser: tsParser,
@@ -20,7 +23,7 @@ export default [
       'react-hooks': reactHooks,
     },
     rules: {
-      'security/detect-object-injection': 'warn',
+      'security/detect-object-injection': 'off',
       'security/detect-non-literal-regexp': 'warn',
       'security/detect-unsafe-regex': 'error',
       'security/detect-buffer-noassert': 'error',

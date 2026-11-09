@@ -2720,4 +2720,35 @@ describe("AGMReportView", () => {
     expect(dashes.length).toBeGreaterThan(0);
   });
 
+  it("multi-choice option row displays long option text without clipping and truncates aria-label to 80 chars", () => {
+    const longOptionText = "A".repeat(120);
+    const motionWithLongOption: MotionDetail = {
+      ...mcMotionFixture,
+      tally: {
+        ...mcMotionFixture.tally,
+        options: [
+          {
+            option_id: "opt-long-1",
+            option_text: longOptionText,
+            display_order: 1,
+            for_voter_count: 5,
+            for_entitlement_sum: 500,
+            against_voter_count: 1,
+            against_entitlement_sum: 100,
+            abstained_voter_count: 0,
+            abstained_entitlement_sum: 0,
+            outcome: "pass",
+            voter_count: 5,
+            entitlement_sum: 500,
+          },
+        ],
+      },
+    };
+    render(<AGMReportView motions={[motionWithLongOption]} />);
+    expect(screen.getByText(longOptionText)).toBeInTheDocument();
+    const truncated = `${"A".repeat(80)}...`;
+    expect(
+      screen.getByRole("button", { name: `Show voting details for ${truncated}` })
+    ).toBeInTheDocument();
+  });
 });

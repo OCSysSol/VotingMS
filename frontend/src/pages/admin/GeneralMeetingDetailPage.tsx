@@ -11,6 +11,7 @@ import {
   deleteMotion,
   resendReport,
   closeMotion,
+  updateGeneralMeeting,
 } from "../../api/admin";
 import type { GeneralMeetingDetail, AddMotionRequest, UpdateMotionRequest, MotionDetail } from "../../api/admin";
 import type { MotionType } from "../../types";
@@ -23,7 +24,21 @@ import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
 import MotionManagementTable from "../../components/admin/MotionManagementTable";
 import AdminVoteEntryPanel from "./AdminVoteEntryPanel";
 import { formatLocalDateTime } from "../../utils/dateTime";
+import { formatApiErrorMessage, MOTION_LIMITS, getCounterClass } from "../../utils/validation";
 import { useBranding } from "../../context/BrandingContext";
+
+/** Convert a UTC ISO string to a "YYYY-MM-DDTHH:MM" value for datetime-local inputs. */
+function toDatetimeLocalValue(isoUtcString: string): string {
+  const d = new Date(isoUtcString);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    d.getFullYear() +
+    "-" + pad(d.getMonth() + 1) +
+    "-" + pad(d.getDate()) +
+    "T" + pad(d.getHours()) +
+    ":" + pad(d.getMinutes())
+  );
+}
 
 const AgmQrCode = lazy(() => import("../../components/admin/AgmQrCode"));
 const AgmQrCodeModal = lazy(() => import("../../components/admin/AgmQrCodeModal"));
@@ -360,6 +375,58 @@ export default function GeneralMeetingDetailPage() {
   // Delete motion confirmation state
   const [pendingDeleteMotionId, setPendingDeleteMotionId] = useState<string | null>(null);
 
+  // Edit close time state
+  const [isEditingCloseTime, setIsEditingCloseTime] = useState(false);
+  const [editCloseTimeValue, setEditCloseTimeValue] = useState("");
+  const [editCloseTimeError, setEditCloseTimeError] = useState<string | null>(null);
+
+  const editCloseTimeMutation = useMutation({
+    mutationFn: (votingClosesAtUtc: string) =>
+      updateGeneralMeeting(meetingId!, { voting_closes_at: votingClosesAtUtc }),
+    onSuccess: async () => {
+      setIsEditingCloseTime(false);
+      setEditCloseTimeError(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (err: Error) => {
+      let msg = err.message || "Failed to update close time";
+      const jsonStart = msg.indexOf("{");
+      if (jsonStart !== -1) {
+        try {
+          const parsed = JSON.parse(msg.slice(jsonStart)) as { detail?: string };
+          if (parsed.detail) msg = parsed.detail;
+        } catch {
+          // leave msg as-is
+        }
+      }
+      setEditCloseTimeError(msg);
+    },
+  });
+
+  function handleEditCloseTimeOpen() {
+    if (!meeting) return;
+    setEditCloseTimeValue(toDatetimeLocalValue(meeting.voting_closes_at));
+    setEditCloseTimeError(null);
+    setIsEditingCloseTime(true);
+  }
+
+  function handleEditCloseTimeCancel() {
+    setIsEditingCloseTime(false);
+    setEditCloseTimeError(null);
+  }
+
+  function handleEditCloseTimeSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!meeting) return;
+    // Client-side validation: new time must be after meeting_at
+    const selectedUtc = new Date(editCloseTimeValue).toISOString();
+    if (new Date(selectedUtc) <= new Date(meeting.meeting_at)) {
+      setEditCloseTimeError("Close time must be after the meeting start time.");
+      return;
+    }
+    editCloseTimeMutation.mutate(selectedUtc);
+  }
+
   // Admin vote entry panel
   const [showVoteEntryPanel, setShowVoteEntryPanel] = useState(false);
   // Fix 9: modal replaces the old green banner
@@ -374,7 +441,7 @@ export default function GeneralMeetingDetailPage() {
       setAddMotionForm({ title: "", description: "", motion_type: "general", is_multi_choice: false, motion_number: "", option_limit: "1", options: [{ text: "" }, { text: "" }] });
     },
     onError: (error: Error) => {
-      setAddMotionError(error.message || "Failed to add motion");
+      setAddMotionError(formatApiErrorMessage(error) || "Failed to add motion");
     },
   });
 
@@ -387,7 +454,7 @@ export default function GeneralMeetingDetailPage() {
       await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
     },
     onError: (error: Error) => {
-      setEditMotionError(error.message || "Failed to update motion");
+      setEditMotionError(formatApiErrorMessage(error) || "Failed to update motion");
     },
   });
 
@@ -438,19 +505,19 @@ export default function GeneralMeetingDetailPage() {
     },
     onMutate: async ({ motionId, isVisible }) => {
       await queryClient.cancelQueries({ queryKey: ["admin", "general-meetings", meetingId] });
-      const previous = queryClient.getQueryData(["admin", "general-meetings", meetingId]);
-      queryClient.setQueryData(["admin", "general-meetings", meetingId], (old: any) => {
+      const previous = queryClient.getQueryData<GeneralMeetingDetail>(["admin", "general-meetings", meetingId]);
+      queryClient.setQueryData(["admin", "general-meetings", meetingId], (old: GeneralMeetingDetail | undefined): GeneralMeetingDetail | undefined => {
         if (!old) return old;
         return {
           ...old,
-          motions: old.motions.map((m: any) =>
+          motions: old.motions.map((m: MotionDetail) =>
             m.id === motionId ? { ...m, is_visible: isVisible } : m
           ),
         };
       });
       return { previous };
     },
-    onError: (error: Error, variables, context: any) => {
+    onError: (error: Error, variables, context: { previous: GeneralMeetingDetail | undefined } | undefined) => {
       if (context?.previous) {
         queryClient.setQueryData(["admin", "general-meetings", meetingId], context.previous);
       }
@@ -538,12 +605,43 @@ export default function GeneralMeetingDetailPage() {
     e.preventDefault();
     if (!editingMotion) return;
 
+    if (!editForm.title.trim()) {
+      setEditMotionError("Title is required");
+      return;
+    }
+    if (editForm.title.length > MOTION_LIMITS.TITLE.MAX) {
+      setEditMotionError(`Title exceeds the 500 character limit (${editForm.title.length}/500 characters).`);
+      return;
+    }
+    if (editForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX) {
+      setEditMotionError(`Motion number exceeds the 50 character limit (${editForm.motion_number.length}/50 characters).`);
+      return;
+    }
+    if (editForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX) {
+      setEditMotionError(`Description exceeds the 5,000 character limit (${editForm.description.length.toLocaleString()}/5000 characters).`);
+      return;
+    }
+
     // Validate multi-choice fields
     if (editForm.is_multi_choice) {
-      const validOptions = editForm.options.filter((o) => o.text.trim());
+      const opts = editForm.options;
+      for (let idx = 0; idx < opts.length; idx++) {
+        const txt = opts[idx].text;
+        if (txt.length > MOTION_LIMITS.OPTION_TEXT.MAX) {
+          setEditMotionError(`Option ${idx + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
+          return;
+        }
+      }
+      const validOptions = opts.filter((o) => o.text.trim());
       if (validOptions.length < 2) {
         setEditMotionError("Multi-choice motions require at least 2 options.");
         return;
+      }
+      for (let idx = 0; idx < opts.length; idx++) {
+        if (!opts[idx].text.trim()) {
+          setEditMotionError("Option text must not be empty.");
+          return;
+        }
       }
       const limit = parseInt(editForm.option_limit, 10);
       if (isNaN(limit) || limit < 1) {
@@ -659,7 +757,54 @@ export default function GeneralMeetingDetailPage() {
             </span>
             <span className="admin-meta__item">
               <span className="admin-meta__label">Voting closes</span>
-              {formatLocalDateTime(meeting.voting_closes_at)}
+              {isEditingCloseTime ? (
+                <form onSubmit={handleEditCloseTimeSubmit} style={{ display: "inline-flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input
+                      type="datetime-local"
+                      className="field__input"
+                      aria-label="New voting close time"
+                      value={editCloseTimeValue}
+                      onChange={(e) => setEditCloseTimeValue(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="submit"
+                      className="btn btn--primary"
+                      disabled={editCloseTimeMutation.isPending}
+                    >
+                      {editCloseTimeMutation.isPending ? "Saving..." : "Save"}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn--secondary"
+                      onClick={handleEditCloseTimeCancel}
+                      disabled={editCloseTimeMutation.isPending}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {editCloseTimeError && (
+                    <span role="alert" className="field__error">
+                      {editCloseTimeError}
+                    </span>
+                  )}
+                </form>
+              ) : (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  {formatLocalDateTime(meeting.voting_closes_at)}
+                  {(meeting.status === "pending" || meeting.status === "open") && (
+                    <button
+                      type="button"
+                      className="btn btn--admin"
+                      onClick={handleEditCloseTimeOpen}
+                      aria-label="Edit close time"
+                    >
+                      Edit
+                    </button>
+                  )}
+                </span>
+              )}
             </span>
             {meeting.closed_at && (
               <span className="admin-meta__item">
@@ -953,11 +1098,37 @@ export default function GeneralMeetingDetailPage() {
                   setAddMotionError("Title is required");
                   return;
                 }
+                if (addMotionForm.title.length > MOTION_LIMITS.TITLE.MAX) {
+                  setAddMotionError(`Title exceeds the 500 character limit (${addMotionForm.title.length}/500 characters).`);
+                  return;
+                }
+                if (addMotionForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX) {
+                  setAddMotionError(`Motion number exceeds the 50 character limit (${addMotionForm.motion_number.length}/50 characters).`);
+                  return;
+                }
+                if (addMotionForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX) {
+                  setAddMotionError(`Description exceeds the 5,000 character limit (${addMotionForm.description.length.toLocaleString()}/5000 characters).`);
+                  return;
+                }
                 if (addMotionForm.is_multi_choice) {
-                  const validOpts = addMotionForm.options.filter((o) => o.text.trim());
+                  const opts = addMotionForm.options;
+                  for (let idx = 0; idx < opts.length; idx++) {
+                    const txt = opts[idx].text;
+                    if (txt.length > MOTION_LIMITS.OPTION_TEXT.MAX) {
+                      setAddMotionError(`Option ${idx + 1} exceeds the 1,000 character limit (${txt.length}/1000 characters).`);
+                      return;
+                    }
+                  }
+                  const validOpts = opts.filter((o) => o.text.trim());
                   if (validOpts.length < 2) {
                     setAddMotionError("Multi-choice motions require at least 2 options.");
                     return;
+                  }
+                  for (let idx = 0; idx < opts.length; idx++) {
+                    if (!opts[idx].text.trim()) {
+                      setAddMotionError("Option text must not be empty.");
+                      return;
+                    }
                   }
                   const lim = parseInt(addMotionForm.option_limit, 10);
                   if (isNaN(lim) || lim < 1) {
@@ -991,30 +1162,57 @@ export default function GeneralMeetingDetailPage() {
                 <label className="field__label" htmlFor="add-motion-title">Title *</label>
                 <input
                   id="add-motion-title"
-                  className="field__input"
+                  className={`field__input${addMotionForm.title.length > MOTION_LIMITS.TITLE.MAX ? " field__input--error" : ""}`}
                   value={addMotionForm.title}
                   onChange={(e) => setAddMotionForm((f) => ({ ...f, title: e.target.value }))}
+                  aria-invalid={addMotionForm.title.length > MOTION_LIMITS.TITLE.MAX}
+                  aria-describedby="add-motion-title-counter"
                 />
+                <div
+                  id="add-motion-title-counter"
+                  className={getCounterClass(addMotionForm.title.length, MOTION_LIMITS.TITLE.MAX, MOTION_LIMITS.TITLE.WARN)}
+                  data-testid="add-motion-title-counter"
+                >
+                  {addMotionForm.title.length}/{MOTION_LIMITS.TITLE.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="add-motion-description">Description</label>
                 <textarea
                   id="add-motion-description"
-                  className="field__input"
+                  className={`field__input${addMotionForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX ? " field__input--error" : ""}`}
                   value={addMotionForm.description}
                   onChange={(e) => setAddMotionForm((f) => ({ ...f, description: e.target.value }))}
+                  aria-invalid={addMotionForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX}
+                  aria-describedby="add-motion-desc-counter"
                 />
+                <div
+                  id="add-motion-desc-counter"
+                  className={getCounterClass(addMotionForm.description.length, MOTION_LIMITS.DESCRIPTION.MAX, MOTION_LIMITS.DESCRIPTION.WARN)}
+                  data-testid="add-motion-desc-counter"
+                >
+                  {addMotionForm.description.length}/{MOTION_LIMITS.DESCRIPTION.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="add-motion-number">Motion number (optional)</label>
                 <input
                   id="add-motion-number"
-                  className="field__input"
+                  className={`field__input${addMotionForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX ? " field__input--error" : ""}`}
                   type="text"
                   placeholder={`Auto (e.g. ${(meeting.motions.length + 1).toString()})`}
                   value={addMotionForm.motion_number}
                   onChange={(e) => setAddMotionForm((f) => ({ ...f, motion_number: e.target.value }))}
+                  aria-invalid={addMotionForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX}
+                  aria-describedby="add-motion-number-counter"
                 />
+                <div
+                  id="add-motion-number-counter"
+                  className={getCounterClass(addMotionForm.motion_number.length, MOTION_LIMITS.MOTION_NUMBER.MAX, MOTION_LIMITS.MOTION_NUMBER.WARN)}
+                  data-testid="add-motion-number-counter"
+                >
+                  {addMotionForm.motion_number.length}/{MOTION_LIMITS.MOTION_NUMBER.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="add-motion-type">Motion Type</label>
@@ -1054,35 +1252,49 @@ export default function GeneralMeetingDetailPage() {
                   </div>
                   <div>
                     <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                    {addMotionForm.options.map((opt, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input
-                          aria-label={`Option ${idx + 1}`}
-                          className="field__input"
-                          type="text"
-                          value={opt.text}
-                          onChange={(e) => {
-                            const updated = [...addMotionForm.options];
-                            updated[idx] = { text: e.target.value };
-                            setAddMotionForm((f) => ({ ...f, options: updated }));
-                          }}
-                          placeholder={`Option ${idx + 1}`}
-                        />
-                        {addMotionForm.options.length > 2 && (
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            aria-label={`Remove option ${idx + 1}`}
-                            onClick={() => {
-                              const updated = addMotionForm.options.filter((_, i) => i !== idx);
-                              setAddMotionForm((f) => ({ ...f, options: updated }));
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {addMotionForm.options.map((opt, idx) => {
+                      const len = opt.text.length;
+                      const isOverLimit = len > MOTION_LIMITS.OPTION_TEXT.MAX;
+                      const counterId = `add-motion-option-${idx + 1}-counter`;
+                      const counterClass = getCounterClass(len, MOTION_LIMITS.OPTION_TEXT.MAX, MOTION_LIMITS.OPTION_TEXT.WARN);
+                      return (
+                        <div key={idx} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                            <textarea
+                              aria-label={`Option ${idx + 1}`}
+                              className={`field__input field__input--textarea${isOverLimit ? " field__input--error" : ""}`}
+                              rows={2}
+                              style={{ resize: "vertical" }}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const updated = [...addMotionForm.options];
+                                updated[idx] = { text: e.target.value };
+                                setAddMotionForm((f) => ({ ...f, options: updated }));
+                              }}
+                              placeholder={`Option ${idx + 1}`}
+                              aria-invalid={isOverLimit}
+                              aria-describedby={counterId}
+                            />
+                            {addMotionForm.options.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn btn--danger btn--sm"
+                                aria-label={`Remove option ${idx + 1}`}
+                                onClick={() => {
+                                  const updated = addMotionForm.options.filter((_, i) => i !== idx);
+                                  setAddMotionForm((f) => ({ ...f, options: updated }));
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div id={counterId} className={counterClass} data-testid={counterId}>
+                            {len}/{MOTION_LIMITS.OPTION_TEXT.MAX}
+                          </div>
+                        </div>
+                      );
+                    })}
                     <button
                       type="button"
                       className="btn btn--secondary btn--sm"
@@ -1166,32 +1378,59 @@ export default function GeneralMeetingDetailPage() {
                 <label className="field__label" htmlFor="modal-edit-title">Title</label>
                 <input
                   id="modal-edit-title"
-                  className="field__input"
+                  className={`field__input${editForm.title.length > MOTION_LIMITS.TITLE.MAX ? " field__input--error" : ""}`}
                   type="text"
                   required
                   value={editForm.title}
                   onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                  aria-invalid={editForm.title.length > MOTION_LIMITS.TITLE.MAX}
+                  aria-describedby="modal-edit-title-counter"
                 />
+                <div
+                  id="modal-edit-title-counter"
+                  className={getCounterClass(editForm.title.length, MOTION_LIMITS.TITLE.MAX, MOTION_LIMITS.TITLE.WARN)}
+                  data-testid="modal-edit-title-counter"
+                >
+                  {editForm.title.length}/{MOTION_LIMITS.TITLE.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="modal-edit-motion-number">Motion number (optional)</label>
                 <input
                   id="modal-edit-motion-number"
-                  className="field__input"
+                  className={`field__input${editForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX ? " field__input--error" : ""}`}
                   type="text"
                   value={editForm.motion_number}
                   onChange={(e) => setEditForm((f) => ({ ...f, motion_number: e.target.value }))}
                   placeholder="e.g. 1, SR-1"
+                  aria-invalid={editForm.motion_number.length > MOTION_LIMITS.MOTION_NUMBER.MAX}
+                  aria-describedby="modal-edit-number-counter"
                 />
+                <div
+                  id="modal-edit-number-counter"
+                  className={getCounterClass(editForm.motion_number.length, MOTION_LIMITS.MOTION_NUMBER.MAX, MOTION_LIMITS.MOTION_NUMBER.WARN)}
+                  data-testid="modal-edit-number-counter"
+                >
+                  {editForm.motion_number.length}/{MOTION_LIMITS.MOTION_NUMBER.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="modal-edit-description">Description</label>
                 <textarea
                   id="modal-edit-description"
-                  className="field__input"
+                  className={`field__input${editForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX ? " field__input--error" : ""}`}
                   value={editForm.description}
                   onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                  aria-invalid={editForm.description.length > MOTION_LIMITS.DESCRIPTION.MAX}
+                  aria-describedby="modal-edit-desc-counter"
                 />
+                <div
+                  id="modal-edit-desc-counter"
+                  className={getCounterClass(editForm.description.length, MOTION_LIMITS.DESCRIPTION.MAX, MOTION_LIMITS.DESCRIPTION.WARN)}
+                  data-testid="modal-edit-desc-counter"
+                >
+                  {editForm.description.length}/{MOTION_LIMITS.DESCRIPTION.MAX}
+                </div>
               </div>
               <div className="field">
                 <label className="field__label" htmlFor="modal-edit-type">Motion Type</label>
@@ -1231,35 +1470,49 @@ export default function GeneralMeetingDetailPage() {
                   </div>
                   <div>
                     <p className="field__label" style={{ marginBottom: 6 }}>Options (min 2)</p>
-                    {editForm.options.map((opt, idx) => (
-                      <div key={idx} style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-                        <input
-                          aria-label={`Option ${idx + 1}`}
-                          className="field__input"
-                          type="text"
-                          value={opt.text}
-                          onChange={(e) => {
-                            const updated = [...editForm.options];
-                            updated[idx] = { text: e.target.value };
-                            setEditForm((f) => ({ ...f, options: updated }));
-                          }}
-                          placeholder={`Option ${idx + 1}`}
-                        />
-                        {editForm.options.length > 2 && (
-                          <button
-                            type="button"
-                            className="btn btn--danger btn--sm"
-                            aria-label={`Remove option ${idx + 1}`}
-                            onClick={() => {
-                              const updated = editForm.options.filter((_, i) => i !== idx);
-                              setEditForm((f) => ({ ...f, options: updated }));
-                            }}
-                          >
-                            ✕
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                    {editForm.options.map((opt, idx) => {
+                      const len = opt.text.length;
+                      const isOverLimit = len > MOTION_LIMITS.OPTION_TEXT.MAX;
+                      const counterId = `edit-motion-option-${idx + 1}-counter`;
+                      const counterClass = getCounterClass(len, MOTION_LIMITS.OPTION_TEXT.MAX, MOTION_LIMITS.OPTION_TEXT.WARN);
+                      return (
+                        <div key={idx} style={{ marginBottom: 8 }}>
+                          <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                            <textarea
+                              aria-label={`Option ${idx + 1}`}
+                              className={`field__input field__input--textarea${isOverLimit ? " field__input--error" : ""}`}
+                              rows={2}
+                              style={{ resize: "vertical" }}
+                              value={opt.text}
+                              onChange={(e) => {
+                                const updated = [...editForm.options];
+                                updated[idx] = { text: e.target.value };
+                                setEditForm((f) => ({ ...f, options: updated }));
+                              }}
+                              placeholder={`Option ${idx + 1}`}
+                              aria-invalid={isOverLimit}
+                              aria-describedby={counterId}
+                            />
+                            {editForm.options.length > 2 && (
+                              <button
+                                type="button"
+                                className="btn btn--danger btn--sm"
+                                aria-label={`Remove option ${idx + 1}`}
+                                onClick={() => {
+                                  const updated = editForm.options.filter((_, i) => i !== idx);
+                                  setEditForm((f) => ({ ...f, options: updated }));
+                                }}
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                          <div id={counterId} className={counterClass} data-testid={counterId}>
+                            {len}/{MOTION_LIMITS.OPTION_TEXT.MAX}
+                          </div>
+                        </div>
+                      );
+                    })}
                     <button
                       type="button"
                       className="btn btn--secondary btn--sm"

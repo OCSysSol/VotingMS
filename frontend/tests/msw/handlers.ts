@@ -15,7 +15,7 @@ import type {
   ResendReportOut,
 } from "../../src/api/admin";
 import type { GeneralMeetingSummaryData } from "../../src/api/public";
-import type { TenantConfig, SmtpConfig, SmtpStatus } from "../../src/api/config";
+import type { TenantConfig, SmtpConfig, SmtpStatus, SmsConfigOut } from "../../src/api/config";
 import type { AdminUser, AdminUserListResponse } from "../../src/api/users";
 import type { SubscriptionResponse } from "../../src/api/subscription";
 
@@ -27,6 +27,8 @@ export let configFixture: TenantConfig = {
   favicon_url: null,
   primary_colour: "#005f73",
   support_email: "",
+  otp_email_enabled: true,
+  otp_sms_enabled: false,
 };
 
 export let smtpConfigFixture: SmtpConfig = {
@@ -53,6 +55,38 @@ export function resetSmtpStatusFixture() {
   smtpStatusFixture = { configured: false };
 }
 
+export let smsConfigFixture: SmsConfigOut = {
+  sms_enabled: false,
+  sms_provider: null,
+  sms_smtp2go_api_key_is_set: false,
+  sms_from_number: null,
+  sms_twilio_account_sid: null,
+  sms_twilio_auth_token_is_set: false,
+  sms_twilio_from_number: null,
+  sms_clicksend_username: null,
+  sms_clicksend_api_key_is_set: false,
+  sms_clicksend_from_number: null,
+  sms_webhook_url: null,
+  sms_webhook_secret_is_set: false,
+};
+
+export function resetSmsConfigFixture() {
+  smsConfigFixture = {
+    sms_enabled: false,
+    sms_provider: null,
+    sms_smtp2go_api_key_is_set: false,
+    sms_from_number: null,
+    sms_twilio_account_sid: null,
+    sms_twilio_auth_token_is_set: false,
+    sms_twilio_from_number: null,
+    sms_clicksend_username: null,
+    sms_clicksend_api_key_is_set: false,
+    sms_clicksend_from_number: null,
+    sms_webhook_url: null,
+    sms_webhook_secret_is_set: false,
+  };
+}
+
 export function resetConfigFixture() {
   configFixture = {
     app_name: "General Meeting",
@@ -60,9 +94,12 @@ export function resetConfigFixture() {
     favicon_url: null,
     primary_colour: "#005f73",
     support_email: "",
+    otp_email_enabled: true,
+    otp_sms_enabled: false,
   };
   resetSmtpConfigFixture();
   resetSmtpStatusFixture();
+  resetSmsConfigFixture();
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +183,7 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     given_name: "Alice",
     surname: "Smith",
     owner_emails: [
-      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith" },
+      { id: "em1", email: "owner1@example.com", given_name: "Alice", surname: "Smith", phone_number: null },
     ],
     emails: ["owner1@example.com"],
     unit_entitlement: 100,
@@ -162,7 +199,7 @@ export const ADMIN_LOT_OWNERS: LotOwner[] = [
     given_name: null,
     surname: null,
     owner_emails: [
-      { id: "em2", email: "owner2@example.com", given_name: null, surname: null },
+      { id: "em2", email: "owner2@example.com", given_name: null, surname: null, phone_number: null },
     ],
     emails: ["owner2@example.com"],
     unit_entitlement: 200,
@@ -755,7 +792,7 @@ export const adminHandlers = [
       lot_number: body?.lot_number ?? "NEW",
       given_name: null,
       surname: null,
-      owner_emails: [{ id: "em-new", email: "new@example.com", given_name: null, surname: null }],
+      owner_emails: [{ id: "em-new", email: "new@example.com", given_name: null, surname: null, phone_number: null }],
       emails: ["new@example.com"],
       unit_entitlement: 50,
       financial_position: "normal",
@@ -826,6 +863,50 @@ export const adminHandlers = [
       emails: ADMIN_LOT_OWNERS[0].emails,
     };
     return HttpResponse.json(updated);
+  }),
+
+  // Person update endpoint
+  http.patch(`${BASE}/api/admin/persons/:personId`, async ({ request, params }) => {
+    const body = await request.json() as { given_name?: string | null; surname?: string | null; phone_number?: string | null };
+    const personId = params.personId as string;
+    const allPersons = ADMIN_LOT_OWNERS.flatMap((lo) =>
+      lo.owner_emails.map((e) => ({
+        id: e.id,
+        email: e.email ?? "",
+        given_name: e.given_name ?? null,
+        surname: e.surname ?? null,
+        phone_number: e.phone_number ?? null,
+      }))
+    );
+    const existing = allPersons.find((p) => p.id === personId);
+    if (!existing) {
+      return HttpResponse.json({ detail: "Person not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      ...existing,
+      ...(body.given_name !== undefined ? { given_name: body.given_name } : {}),
+      ...(body.surname !== undefined ? { surname: body.surname } : {}),
+      ...(body.phone_number !== undefined ? { phone_number: body.phone_number } : {}),
+    });
+  }),
+
+  // Person search endpoint
+  http.get(`${BASE}/api/admin/persons/search`, ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").toLowerCase().trim();
+    const limit = parseInt(url.searchParams.get("limit") ?? "10", 10);
+    if (!q) return HttpResponse.json([]);
+    const allPersons = ADMIN_LOT_OWNERS.flatMap((lo) =>
+      lo.owner_emails.map((e) => ({
+        id: e.id,
+        email: e.email ?? "",
+        given_name: e.given_name,
+        surname: e.surname,
+        phone_number: e.phone_number ?? null,
+      }))
+    );
+    const matches = allPersons.filter((p) => p.email.startsWith(q)).slice(0, limit);
+    return HttpResponse.json(matches);
   }),
 
   http.delete(`${BASE}/api/admin/lot-owners/:lotOwnerId/owner-emails/:emailId`, ({ params }) => {
@@ -1025,6 +1106,32 @@ export const adminHandlers = [
       return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
     }
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.patch(`${BASE}/api/admin/general-meetings/:meetingId`, async ({ request, params }) => {
+    const body = await request.json() as { voting_closes_at: string };
+    const meetingId = params.meetingId as string;
+    if (meetingId === "agm2") {
+      // Closed meeting
+      return HttpResponse.json({ detail: "Meeting is already closed" }, { status: 409 });
+    }
+    if (meetingId === "agm-notfound-patch") {
+      return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
+    }
+    if (meetingId === "agm-patch-422") {
+      return HttpResponse.json(
+        { detail: "voting_closes_at must be after meeting_at" },
+        { status: 422 }
+      );
+    }
+    if (meetingId === "agm-patch-error") {
+      return HttpResponse.json({ detail: "Server error" }, { status: 500 });
+    }
+    return HttpResponse.json({
+      id: meetingId,
+      status: "open",
+      voting_closes_at: body.voting_closes_at,
+    });
   }),
 
   http.post(`${BASE}/api/admin/general-meetings/:meetingId/resend-report`, ({ params }) => {
@@ -1253,6 +1360,35 @@ export const adminHandlers = [
   http.post(`${BASE}/api/admin/config/smtp/test`, () => {
     return HttpResponse.json({ ok: true });
   }),
+
+  // SMS configuration endpoints
+  http.get(`${BASE}/api/admin/config/sms`, () => {
+    return HttpResponse.json(smsConfigFixture);
+  }),
+
+  http.put(`${BASE}/api/admin/config/sms`, async ({ request }) => {
+    const body = await request.json() as Partial<SmsConfigOut> & { sms_smtp2go_api_key?: string | null; sms_twilio_auth_token?: string | null; sms_clicksend_api_key?: string | null; sms_webhook_secret?: string | null };
+    smsConfigFixture = {
+      ...smsConfigFixture,
+      sms_enabled: body?.sms_enabled !== undefined ? body.sms_enabled : smsConfigFixture.sms_enabled,
+      sms_provider: body?.sms_provider !== undefined ? body.sms_provider : smsConfigFixture.sms_provider,
+      sms_smtp2go_api_key_is_set: body?.sms_smtp2go_api_key ? true : smsConfigFixture.sms_smtp2go_api_key_is_set,
+      sms_from_number: body?.sms_from_number !== undefined ? body.sms_from_number : smsConfigFixture.sms_from_number,
+      sms_twilio_account_sid: body?.sms_twilio_account_sid !== undefined ? body.sms_twilio_account_sid : smsConfigFixture.sms_twilio_account_sid,
+      sms_twilio_auth_token_is_set: body?.sms_twilio_auth_token ? true : smsConfigFixture.sms_twilio_auth_token_is_set,
+      sms_twilio_from_number: body?.sms_twilio_from_number !== undefined ? body.sms_twilio_from_number : smsConfigFixture.sms_twilio_from_number,
+      sms_clicksend_username: body?.sms_clicksend_username !== undefined ? body.sms_clicksend_username : smsConfigFixture.sms_clicksend_username,
+      sms_clicksend_api_key_is_set: body?.sms_clicksend_api_key ? true : smsConfigFixture.sms_clicksend_api_key_is_set,
+      sms_clicksend_from_number: body?.sms_clicksend_from_number !== undefined ? body.sms_clicksend_from_number : smsConfigFixture.sms_clicksend_from_number,
+      sms_webhook_url: body?.sms_webhook_url !== undefined ? body.sms_webhook_url : smsConfigFixture.sms_webhook_url,
+      sms_webhook_secret_is_set: body?.sms_webhook_secret ? true : smsConfigFixture.sms_webhook_secret_is_set,
+    };
+    return HttpResponse.json(smsConfigFixture);
+  }),
+
+  http.post(`${BASE}/api/admin/config/sms/test`, () => {
+    return HttpResponse.json({ ok: true });
+  }),
 ];
 
 export const SUMMARY_AGM_ID = "agm-summary-test-999";
@@ -1437,7 +1573,7 @@ export const handlers = [
   ),
 
   http.post(`${BASE}/api/auth/request-otp`, () =>
-    HttpResponse.json({ sent: true })
+    HttpResponse.json({ sent: true, has_phone: false, phone_hint: null, enabled_channels: ["email"] })
   ),
 
   http.post(`${BASE}/api/auth/verify`, () =>

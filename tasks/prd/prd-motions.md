@@ -339,7 +339,7 @@ This document covers motion management for the AGM Voting App: CRUD operations o
 - [ ] When "Multi-Choice" is selected, the form shows: an "Option limit" number input (label: "Max selections per voter", min 1, required) and a dynamic list of option text inputs with add/remove buttons
 - [ ] At least 2 options are required; attempting to save with fewer shows an inline error: "At least 2 options are required"
 - [ ] Option limit must be between 1 and the number of options inclusive
-- [ ] Each option text must be non-empty (max 200 characters)
+- [ ] Each option text must be non-empty (max 1,000 characters; live counter and multi-line editing supported)
 - [ ] Options have an explicit display order; the form provides simple up/down buttons to reorder options within the modal
 - [ ] Saved multi-choice motions appear in the motion management table with a "Multi-Choice (N options)" badge
 - [ ] `POST /api/admin/general-meetings` and `POST /api/admin/general-meetings/{id}/motions` accept `option_limit` and `options` when `motion_type = "multi_choice"`; missing or invalid fields return 422
@@ -363,6 +363,36 @@ This document covers motion management for the AGM Voting App: CRUD operations o
 - [ ] A visible multi-choice motion cannot be edited (must be hidden first — existing rule unchanged)
 - [ ] All tests pass at 100% coverage
 - [ ] Typecheck/lint passes
+
+---
+
+### US-MC-03: Expanded motion option text limit (1,000 characters) with graceful error handling
+
+**Status:** ✅ Implemented — branch: `feat/option-text-1000-limit`, committed 2026-11-09
+
+**Description:** As a meeting host, I want to provide detailed option text (up to 1,000 characters) for multi-choice motions—such as full resolution wordings, candidate biographies, or detailed policy choices—with live character counters and clear error messaging, so that options are clearly described without running into restrictive limits or confusing validation errors.
+
+**Acceptance Criteria:**
+
+- [x] Multi-choice motion options accept up to 1,000 characters (expanded from 200 characters).
+- [x] In `MotionEditor.tsx`, each option input is rendered as a multi-line input / textarea with vertical resizing so lengthy descriptions can be easily reviewed and edited.
+- [x] In `MotionEditor.tsx`, Add Motion Modal, and Edit Motion Modal (`GeneralMeetingDetailPage.tsx`), each option field displays a live character counter (e.g., "750/1000").
+- [x] The character counter provides real-time visual feedback:
+  - Neutral muted color below 900 characters.
+  - Warning amber color when approaching the limit (900–1,000 characters).
+  - Error red color when exceeding 1,000 characters.
+- [x] Form submission validates option text lengths client-side before dispatching API requests:
+  - If any option exceeds 1,000 characters, submission is blocked and a human-readable inline error is displayed (e.g. "Motion 1, Option 2 exceeds the 1,000 character limit (1,042/1000 characters)").
+  - If any option is blank/whitespace-only, submission is blocked with an inline error ("Option text must not be empty").
+- [x] If the backend returns a 422 error for option length validation, the admin UI surfaces a clear inline error message rather than a generic or unhandled exception.
+- [x] Backend `MotionOptionCreate` Pydantic validator allows up to 1,000 characters and returns 422 with a descriptive error message when exceeded.
+- [x] Database storage requires no migration because `motion_options.text` is already an unbounded `TEXT` column in PostgreSQL.
+- [x] On the voter voting page (`MultiChoiceOptionList.tsx`), long option texts wrap cleanly across multiple lines (`word-break: break-word`) without displacing the For/Against/Abstain buttons or breaking card responsiveness on mobile devices.
+- [x] In `MultiChoiceOptionList.tsx`, the `aria-label` attributes on button groups and voting buttons truncate long option text to 80 characters with an ellipsis (`...`) so screen reader users are not forced to listen to 1,000 characters per option button.
+- [x] In `AdminVoteEntryPanel.tsx`, table cells format long option texts cleanly with word wrapping and truncated button `aria-label` attributes.
+- [x] In `AGMReportView.tsx`, the option tally row accommodates 1,000-character options cleanly without clipping the outcome badge, summary counts, or "Show voting details" button.
+- [x] In `AGMReportView.tsx`, CSV export cleanly escapes and quotes multi-line 1,000-character option texts without breaking spreadsheet row parsing.
+- [x] All tests pass at 100% test coverage.
 
 ---
 
@@ -396,12 +426,46 @@ This document covers motion management for the AGM Voting App: CRUD operations o
 
 ---
 
+### US-AM06: Real-time character limit indicators, field-level error highlighting, and graceful error messaging for motion fields
+
+**Status:** ✅ Implemented — branch: `feat/motion-field-limits`, committed 2026-11-09
+
+**Description:** As a meeting host/admin, I want real-time character limit indicators, field-level error highlighting, and clear error messaging for Motion Title, Motion Number, and Description across both motion creation and motion editing, so that I can see field limits as I type, immediately identify and locate invalid fields, and avoid confusing validation rejections.
+
+**Acceptance Criteria:**
+- [x] Motion fields enforce backend-aligned limits:
+  - **Motion Title**: maximum 500 characters; visual warning threshold at 450 characters (90%).
+  - **Motion Number**: maximum 50 characters; visual warning threshold at 45 characters (90%).
+  - **Motion Description**: maximum 5,000 characters; visual warning threshold at 4,500 characters (90%).
+- [x] Real-time character limit counter is displayed immediately below each field:
+  - Formatted as `"{current}/{max}"` (e.g., `450/500`, `48/50`, `4820/5000`).
+  - Styled with neutral muted color (`var(--text-muted)`) when under 90% of the maximum limit.
+  - Styled with warning amber color (`var(--amber)`) when between 90% and 100% of the maximum limit inclusive.
+  - Styled with error red color (`var(--red)`) when exceeding the maximum limit.
+- [x] Field-level error styling:
+  - Inputs and textareas exceeding their limit receive `aria-invalid="true"` and an error border (`.field__input--error` / `.field__input[aria-invalid="true"]`), making the invalid field immediately distinguishable.
+- [x] Client-side validation prevents submission when any field exceeds its limit:
+  - Submission is blocked before any API call is made.
+  - A descriptive, human-readable error summary is displayed identifying the exact motion number and field name (e.g., `"Motion 2: Title exceeds the 500 character limit (512/500 characters)"`, `"Motion 1: Description exceeds the 5,000 character limit (5,210/5000 characters)"`, or `"Motion number exceeds the 50 character limit (54/50 characters)"`).
+  - Screen readers are notified via `role="alert"` on error summary messages and `aria-describedby` links to field counters.
+- [x] Graceful handling of backend 422 API errors:
+  - If a 422 Unprocessable Entity is returned by the API (e.g. `POST /api/admin/general-meetings`, `POST /api/admin/general-meetings/{id}/motions`, `PATCH /api/admin/motions/{id}`), the response is parsed to extract field locations and messages without exposing raw JSON, internal validation dumps, or generic unhelpful text.
+- [x] Comprehensive coverage across all motion entry interfaces:
+  - Meeting creation flow: `MotionEditor.tsx` / `CreateGeneralMeetingForm.tsx`.
+  - Meeting detail flow: "Add Motion" modal in `GeneralMeetingDetailPage.tsx`.
+  - Meeting detail flow: "Edit Motion" modal in `GeneralMeetingDetailPage.tsx`.
+- [x] No regression on existing multi-choice option length limits (1,000 chars) and validations.
+- [x] All unit, integration, and E2E tests pass at 100% test coverage.
+- [x] Typecheck, lint, and security checks pass cleanly.
+
+---
+
 ## Functional Requirements
 
 - FR-11: AGM records and their motions are immutable after creation. No edits or deletions are permitted regardless of AGM status once the motion is visible and has received votes.
 - FR-16: Each motion has a `motion_number` (VARCHAR). Auto-assigned as `str(display_order)` when omitted. Whitespace-only input is treated as blank and stored as `NULL`. `motion_number` is unique per meeting (partial unique index `WHERE motion_number IS NOT NULL`). On the voter-facing voting page, every motion card always renders `"MOTION {motion_number}"` as its label.
 - FR-17: Motions have a `display_order` (INTEGER, 1-based, unique per meeting). The admin can reorder motions via `PUT /api/admin/general-meetings/{id}/motions/reorder`. Reordering is only permitted on open or pending meetings. Changing `display_order` never modifies `motion_number`.
-- FR-18: A third motion type — `multi_choice` — is supported alongside `general` and `special`. A multi-choice motion has a list of options (`motion_options` table) and an `option_limit` (integer, 1 to N options). Each selected option receives the voter's full UOE (not split). Selecting zero options is recorded as `abstained`. In-arrear lots are recorded as `not_eligible` for multi-choice motions.
+- FR-18: A third motion type — `multi_choice` — is supported alongside `general` and `special`. A multi-choice motion has a list of options (`motion_options` table) and an `option_limit` (integer, 1 to N options). Option text supports up to 1,000 characters with live character counter feedback and multi-line editing. Each selected option receives the voter's full UOE (not split). Selecting zero options is recorded as `abstained`. In-arrear lots are recorded as `not_eligible` for multi-choice motions.
 - FR-19: Multi-choice motion tally is computed per option: for each option, the `voter_count` is the number of lots that selected it and `entitlement_sum` is the sum of their snapshotted UOE. A lot may appear in multiple option tallies. The `yes` and `no` tally categories are not applicable to multi-choice motions (returned as zero). `abstained` and `absent` tallies continue to apply.
 - Visibility: Hidden motions do not appear on the voter voting page. Server-side filtering ensures hidden motion titles are never sent to the browser for unvoted motions. Motions the voter has already voted on are always returned even if hidden (read-only).
 

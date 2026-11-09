@@ -364,7 +364,7 @@ test.describe("SESS-E2E-08: return visit after ballot submitted routes to confir
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
     // Vote on the single motion and submit
-    await page.locator(".motion-card").first().getByRole("button", { name: "For" }).click();
+    await page.locator(".motion-card").first().getByTestId("vote-btn-yes").click();
     await submitBallot(page);
     // After submission → confirmation page
     await expect(page).toHaveURL(/vote\/.*\/confirmation/, { timeout: 20000 });

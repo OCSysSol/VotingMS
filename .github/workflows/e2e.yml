@@ -15,7 +15,7 @@ jobs:
     name: E2E Setup
     if: |
       github.event.deployment_status.state == 'success' &&
-      github.event.deployment.environment != 'Production'
+      !startsWith(github.event.deployment.environment, 'Production')
     runs-on: ubuntu-latest
 
     outputs:
@@ -39,13 +39,6 @@ jobs:
       - name: Link e2e_tests to frontend node_modules
         run: ln -sf ../frontend/node_modules e2e_tests/node_modules
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
@@ -136,13 +129,6 @@ jobs:
       - name: Link e2e_tests to frontend node_modules
         run: ln -sf ../frontend/node_modules e2e_tests/node_modules
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
@@ -200,13 +186,6 @@ jobs:
       - name: Link e2e_tests to frontend node_modules
         run: ln -sf ../frontend/node_modules e2e_tests/node_modules
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
@@ -264,13 +243,6 @@ jobs:
       - name: Link e2e_tests to frontend node_modules
         run: ln -sf ../frontend/node_modules e2e_tests/node_modules
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
@@ -328,13 +300,6 @@ jobs:
       - name: Link e2e_tests to frontend node_modules
         run: ln -sf ../frontend/node_modules e2e_tests/node_modules
 
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ hashFiles('frontend/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-playwright-
       - name: Install Playwright browsers
         run: cd frontend && npx playwright install --with-deps chromium
 
@@ -398,9 +363,15 @@ jobs:
           merge-multiple: true
 
       - name: Merge Playwright reports
-        run: cd frontend && npx playwright merge-reports --reporter html all-blob-reports
+        run: |
+          if [ -d "frontend/all-blob-reports" ] && [ "$(ls -A frontend/all-blob-reports 2>/dev/null)" ]; then
+            cd frontend && npx playwright merge-reports --reporter html all-blob-reports
+          else
+            echo "No blob reports found to merge; skipping."
+          fi
 
       - name: Upload merged Playwright report
+        if: hashFiles('frontend/playwright-report/**') != ''
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report-${{ github.run_id }}
