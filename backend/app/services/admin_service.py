@@ -1956,6 +1956,7 @@ async def create_general_meeting(data: GeneralMeetingCreate, db: AsyncSession) -
         "status": general_meeting.status.value if hasattr(general_meeting.status, "value") else general_meeting.status,
         "meeting_at": general_meeting.meeting_at,
         "voting_closes_at": general_meeting.voting_closes_at,
+        "is_archived": general_meeting.is_archived,
         "motions": [
             {
                 "id": m.id,
@@ -2024,6 +2025,7 @@ async def list_general_meetings(
     name: str | None = None,
     building_id: uuid.UUID | None = None,
     status: str | None = None,
+    is_archived: bool | None = False,
     sort_by: str | None = None,
     sort_dir: str | None = None,
 ) -> list[dict]:
@@ -2038,6 +2040,8 @@ async def list_general_meetings(
         q = q.where(GeneralMeeting.building_id == building_id)
     if status is not None:
         q = q.where(_effective_status_case() == status)
+    if is_archived is not None:
+        q = q.where(GeneralMeeting.is_archived == is_archived)
     result = await db.execute(q.offset(offset).limit(limit))
     rows = result.all()
     items = []
@@ -2054,6 +2058,7 @@ async def list_general_meetings(
                 "meeting_at": general_meeting.meeting_at,
                 "voting_closes_at": general_meeting.voting_closes_at,
                 "created_at": general_meeting.created_at,
+                "is_archived": general_meeting.is_archived,
             }
         )
     return items
@@ -2064,6 +2069,7 @@ async def count_general_meetings(
     name: str | None = None,
     building_id: uuid.UUID | None = None,
     status: str | None = None,
+    is_archived: bool | None = False,
 ) -> int:
     """Return total count of general meetings matching the optional filters.
 
@@ -2082,6 +2088,8 @@ async def count_general_meetings(
         q = q.where(GeneralMeeting.building_id == building_id)
     if status is not None:
         q = q.where(_effective_status_case() == status)
+    if is_archived is not None:
+        q = q.where(GeneralMeeting.is_archived == is_archived)
     result = await db.execute(q)
     return result.scalar_one()
 
@@ -2593,6 +2601,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
         "meeting_at": general_meeting.meeting_at,
         "voting_closes_at": general_meeting.voting_closes_at,
         "closed_at": general_meeting.closed_at,
+        "is_archived": general_meeting.is_archived,
         "total_eligible_voters": total_eligible_voters,
         "total_submitted": total_submitted,
         "total_entitlement": total_entitlement,
@@ -3446,6 +3455,31 @@ async def delete_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession
         raise HTTPException(status_code=404, detail="General Meeting not found")
     if meeting.status == GeneralMeetingStatus.open:
         raise HTTPException(status_code=409, detail="Cannot delete an open General Meeting")
+    if meeting.status == GeneralMeetingStatus.closed:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead.",
+        )
+
+    # Check for recorded votes or ballot submissions
+    vote_count_res = await db.execute(
+        select(func.count()).select_from(Vote).where(Vote.general_meeting_id == general_meeting_id)
+    )
+    if vote_count_res.scalar_one() > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead.",
+        )
+
+    ballot_count_res = await db.execute(
+        select(func.count()).select_from(BallotSubmission).where(BallotSubmission.general_meeting_id == general_meeting_id)
+    )
+    if ballot_count_res.scalar_one() > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead.",
+        )
+
     # RR5-11: Block deletion of pending meetings that already have data (motions or lot weights),
     # to prevent accidental loss of configured but not-yet-started meetings.
     if meeting.status == GeneralMeetingStatus.pending:
@@ -3469,6 +3503,47 @@ async def delete_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession
     # session; without that it raises a MissingGreenlet / lazy-load error at runtime.
     await db.execute(delete(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
     await db.commit()
+
+
+async def archive_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession) -> GeneralMeeting:
+    """Archive a general meeting.
+
+    Raises 404 if not found.
+    Raises 409 if meeting is open ('Cannot archive an open General Meeting').
+    Raises 409 if already archived.
+    """
+    result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+    if meeting.status == GeneralMeetingStatus.open:
+        raise HTTPException(status_code=409, detail="Cannot archive an open General Meeting")
+    if meeting.is_archived:
+        raise HTTPException(status_code=409, detail="General Meeting is already archived")
+
+    meeting.is_archived = True
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
+
+
+async def unarchive_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession) -> GeneralMeeting:
+    """Unarchive a general meeting.
+
+    Raises 404 if not found.
+    Raises 409 if not archived.
+    """
+    result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+    if not meeting.is_archived:
+        raise HTTPException(status_code=409, detail="General Meeting is not archived")
+
+    meeting.is_archived = False
+    await db.commit()
+    await db.refresh(meeting)
+    return meeting
 
 
 async def resend_report(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict:

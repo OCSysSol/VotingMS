@@ -4146,13 +4146,14 @@ class TestDeleteGeneralMeeting:
 
     # --- Happy path ---
 
-    async def test_delete_general_meeting_closed_success(
+    async def test_delete_general_meeting_closed_returns_409(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """DELETE on a closed meeting returns 204."""
+        """DELETE on a closed meeting returns 409 per data retention policy."""
         agm = await self._create_meeting(db_session, "DeleteClosed", GeneralMeetingStatus.closed)
         response = await client.delete(f"/api/admin/general-meetings/{agm.id}")
-        assert response.status_code == 204
+        assert response.status_code == 409
+        assert "Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead." in response.json()["detail"]
 
     async def test_delete_general_meeting_pending_success(
         self, client: AsyncClient, db_session: AsyncSession
@@ -4166,7 +4167,7 @@ class TestDeleteGeneralMeeting:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """After DELETE the record no longer exists in the database."""
-        agm = await self._create_meeting(db_session, "DeleteDBCheck", GeneralMeetingStatus.closed)
+        agm = await self._create_meeting(db_session, "DeleteDBCheck", GeneralMeetingStatus.pending)
         agm_id = agm.id
         response = await client.delete(f"/api/admin/general-meetings/{agm_id}")
         assert response.status_code == 204
@@ -4261,6 +4262,196 @@ class TestDeleteGeneralMeeting:
         agm = await self._create_meeting(db_session, "DeletePendingEmpty", GeneralMeetingStatus.pending)
         response = await client.delete(f"/api/admin/general-meetings/{agm.id}")
         assert response.status_code == 204
+
+    async def test_delete_meeting_with_votes_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """DELETE on a meeting with recorded votes returns 409 per data retention policy."""
+        agm = await self._create_meeting(db_session, "DeleteWithVotes", GeneralMeetingStatus.pending)
+        b_result = await db_session.execute(
+            select(Building).where(Building.id == agm.building_id)
+        )
+        building = b_result.scalar_one()
+        lot = LotOwner(building_id=building.id, lot_number="VOT1", unit_entitlement=10)
+        db_session.add(lot)
+        await db_session.flush()
+        motion = Motion(general_meeting_id=agm.id, title="M1", display_order=1)
+        db_session.add(motion)
+        await db_session.flush()
+        vote = Vote(
+            general_meeting_id=agm.id,
+            motion_id=motion.id,
+            voter_email="voter@example.com",
+            lot_owner_id=lot.id,
+            choice=VoteChoice.yes,
+            status=VoteStatus.submitted,
+        )
+        db_session.add(vote)
+        await db_session.commit()
+        response = await client.delete(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 409
+        assert "Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead." in response.json()["detail"]
+
+    async def test_delete_meeting_with_ballot_submissions_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """DELETE on a meeting with ballot submissions returns 409 per data retention policy."""
+        agm = await self._create_meeting(db_session, "DeleteWithBallots", GeneralMeetingStatus.pending)
+        b_result = await db_session.execute(
+            select(Building).where(Building.id == agm.building_id)
+        )
+        building = b_result.scalar_one()
+        lot = LotOwner(building_id=building.id, lot_number="BAL1", unit_entitlement=10)
+        db_session.add(lot)
+        await db_session.flush()
+        ballot = BallotSubmission(
+            general_meeting_id=agm.id,
+            lot_owner_id=lot.id,
+            voter_email="voter@example.com",
+        )
+        db_session.add(ballot)
+        await db_session.commit()
+        response = await client.delete(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 409
+        assert "Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead." in response.json()["detail"]
+
+
+class TestArchiveGeneralMeeting:
+    """Tests for POST /api/admin/general-meetings/{id}/archive and unarchive endpoints."""
+
+    async def _create_meeting(
+        self, db_session: AsyncSession, name: str, status: GeneralMeetingStatus, is_archived: bool = False
+    ) -> GeneralMeeting:
+        building = Building(name=f"Archive Bldg {name} {uuid.uuid4().hex[:6]}", manager_email="mgr@example.com")
+        db_session.add(building)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=building.id,
+            title=f"AGM {name}",
+            status=status,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+            is_archived=is_archived,
+        )
+        db_session.add(agm)
+        await db_session.commit()
+        await db_session.refresh(agm)
+        return agm
+
+    async def test_archive_closed_meeting_success(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm = await self._create_meeting(db_session, "ArchClosed", GeneralMeetingStatus.closed)
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/archive")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(agm.id)
+        assert data["is_archived"] is True
+        # Verify in DB
+        result = await db_session.execute(select(GeneralMeeting).where(GeneralMeeting.id == agm.id))
+        updated = result.scalar_one()
+        assert updated.is_archived is True
+
+    async def test_archive_open_meeting_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm = await self._create_meeting(db_session, "ArchOpen", GeneralMeetingStatus.open)
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/archive")
+        assert response.status_code == 409
+        assert "Cannot archive an open General Meeting" in response.json()["detail"]
+
+    async def test_archive_already_archived_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm = await self._create_meeting(db_session, "AlreadyArch", GeneralMeetingStatus.closed, is_archived=True)
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/archive")
+        assert response.status_code == 409
+        assert "General Meeting is already archived" in response.json()["detail"]
+
+    async def test_archive_not_found_returns_404(self, client: AsyncClient):
+        fake_id = uuid.uuid4()
+        response = await client.post(f"/api/admin/general-meetings/{fake_id}/archive")
+        assert response.status_code == 404
+        assert "General Meeting not found" in response.json()["detail"]
+
+    async def test_unarchive_meeting_success(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm = await self._create_meeting(db_session, "UnarchSuccess", GeneralMeetingStatus.closed, is_archived=True)
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/unarchive")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(agm.id)
+        assert data["is_archived"] is False
+        # Verify in DB
+        result = await db_session.execute(select(GeneralMeeting).where(GeneralMeeting.id == agm.id))
+        updated = result.scalar_one()
+        assert updated.is_archived is False
+
+    async def test_unarchive_not_archived_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm = await self._create_meeting(db_session, "NotArch", GeneralMeetingStatus.closed, is_archived=False)
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/unarchive")
+        assert response.status_code == 409
+        assert "General Meeting is not archived" in response.json()["detail"]
+
+    async def test_unarchive_not_found_returns_404(self, client: AsyncClient):
+        fake_id = uuid.uuid4()
+        response = await client.post(f"/api/admin/general-meetings/{fake_id}/unarchive")
+        assert response.status_code == 404
+        assert "General Meeting not found" in response.json()["detail"]
+
+    async def test_archive_unauthenticated_returns_401(self, db_session: AsyncSession):
+        from app.main import app as fastapi_app
+        async with AsyncClient(
+            transport=ASGITransport(app=fastapi_app), base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as unauth_client:
+            agm = await self._create_meeting(db_session, "ArchUnauth", GeneralMeetingStatus.closed)
+            resp = await unauth_client.post(f"/api/admin/general-meetings/{agm.id}/archive")
+            assert resp.status_code == 401
+            resp2 = await unauth_client.post(f"/api/admin/general-meetings/{agm.id}/unarchive")
+            assert resp2.status_code == 401
+
+    async def test_list_and_count_with_is_archived(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        agm_active = await self._create_meeting(db_session, "ActiveListing", GeneralMeetingStatus.closed, is_archived=False)
+        agm_archived = await self._create_meeting(db_session, "ArchivedListing", GeneralMeetingStatus.closed, is_archived=True)
+
+        # Default: is_archived=False (active only)
+        resp_default = await client.get("/api/admin/general-meetings?name=Listing")
+        assert resp_default.status_code == 200
+        titles_default = [m["title"] for m in resp_default.json()]
+        assert agm_active.title in titles_default
+        assert agm_archived.title not in titles_default
+
+        # is_archived=true: returns only archived
+        resp_arch = await client.get("/api/admin/general-meetings?name=Listing&is_archived=true")
+        assert resp_arch.status_code == 200
+        titles_arch = [m["title"] for m in resp_arch.json()]
+        assert agm_active.title not in titles_arch
+        assert agm_archived.title in titles_arch
+
+        # Count default
+        count_default = await client.get("/api/admin/general-meetings/count?name=Listing")
+        assert count_default.status_code == 200
+        assert count_default.json()["count"] >= 1
+
+        # Count archived
+        count_arch = await client.get("/api/admin/general-meetings/count?name=Listing&is_archived=true")
+        assert count_arch.status_code == 200
+        assert count_arch.json()["count"] >= 1
+
+        # Direct service call with is_archived=None
+        from app.services import admin_service
+        all_items = await admin_service.list_general_meetings(db_session, name="Listing", is_archived=None)
+        all_titles = [m["title"] for m in all_items]
+        assert agm_active.title in all_titles
+        assert agm_archived.title in all_titles
+        all_count = await admin_service.count_general_meetings(db_session, name="Listing", is_archived=None)
+        assert all_count >= 2
 
 
 class TestReorderMotions:

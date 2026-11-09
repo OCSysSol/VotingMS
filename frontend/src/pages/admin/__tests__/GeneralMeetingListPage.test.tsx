@@ -33,7 +33,7 @@ function renderPage(initialSearch = "") {
  *  Uses fireEvent.mouseDown on the option (matching the onMouseDown handler in the component)
  *  which also calls e.preventDefault() to keep focus on the input.
  */
-async function selectBuildingOption(user: ReturnType<typeof userEvent.setup>, optionText: string) {
+async function selectBuildingOption(_user: ReturnType<typeof userEvent.setup>, optionText: string) {
   const combobox = screen.getByRole("combobox", { name: "Building" });
   // Click to open (safe even if already open)
   fireEvent.click(combobox);
@@ -1035,5 +1035,336 @@ describe("GeneralMeetingListPage", () => {
       expect(screen.getByText("Closed Meeting 1")).toBeInTheDocument();
     });
     expect(screen.queryByText("Open Meeting 21")).not.toBeInTheDocument();
+  });
+
+  // --- Show archived meetings toggle and archiving actions ---
+
+  it("hides archived meetings by default (server sends is_archived=false)", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
+        const url = new URL(request.url);
+        const isArchived = url.searchParams.get("is_archived");
+        if (isArchived === "false") return HttpResponse.json({ count: 1 });
+        return HttpResponse.json({ count: 2 });
+      }),
+      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
+        const url = new URL(request.url);
+        const isArchived = url.searchParams.get("is_archived");
+        if (isArchived === "false") {
+          return HttpResponse.json([
+            {
+              id: "active-1",
+              building_id: "b1",
+              building_name: "Alpha Tower",
+              title: "Active AGM",
+              status: "open",
+              meeting_at: "2024-06-01T10:00:00Z",
+              voting_closes_at: "2024-06-01T12:00:00Z",
+              created_at: "2024-01-01T00:00:00Z",
+              is_archived: false,
+            },
+          ]);
+        }
+        return HttpResponse.json([
+          {
+            id: "active-1",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Active AGM",
+            status: "open",
+            meeting_at: "2024-06-01T10:00:00Z",
+            voting_closes_at: "2024-06-01T12:00:00Z",
+            created_at: "2024-01-01T00:00:00Z",
+            is_archived: false,
+          },
+          {
+            id: "arch-1",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Old Archived AGM",
+            status: "closed",
+            meeting_at: "2022-06-01T10:00:00Z",
+            voting_closes_at: "2022-06-01T12:00:00Z",
+            created_at: "2022-01-01T00:00:00Z",
+            is_archived: true,
+          },
+        ]);
+      })
+    );
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Active AGM")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Old Archived AGM")).not.toBeInTheDocument();
+  });
+
+  it("shows archived meetings when Show archived toggle is checked (server sends is_archived=true)", async () => {
+    let capturedIsArchived: string | null = null;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
+        const url = new URL(request.url);
+        capturedIsArchived = url.searchParams.get("is_archived");
+        return HttpResponse.json({ count: 1 });
+      }),
+      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
+        const url = new URL(request.url);
+        capturedIsArchived = url.searchParams.get("is_archived");
+        if (capturedIsArchived === "true") {
+          return HttpResponse.json([
+            {
+              id: "arch-1",
+              building_id: "b1",
+              building_name: "Alpha Tower",
+              title: "Old Archived AGM",
+              status: "closed",
+              meeting_at: "2022-06-01T10:00:00Z",
+              voting_closes_at: "2022-06-01T12:00:00Z",
+              created_at: "2022-01-01T00:00:00Z",
+              is_archived: true,
+            },
+          ]);
+        }
+        return HttpResponse.json([]);
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const toggle = screen.getByLabelText("Show archived meetings");
+    expect(toggle).not.toBeChecked();
+
+    await user.click(toggle);
+    expect(toggle).toBeChecked();
+
+    await waitFor(() => {
+      expect(screen.getByText("Old Archived AGM")).toBeInTheDocument();
+      expect(screen.getByText("Archived")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Unarchive Old Archived AGM" })).toBeInTheDocument();
+    });
+    expect(capturedIsArchived).toBe("true");
+  });
+
+  it("clicking Archive on a closed meeting opens ConfirmDialog and cancelling closes it", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "closed-1",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Closed AGM 2023",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: false,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Closed AGM 2023")).toBeInTheDocument();
+    });
+
+    const archiveBtn = screen.getByRole("button", { name: "Archive Closed AGM 2023" });
+    await user.click(archiveBtn);
+
+    // Confirm dialog should be open
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Archive General Meeting" })).toBeInTheDocument();
+      expect(screen.getByText(/Are you sure you want to archive "Closed AGM 2023"\?/)).toBeInTheDocument();
+    });
+
+    // Click Cancel
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Archive General Meeting" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("confirming archive calls archiveGeneralMeeting and refreshes list", async () => {
+    let archiveCalledWith = "";
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "closed-to-archive",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Closed AGM to Archive",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: false,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:id/archive", ({ params }) => {
+        archiveCalledWith = String(params.id);
+        return HttpResponse.json({ id: params.id, is_archived: true });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Closed AGM to Archive")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive Closed AGM to Archive" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Archive General Meeting" })).toBeInTheDocument();
+    });
+
+    // Click Confirm Archive
+    const confirmBtn = screen.getByRole("dialog").querySelector(".btn--danger") as HTMLElement;
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(archiveCalledWith).toBe("closed-to-archive");
+      expect(screen.queryByRole("heading", { name: "Archive General Meeting" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows error when archive fails", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "closed-fail",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Closed AGM Fail",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: false,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:id/archive", () =>
+        HttpResponse.json({ detail: "Archiving failed due to conflict" }, { status: 409 })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Closed AGM Fail")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive Closed AGM Fail" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Archive General Meeting" })).toBeInTheDocument();
+    });
+
+    const confirmBtn = screen.getByRole("dialog").querySelector(".btn--danger") as HTMLElement;
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
+
+  it("clicking Unarchive calls unarchiveGeneralMeeting and invalidates query", async () => {
+    let unarchiveCalledWith = "";
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "arch-to-unarch",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Archived Meeting 1",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: true,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:id/unarchive", ({ params }) => {
+        unarchiveCalledWith = String(params.id);
+        return HttpResponse.json({ id: params.id, is_archived: false });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    // Toggle show archived
+    await user.click(screen.getByLabelText("Show archived meetings"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived Meeting 1")).toBeInTheDocument();
+    });
+
+    const unarchiveBtn = screen.getByRole("button", { name: "Unarchive Archived Meeting 1" });
+    await user.click(unarchiveBtn);
+
+    await waitFor(() => {
+      expect(unarchiveCalledWith).toBe("arch-to-unarch");
+    });
+  });
+
+  it("handles unarchive error gracefully", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "arch-error",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Archived Error Meeting",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: true,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:id/unarchive", () =>
+        HttpResponse.json({ detail: "Unarchive failed" }, { status: 409 })
+      )
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText("Show archived meetings"));
+    await waitFor(() => {
+      expect(screen.getByText("Archived Error Meeting")).toBeInTheDocument();
+    });
+
+    const unarchiveBtn = screen.getByRole("button", { name: "Unarchive Archived Error Meeting" });
+    await user.click(unarchiveBtn);
+    // Should handle the rejection without throwing unhandled error
   });
 });

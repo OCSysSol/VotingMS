@@ -5524,13 +5524,14 @@ class TestDeleteGeneralMeeting:
 
     # --- Happy path ---
 
-    async def test_delete_general_meeting_closed_success(
+    async def test_delete_general_meeting_closed_returns_409(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """DELETE on a closed meeting returns 204."""
+        """DELETE on a closed meeting returns 409 per data retention policy."""
         agm = await self._create_meeting(db_session, "DeleteClosed", GeneralMeetingStatus.closed)
         response = await client.delete(f"/api/admin/general-meetings/{agm.id}")
-        assert response.status_code == 204
+        assert response.status_code == 409
+        assert "Cannot delete a closed General Meeting with recorded votes. Meetings must be retained for audit compliance; archive the meeting instead." in response.json()["detail"]
 
     async def test_delete_general_meeting_pending_success(
         self, client: AsyncClient, db_session: AsyncSession
@@ -5544,7 +5545,7 @@ class TestDeleteGeneralMeeting:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """After DELETE the record no longer exists in the database."""
-        agm = await self._create_meeting(db_session, "DeleteDBCheck", GeneralMeetingStatus.closed)
+        agm = await self._create_meeting(db_session, "DeleteDBCheck", GeneralMeetingStatus.pending)
         agm_id = agm.id
         response = await client.delete(f"/api/admin/general-meetings/{agm_id}")
         assert response.status_code == 204

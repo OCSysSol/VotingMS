@@ -986,6 +986,7 @@ async def list_general_meetings(
     name: str | None = Query(default=None),
     building_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    is_archived: bool | None = Query(default=False),
     sort_by: str | None = Query(default=None),
     sort_dir: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -996,6 +997,7 @@ async def list_general_meetings(
         raise HTTPException(status_code=422, detail="Invalid sort_dir value")
     items = await admin_service.list_general_meetings(
         db, limit=limit, offset=offset, name=name, building_id=building_id, status=status,
+        is_archived=is_archived,
         sort_by=sort_by, sort_dir=sort_dir,
     )
     return [GeneralMeetingListItem(**item) for item in items]
@@ -1006,11 +1008,12 @@ async def count_general_meetings(
     name: str | None = Query(default=None),
     building_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
+    is_archived: bool | None = Query(default=False),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
     """Return the total count of general meetings, applying the same filters as the list endpoint."""
     count = await admin_service.count_general_meetings(
-        db, name=name, building_id=building_id, status=status
+        db, name=name, building_id=building_id, status=status, is_archived=is_archived
     )
     return {"count": count}
 
@@ -1115,6 +1118,50 @@ async def delete_general_meeting_endpoint(
     # RR5-15: removed redundant _: str = Depends(require_admin) — the router-level
     # dependency already enforces authentication for all endpoints on this router.
     await admin_service.delete_general_meeting(general_meeting_id, db)
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/archive",
+    response_model=GeneralMeetingOut,
+)
+async def archive_general_meeting_endpoint(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingOut:
+    meeting = await admin_service.archive_general_meeting(general_meeting_id, db)
+    status_str = meeting.status.value if hasattr(meeting.status, "value") else str(meeting.status)
+    return GeneralMeetingOut(
+        id=meeting.id,
+        building_id=meeting.building_id,
+        title=meeting.title,
+        status=status_str,
+        meeting_at=meeting.meeting_at,
+        voting_closes_at=meeting.voting_closes_at,
+        is_archived=meeting.is_archived,
+        motions=[],
+    )
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/unarchive",
+    response_model=GeneralMeetingOut,
+)
+async def unarchive_general_meeting_endpoint(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> GeneralMeetingOut:
+    meeting = await admin_service.unarchive_general_meeting(general_meeting_id, db)
+    status_str = meeting.status.value if hasattr(meeting.status, "value") else str(meeting.status)
+    return GeneralMeetingOut(
+        id=meeting.id,
+        building_id=meeting.building_id,
+        title=meeting.title,
+        status=status_str,
+        meeting_at=meeting.meeting_at,
+        voting_closes_at=meeting.voting_closes_at,
+        is_archived=meeting.is_archived,
+        motions=[],
+    )
 
 
 @router.post(
