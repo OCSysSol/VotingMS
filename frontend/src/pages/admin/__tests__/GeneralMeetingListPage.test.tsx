@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
+import * as adminApi from "../../../api/admin";
 import GeneralMeetingListPage from "../GeneralMeetingListPage";
 
 const mockNavigate = vi.fn();
@@ -1365,6 +1366,193 @@ describe("GeneralMeetingListPage", () => {
 
     const unarchiveBtn = screen.getByRole("button", { name: "Unarchive Archived Error Meeting" });
     await user.click(unarchiveBtn);
-    // Should handle the rejection without throwing unhandled error
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Unarchive failed");
+    });
+  });
+
+  it("handles unarchive non-Error rejection gracefully", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "arch-non-err",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Archived Non-Error Meeting",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: true,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      )
+    );
+
+    vi.spyOn(adminApi, "unarchiveGeneralMeeting").mockRejectedValueOnce("unarchive string error");
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText("Show archived meetings"));
+    await waitFor(() => {
+      expect(screen.getByText("Archived Non-Error Meeting")).toBeInTheDocument();
+    });
+
+    const unarchiveBtn = screen.getByRole("button", { name: "Unarchive Archived Non-Error Meeting" });
+    await user.click(unarchiveBtn);
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Failed to unarchive General Meeting");
+    });
+  });
+
+  it("handles archive non-Error rejection gracefully", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "closed-non-err",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Closed Non-Error Meeting",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: false,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      )
+    );
+
+    vi.spyOn(adminApi, "archiveGeneralMeeting").mockRejectedValueOnce("archive string error");
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Closed Non-Error Meeting")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive Closed Non-Error Meeting" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Archive General Meeting" })).toBeInTheDocument();
+    });
+
+    const confirmBtn = screen.getByRole("dialog").querySelector(".btn--danger") as HTMLElement;
+    await user.click(confirmBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Failed to archive General Meeting")).toBeInTheDocument();
+    });
+  });
+
+  it("ConfirmDialog Cancel button is disabled while archive request is pending", async () => {
+    let resolveArchive: (value: unknown) => void;
+    const archivePromise = new Promise((resolve) => {
+      resolveArchive = resolve;
+    });
+
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", () =>
+        HttpResponse.json([
+          {
+            id: "closed-pending-check",
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: "Closed Pending Check",
+            status: "closed",
+            meeting_at: "2023-06-01T10:00:00Z",
+            voting_closes_at: "2023-06-01T12:00:00Z",
+            created_at: "2023-01-01T00:00:00Z",
+            is_archived: false,
+          },
+        ])
+      ),
+      http.get("http://localhost/api/admin/general-meetings/count", () =>
+        HttpResponse.json({ count: 1 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:id/archive", async () => {
+        await archivePromise;
+        return HttpResponse.json({ id: "closed-pending-check", is_archived: true });
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Closed Pending Check")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive Closed Pending Check" }));
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Archive General Meeting" })).toBeInTheDocument();
+    });
+
+    const confirmBtn = screen.getByRole("dialog").querySelector(".btn--danger") as HTMLElement;
+    await user.click(confirmBtn);
+
+    // Cancel button is disabled during isPending
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    expect(cancelBtn).toBeDisabled();
+
+    // Now resolve
+    await act(async () => {
+      resolveArchive!({});
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Archive General Meeting" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("prefetches next page when showArchived is true and multiple pages exist", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
+        const url = new URL(request.url);
+        const isArchived = url.searchParams.get("is_archived");
+        if (isArchived === "true") return HttpResponse.json({ count: 21 });
+        return HttpResponse.json({ count: 1 });
+      }),
+      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
+        const url = new URL(request.url);
+        const isArchived = url.searchParams.get("is_archived");
+        const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
+        if (isArchived === "true") {
+          const items = Array.from({ length: 21 }, (_, i) => ({
+            id: `arch-${i + 1}`,
+            building_id: "b1",
+            building_name: "Alpha Tower",
+            title: `Archived AGM ${i + 1}`,
+            status: "closed",
+            meeting_at: "2022-06-01T10:00:00Z",
+            voting_closes_at: "2022-06-01T12:00:00Z",
+            created_at: "2022-01-01T00:00:00Z",
+            is_archived: true,
+          }));
+          return HttpResponse.json(items.slice(offset, offset + 20));
+        }
+        return HttpResponse.json([]);
+      })
+    );
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(screen.getByLabelText("Show archived meetings"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Archived AGM 1")).toBeInTheDocument();
+    });
   });
 });

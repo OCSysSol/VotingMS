@@ -62,6 +62,7 @@ export default function GeneralMeetingListPage() {
   }
 
   async function handleConfirmArchive() {
+    /* v8 ignore next 2 -- defensive guard; archiveTarget is non-null when ConfirmDialog is open */
     if (!archiveTarget) return;
     setIsPending(true);
     setActionError(null);
@@ -203,6 +204,13 @@ export default function GeneralMeetingListPage() {
           </button>
         </div>
       </div>
+      {actionError && !archiveTarget && (
+        <div style={{ marginBottom: 16 }}>
+          <p className="state-message state-message--error" role="alert">
+            {actionError}
+          </p>
+        </div>
+      )}
       <div className="admin-card">
         <div className="admin-card__header">
           <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
@@ -269,10 +277,8 @@ export default function GeneralMeetingListPage() {
       <ConfirmDialog
         isOpen={archiveTarget !== null}
         onClose={() => {
-          if (!isPending) {
-            setArchiveTarget(null);
-            setActionError(null);
-          }
+          setArchiveTarget(null);
+          setActionError(null);
         }}
         onConfirm={handleConfirmArchive}
         isPending={isPending}
