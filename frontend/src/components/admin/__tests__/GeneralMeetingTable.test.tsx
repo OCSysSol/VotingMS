@@ -29,6 +29,7 @@ function makeMeetings(count: number): GeneralMeetingListItem[] {
     meeting_at: "2024-06-01T10:00:00Z",
     voting_closes_at: "2024-06-01T12:00:00Z",
     created_at: "2024-01-01T00:00:00Z",
+    is_archived: false,
   }));
 }
 
@@ -38,6 +39,8 @@ function renderTable(props: {
   sortBy?: string;
   sortDir?: SortDir;
   onSort?: (col: string) => void;
+  onArchive?: (meeting: GeneralMeetingListItem) => void;
+  onUnarchive?: (meeting: GeneralMeetingListItem) => void;
 }) {
   return render(
     <MemoryRouter>
@@ -291,5 +294,112 @@ describe("GeneralMeetingTable", () => {
     );
     expect(screen.getByText("Meeting 1")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Previous page" })).not.toBeInTheDocument();
+  });
+
+  // --- Archive and Unarchive actions ---
+
+  it("renders Archive button for closed non-archived meeting", () => {
+    const closedMeeting: GeneralMeetingListItem = {
+      id: "agm-closed",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Closed Meeting",
+      status: "closed",
+      meeting_at: "2024-01-01T00:00:00Z",
+      voting_closes_at: "2024-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: false,
+    };
+    renderTable({ meetings: [closedMeeting] });
+    expect(screen.getByRole("button", { name: "Archive Closed Meeting" })).toBeInTheDocument();
+  });
+
+  it("does not render Archive button for open or pending meetings", () => {
+    const openMeeting: GeneralMeetingListItem = {
+      id: "agm-open",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Open Meeting",
+      status: "open",
+      meeting_at: "2024-01-01T00:00:00Z",
+      voting_closes_at: "2024-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: false,
+    };
+    const pendingMeeting: GeneralMeetingListItem = {
+      id: "agm-pending",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Pending Meeting",
+      status: "pending",
+      meeting_at: "2026-01-01T00:00:00Z",
+      voting_closes_at: "2026-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: false,
+    };
+    renderTable({ meetings: [openMeeting, pendingMeeting] });
+    expect(screen.queryByRole("button", { name: /Archive/ })).not.toBeInTheDocument();
+  });
+
+  it("calls onArchive and prevents navigation when Archive button is clicked", async () => {
+    const user = userEvent.setup();
+    const onArchive = vi.fn();
+    mockNavigate.mockClear();
+    const closedMeeting: GeneralMeetingListItem = {
+      id: "agm-closed-1",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Closed Meeting 1",
+      status: "closed",
+      meeting_at: "2024-01-01T00:00:00Z",
+      voting_closes_at: "2024-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: false,
+    };
+    renderTable({ meetings: [closedMeeting], onArchive });
+    const archiveBtn = screen.getByRole("button", { name: "Archive Closed Meeting 1" });
+    await user.click(archiveBtn);
+    expect(onArchive).toHaveBeenCalledWith(closedMeeting);
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it("renders Archived badge and Unarchive button for archived meeting", () => {
+    const archivedMeeting: GeneralMeetingListItem = {
+      id: "agm-arch-1",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Archived Meeting",
+      status: "closed",
+      meeting_at: "2024-01-01T00:00:00Z",
+      voting_closes_at: "2024-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: true,
+    };
+    renderTable({ meetings: [archivedMeeting] });
+    expect(screen.getByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unarchive Archived Meeting" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Archived Meeting" })).not.toBeInTheDocument();
+  });
+
+  it("calls onUnarchive and prevents navigation when Unarchive button is clicked", async () => {
+    const user = userEvent.setup();
+    const onUnarchive = vi.fn();
+    mockNavigate.mockClear();
+    const archivedMeeting: GeneralMeetingListItem = {
+      id: "agm-arch-2",
+      building_id: "b1",
+      building_name: "Alpha Tower",
+      title: "Archived Meeting 2",
+      status: "closed",
+      meeting_at: "2024-01-01T00:00:00Z",
+      voting_closes_at: "2024-01-02T00:00:00Z",
+      created_at: "2024-01-01T00:00:00Z",
+      is_archived: true,
+    };
+    renderTable({ meetings: [archivedMeeting], onUnarchive });
+    const unarchiveBtn = screen.getByRole("button", { name: "Unarchive Archived Meeting 2" });
+    await user.click(unarchiveBtn);
+    expect(onUnarchive).toHaveBeenCalledWith(archivedMeeting);
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

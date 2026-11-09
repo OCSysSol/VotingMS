@@ -44,35 +44,48 @@ export function VotingPage() {
   // Tracks the motions count from the previous re-seed run.
   const prevMotionsLengthRef = useRef(0);
 
-  // Load allLots from sessionStorage on mount
+  // Consolidate lot initialization on mount: load from sessionStorage first,
+  // then reconcile authoritatively with fresh session from restoreSession.
   useEffect(() => {
     if (!meetingId) return;
-    const raw = sessionStorage.getItem(`meeting_lots_info_${meetingId}`);
-    if (!raw) return;
-    try {
-      const lots = JSON.parse(raw) as LotInfo[];
-      setAllLots(lots);
-      const pending = lots.filter((l) => !l.already_submitted).map((l) => l.lot_owner_id);
-      setSelectedIds(new Set(pending));
-    } catch {
-      // ignore parse errors
-    }
-  }, [meetingId]);
+    let cancelled = false;
 
-  // On every VotingPage mount: restore session via HttpOnly cookie
-  useEffect(() => {
-    if (!meetingId) return;
+    let initialLots: LotInfo[] = [];
+    const raw = sessionStorage.getItem(`meeting_lots_info_${meetingId}`);
+    if (raw) {
+      try {
+        initialLots = JSON.parse(raw) as LotInfo[];
+        setAllLots(initialLots);
+        const pending = initialLots.filter((l) => !l.already_submitted).map((l) => l.lot_owner_id);
+        setSelectedIds(new Set(pending));
+      } catch {
+        // ignore parse errors
+      }
+    }
 
     restoreSession({ general_meeting_id: meetingId })
       .then((response) => {
+        if (cancelled) return;
         const freshLots = response.lots;
-        setAllLots(freshLots);
         sessionStorage.setItem(`meeting_lots_info_${meetingId}`, JSON.stringify(freshLots));
+        const rawCurrent = JSON.stringify(initialLots);
+        const rawFresh = JSON.stringify(freshLots);
+        if (rawCurrent !== rawFresh) {
+          setAllLots(freshLots);
+          if (initialLots.length === 0) {
+            const pending = freshLots.filter((l) => !l.already_submitted).map((l) => l.lot_owner_id);
+            setSelectedIds(new Set(pending));
+          }
+        }
       })
       .catch(() => {
         // session expired — leave allLots as loaded from sessionStorage
       });
-  }, [meetingId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return () => {
+      cancelled = true;
+    };
+  }, [meetingId]);
 
   // Fetch motions and meeting data in parallel
   const {
@@ -143,17 +156,20 @@ export function VotingPage() {
     });
   }, [motions, allLots, isLotSubmitted]);
 
-  // Poll meeting status every 10s
+  // Adaptive polling for meeting status every 15s, pausing when tab is hidden
   useEffect(() => {
     if (!meetingId) return;
 
     let intervalId: ReturnType<typeof setInterval> | null = null;
+    let isStopped = false;
 
     const poll = async () => {
+      if (document.visibilityState === "hidden" || isStopped) return;
       try {
         const meeting = await fetchGeneralMeeting(meetingId);
         if (meeting.status === "closed") {
           setIsClosed(true);
+          isStopped = true;
           if (intervalId !== null) {
             clearInterval(intervalId);
             intervalId = null;
@@ -164,9 +180,37 @@ export function VotingPage() {
       }
     };
 
-    intervalId = setInterval(() => void poll(), 10000);
+    const startPolling = () => {
+      if (intervalId !== null || isStopped) return;
+      intervalId = setInterval(() => void poll(), 15000);
+    };
+
+    const stopPolling = () => {
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+        intervalId = null;
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void poll();
+        startPolling();
+      } else {
+        stopPolling();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    if (document.visibilityState !== "hidden") {
+      startPolling();
+    }
+
     return () => {
-      if (intervalId !== null) clearInterval(intervalId);
+      isStopped = true;
+      stopPolling();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [meetingId]);
 
@@ -270,18 +314,26 @@ export function VotingPage() {
     navigate(`/vote/${meetingId}/confirmation`);
   };
 
-  const handleSignOut = useCallback(() => {
-    logout().catch(() => {});
-    if (meetingId) {
-      sessionStorage.removeItem(`meeting_lots_${meetingId}`);
-      sessionStorage.removeItem(`meeting_lots_info_${meetingId}`);
-      sessionStorage.removeItem(`meeting_lot_info_${meetingId}`);
-      sessionStorage.removeItem(`meeting_building_name_${meetingId}`);
-      sessionStorage.removeItem(`meeting_title_${meetingId}`);
-      sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+  const handleSignOut = useCallback(async () => {
+    try {
+      await Promise.race([
+        logout(),
+        new Promise((resolve) => setTimeout(resolve, 600)),
+      ]);
+    } catch {
+      // Swallowed: sign-out must not fail or block navigation if network/server errors
+    } finally {
+      if (meetingId) {
+        sessionStorage.removeItem(`meeting_lots_${meetingId}`);
+        sessionStorage.removeItem(`meeting_lots_info_${meetingId}`);
+        sessionStorage.removeItem(`meeting_lot_info_${meetingId}`);
+        sessionStorage.removeItem(`meeting_building_name_${meetingId}`);
+        sessionStorage.removeItem(`meeting_title_${meetingId}`);
+        sessionStorage.removeItem(`meeting_mc_selections_${meetingId}`);
+      }
+      queryClient.clear();
+      navigate("/");
     }
-    queryClient.clear();
-    navigate("/");
   }, [meetingId, queryClient, navigate]);
 
   const hasMixedVoteStatus = (): boolean => {

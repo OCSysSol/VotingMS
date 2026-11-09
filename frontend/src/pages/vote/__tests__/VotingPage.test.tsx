@@ -333,9 +333,9 @@ describe("VotingPage", () => {
     // Wait for meeting data to load (needed before polling starts)
     await waitFor(() => screen.getByText("2024 AGM"));
 
-    // Advance past the 10-second poll interval
+    // Advance past the 15-second poll interval
     act(() => {
-      vi.advanceTimersByTime(11000);
+      vi.advanceTimersByTime(16000);
     });
 
     await waitFor(() => {
@@ -408,7 +408,7 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByText("2024 AGM"));
 
-    act(() => { vi.advanceTimersByTime(11000); });
+    act(() => { vi.advanceTimersByTime(16000); });
 
     // Should NOT show closed banner since still open
     await waitFor(() => {
@@ -437,7 +437,7 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
 
-    act(() => { vi.advanceTimersByTime(11000); });
+    act(() => { vi.advanceTimersByTime(16000); });
 
     // Error in poll catch — should still be on voting page
     expect(screen.getByRole("button", { name: "Submit ballot" })).toBeInTheDocument();
@@ -467,7 +467,9 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 
   it("sign out clears all meeting-scoped sessionStorage keys", async () => {
@@ -484,6 +486,9 @@ describe("VotingPage", () => {
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
 
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
     expect(sessionStorage.getItem(`meeting_lots_${AGM_ID}`)).toBeNull();
     expect(sessionStorage.getItem(`meeting_lots_info_${AGM_ID}`)).toBeNull();
     expect(sessionStorage.getItem(`meeting_lot_info_${AGM_ID}`)).toBeNull();
@@ -503,8 +508,24 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
     await user.click(screen.getByRole("button", { name: "Sign out" }));
-    // Navigation happens synchronously before the async logout resolves
-    expect(mockNavigate).toHaveBeenCalledWith("/");
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
+  });
+
+  it("sign out navigates to '/' when logout() exceeds 600ms timeout", async () => {
+    // Simulate a hanging logout request that does not resolve
+    server.use(
+      http.post(`http://localhost/api/auth/logout`, () => new Promise(() => {}))
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+    await user.click(screen.getByRole("button", { name: "Sign out" }));
+    await vi.advanceTimersByTimeAsync(700);
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith("/");
+    });
   });
 
   // --- Lot selection panel ---
@@ -3330,8 +3351,8 @@ describe("VotingPage", () => {
     renderPage();
     await waitFor(() => screen.getByText("2024 AGM"));
 
-    // Fire the first poll tick — should detect closure and clear the interval
-    act(() => { vi.advanceTimersByTime(10001); });
+    // Fire the first poll tick (15s interval) — should detect closure and clear the interval
+    act(() => { vi.advanceTimersByTime(15001); });
     await waitFor(() => {
       expect(screen.getByText("Voting has closed for this meeting.")).toBeInTheDocument();
     });
@@ -3340,12 +3361,90 @@ describe("VotingPage", () => {
     const callsAfterFirstTick = fetchSpy.mock.calls.length;
 
     // Advance by another full interval — should fire 0 more times (interval cleared)
-    act(() => { vi.advanceTimersByTime(10001); });
-    act(() => { vi.advanceTimersByTime(10001); });
+    act(() => { vi.advanceTimersByTime(15001); });
+    act(() => { vi.advanceTimersByTime(15001); });
 
     // No additional calls — interval was cleared
     expect(fetchSpy.mock.calls.length).toBe(callsAfterFirstTick);
     fetchSpy.mockRestore();
+  });
+
+  it("pauses polling when document is hidden and resumes immediately when visible", async () => {
+    const fetchSpy = vi.spyOn(voterApi, "fetchGeneralMeeting");
+    renderPage();
+    await waitFor(() => screen.getByText("2024 AGM"));
+
+    const initialCalls = fetchSpy.mock.calls.length;
+
+    // Simulate tab hidden (document.visibilityState = 'hidden')
+    Object.defineProperty(document, "visibilityState", {
+      value: "hidden",
+      configurable: true,
+      writable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // Advance past the 15-second interval while hidden — no poll should fire
+    act(() => { vi.advanceTimersByTime(30000); });
+    expect(fetchSpy.mock.calls.length).toBe(initialCalls);
+
+    // Simulate tab returning to visible
+    Object.defineProperty(document, "visibilityState", {
+      value: "visible",
+      configurable: true,
+      writable: true,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    // It should immediately trigger a poll on becoming visible
+    await waitFor(() => {
+      expect(fetchSpy.mock.calls.length).toBeGreaterThan(initialCalls);
+    });
+
+    fetchSpy.mockRestore();
+  });
+
+  it("consolidates lot initialization on mount from sessionStorage and fresh restoreSession without double render", async () => {
+    const testLots = [
+      {
+        lot_owner_id: "lot-1",
+        lot_number: "101",
+        unit_entitlement: 10,
+        already_submitted: false,
+        voted_motion_ids: [],
+        financial_position: "financial" as const,
+        is_proxy: false,
+      },
+      {
+        lot_owner_id: "lot-2",
+        lot_number: "102",
+        unit_entitlement: 15,
+        already_submitted: false,
+        voted_motion_ids: [],
+        financial_position: "financial" as const,
+        is_proxy: false,
+      },
+    ];
+    sessionStorage.setItem(`meeting_lots_info_${AGM_ID}`, JSON.stringify(testLots));
+
+    server.use(
+      http.post(`${BASE}/api/auth/session`, () =>
+        HttpResponse.json({
+          lots: testLots,
+          building_name: "Sunset Towers",
+          meeting_title: "2024 AGM",
+          agm_status: "open",
+          unvoted_visible_count: 2,
+        })
+      )
+    );
+
+    renderPage();
+    await waitFor(() => screen.getByRole("heading", { name: "Motion 1" }));
+
+    // Verify lots are loaded and multi-lot indicator is present
+    expect(screen.getAllByText(/101/)[0]).toBeInTheDocument();
+    expect(screen.getAllByText(/102/)[0]).toBeInTheDocument();
   });
 });
 

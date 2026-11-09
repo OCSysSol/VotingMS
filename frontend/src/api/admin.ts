@@ -1,5 +1,5 @@
 import { apiFetch, apiFetchVoid } from "./client";
-import type { Building, LotOwner, MotionType } from "../types";
+import type { Building, GeneralMeeting, LotOwner, MotionType } from "../types";
 
 // ---------------------------------------------------------------------------
 // Response types (matching backend schemas)
@@ -70,6 +70,7 @@ export interface GeneralMeetingListItem {
   meeting_at: string;
   voting_closes_at: string;
   created_at: string;
+  is_archived: boolean;
 }
 
 export interface VoterEntry {
@@ -522,6 +523,7 @@ export interface ListGeneralMeetingsParams {
   name?: string;
   building_id?: string;
   status?: string;
+  is_archived?: boolean;
   sort_by?: "title" | "created_at" | "meeting_at" | "voting_closes_at" | "status" | string;
   sort_dir?: "asc" | "desc";
 }
@@ -533,17 +535,19 @@ export async function listGeneralMeetings(params?: ListGeneralMeetingsParams): P
   if (params?.name !== undefined) qs.set("name", params.name);
   if (params?.building_id !== undefined) qs.set("building_id", params.building_id);
   if (params?.status !== undefined) qs.set("status", params.status);
+  if (params?.is_archived !== undefined) qs.set("is_archived", String(params.is_archived));
   if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
   if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
   const query = qs.toString();
   return apiFetch<GeneralMeetingListItem[]>(`/api/admin/general-meetings${query ? `?${query}` : ""}`);
 }
 
-export async function getGeneralMeetingsCount(params?: { name?: string; building_id?: string; status?: string }): Promise<{ count: number }> {
+export async function getGeneralMeetingsCount(params?: { name?: string; building_id?: string; status?: string; is_archived?: boolean }): Promise<{ count: number }> {
   const qs = new URLSearchParams();
   if (params?.name !== undefined) qs.set("name", params.name);
   if (params?.building_id !== undefined) qs.set("building_id", params.building_id);
   if (params?.status !== undefined) qs.set("status", params.status);
+  if (params?.is_archived !== undefined) qs.set("is_archived", String(params.is_archived));
   const query = qs.toString();
   return apiFetch<{ count: number }>(`/api/admin/general-meetings/count${query ? `?${query}` : ""}`);
 }
@@ -580,6 +584,18 @@ export async function resendReport(meetingId: string): Promise<ResendReportOut> 
 export async function deleteGeneralMeeting(meetingId: string): Promise<void> {
   return apiFetchVoid(`/api/admin/general-meetings/${meetingId}`, {
     method: "DELETE",
+  });
+}
+
+export async function archiveGeneralMeeting(id: string): Promise<GeneralMeeting> {
+  return apiFetch<GeneralMeeting>(`/api/admin/general-meetings/${id}/archive`, {
+    method: "POST",
+  });
+}
+
+export async function unarchiveGeneralMeeting(id: string): Promise<GeneralMeeting> {
+  return apiFetch<GeneralMeeting>(`/api/admin/general-meetings/${id}/unarchive`, {
+    method: "POST",
   });
 }
 

@@ -22,12 +22,12 @@ jobs:
       branch_url: ${{ steps.branch-url.outputs.branch_url }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -96,7 +96,7 @@ jobs:
           cat e2e_tests/.run-suffix
 
       - name: Upload auth state and run suffix
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: e2e-auth-state-${{ github.run_id }}
           path: |
@@ -112,12 +112,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -139,7 +139,7 @@ jobs:
           bypass-token: ${{ secrets.VERCEL_BYPASS_TOKEN }}
 
       - name: Download auth state
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: e2e-auth-state-${{ github.run_id }}
           path: e2e_tests
@@ -156,7 +156,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-blob-admin-${{ github.run_id }}
           path: frontend/blob-report
@@ -169,12 +169,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -196,7 +196,7 @@ jobs:
           bypass-token: ${{ secrets.VERCEL_BYPASS_TOKEN }}
 
       - name: Download auth state
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: e2e-auth-state-${{ github.run_id }}
           path: e2e_tests
@@ -213,7 +213,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-blob-public-voter-${{ github.run_id }}
           path: frontend/blob-report
@@ -226,12 +226,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -253,7 +253,7 @@ jobs:
           bypass-token: ${{ secrets.VERCEL_BYPASS_TOKEN }}
 
       - name: Download auth state
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: e2e-auth-state-${{ github.run_id }}
           path: e2e_tests
@@ -270,7 +270,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-blob-public-workflow-${{ github.run_id }}
           path: frontend/blob-report
@@ -283,12 +283,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -310,7 +310,7 @@ jobs:
           bypass-token: ${{ secrets.VERCEL_BYPASS_TOKEN }}
 
       - name: Download auth state
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: e2e-auth-state-${{ github.run_id }}
           path: e2e_tests
@@ -327,7 +327,7 @@ jobs:
 
       - name: Upload blob report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-blob-user-workflow-${{ github.run_id }}
           path: frontend/blob-report
@@ -341,12 +341,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.deployment.sha }}
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: 'npm'
@@ -356,7 +356,7 @@ jobs:
         run: cd frontend && npm ci
 
       - name: Download all blob reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: playwright-blob-*-${{ github.run_id }}
           path: frontend/all-blob-reports
@@ -372,7 +372,7 @@ jobs:
 
       - name: Upload merged Playwright report
         if: hashFiles('frontend/playwright-report/**') != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-${{ github.run_id }}
           path: frontend/playwright-report/

@@ -220,6 +220,7 @@ export const ADMIN_MEETING_LIST: GeneralMeetingListItem[] = [
     meeting_at: "2024-06-01T10:00:00Z",
     voting_closes_at: "2024-06-01T12:00:00Z",
     created_at: "2024-01-01T00:00:00Z",
+    is_archived: false,
   },
   {
     id: "agm2",
@@ -230,6 +231,7 @@ export const ADMIN_MEETING_LIST: GeneralMeetingListItem[] = [
     meeting_at: "2023-06-01T10:00:00Z",
     voting_closes_at: "2023-06-01T12:00:00Z",
     created_at: "2023-01-01T00:00:00Z",
+    is_archived: false,
   },
   {
     id: "agm3",
@@ -240,6 +242,7 @@ export const ADMIN_MEETING_LIST: GeneralMeetingListItem[] = [
     meeting_at: "2026-12-01T10:00:00Z",
     voting_closes_at: "2026-12-31T12:00:00Z",
     created_at: "2025-01-01T00:00:00Z",
+    is_archived: false,
   },
 ];
 
@@ -980,10 +983,16 @@ export const adminHandlers = [
     const name = url.searchParams.get("name");
     const buildingId = url.searchParams.get("building_id");
     const status = url.searchParams.get("status");
+    const isArchived = url.searchParams.get("is_archived");
     let filtered = ADMIN_MEETING_LIST;
     if (name) filtered = filtered.filter((m) => m.title.toLowerCase().includes(name.toLowerCase()));
     if (buildingId) filtered = filtered.filter((m) => m.building_id === buildingId);
     if (status) filtered = filtered.filter((m) => m.status === status);
+    if (isArchived === "true") {
+      filtered = filtered.filter((m) => m.is_archived === true);
+    } else if (isArchived === "false") {
+      filtered = filtered.filter((m) => !m.is_archived);
+    }
     return HttpResponse.json({ count: filtered.length });
   }),
 
@@ -993,12 +1002,45 @@ export const adminHandlers = [
     const status = url.searchParams.get("status");
     const limitParam = url.searchParams.get("limit");
     const offsetParam = url.searchParams.get("offset");
+    const isArchived = url.searchParams.get("is_archived");
     let filtered = ADMIN_MEETING_LIST;
     if (buildingId) filtered = filtered.filter((m) => m.building_id === buildingId);
     if (status) filtered = filtered.filter((m) => m.status === status);
+    if (isArchived === "true") {
+      filtered = filtered.filter((m) => m.is_archived === true);
+    } else if (isArchived === "false") {
+      filtered = filtered.filter((m) => !m.is_archived);
+    }
     const offset = offsetParam !== null ? parseInt(offsetParam, 10) : 0;
     const limit = limitParam !== null ? parseInt(limitParam, 10) : filtered.length;
     return HttpResponse.json(filtered.slice(offset, offset + limit));
+  }),
+
+  http.post(`${BASE}/api/admin/general-meetings/:id/archive`, ({ params }) => {
+    const meeting = ADMIN_MEETING_LIST.find((m) => m.id === params.id);
+    if (!meeting) {
+      return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
+    }
+    if (meeting.status === "open") {
+      return HttpResponse.json({ detail: "Cannot archive an open General Meeting" }, { status: 409 });
+    }
+    if (meeting.is_archived) {
+      return HttpResponse.json({ detail: "General Meeting is already archived" }, { status: 409 });
+    }
+    meeting.is_archived = true;
+    return HttpResponse.json({ ...meeting, is_archived: true });
+  }),
+
+  http.post(`${BASE}/api/admin/general-meetings/:id/unarchive`, ({ params }) => {
+    const meeting = ADMIN_MEETING_LIST.find((m) => m.id === params.id);
+    if (!meeting) {
+      return HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 });
+    }
+    if (!meeting.is_archived) {
+      return HttpResponse.json({ detail: "General Meeting is not archived" }, { status: 409 });
+    }
+    meeting.is_archived = false;
+    return HttpResponse.json({ ...meeting, is_archived: false });
   }),
 
   http.post(`${BASE}/api/admin/general-meetings`, async ({ request }) => {

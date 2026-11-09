@@ -50,6 +50,11 @@ class Vote(Base):
             unique=True,
             postgresql_where=text("motion_option_id IS NOT NULL"),  # nosemgrep: raw-sql-requires-comment -- partial index WHERE predicate
         ),
+        Index(
+            "ix_votes_meeting_lot_owner",
+            "general_meeting_id",
+            "lot_owner_id",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(

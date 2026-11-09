@@ -542,16 +542,15 @@ def create_app() -> FastAPI:
 
         Executes SELECT 1 with a 2-second timeout.
         Returns 200 {"status": "ok", "db": "connected"} when the DB is reachable.
-        Returns 503 {"status": "degraded", "db": "unreachable", "error": "..."} on
-        any DB failure or timeout.
+        Returns 553 {"status": "degraded", "db": "unreachable"} on any DB failure or timeout.
         """
         try:
             await asyncio.wait_for(db.execute(select(1)), timeout=2.0)
             return {"status": "ok", "db": "connected"}
-        except Exception as exc:
+        except Exception:
             raise HTTPException(
-                status_code=503,
-                detail={"status": "degraded", "db": "unreachable", "error": str(exc)},
+                status_code=553,
+                detail={"status": "degraded", "db": "unreachable"},
             )
 
     @app.get("/api/health/live")

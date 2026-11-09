@@ -33,6 +33,7 @@ class GeneralMeetingLotWeight(Base):
     lot_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("lots.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     unit_entitlement_snapshot: Mapped[int] = mapped_column(Integer, nullable=False)
     financial_position_snapshot: Mapped[FinancialPositionSnapshot] = mapped_column(

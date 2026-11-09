@@ -58,6 +58,7 @@ export interface GeneralMeeting {
   voting_closes_at: string;
   created_at: string;
   closed_at: string | null;
+  is_archived: boolean;
 }
 
 export interface Motion {

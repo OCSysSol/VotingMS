@@ -22,6 +22,10 @@ from datetime import UTC, datetime, timedelta
 # This must be set BEFORE any app module is imported so the Settings singleton
 # picks up the env var.  The CSRF middleware skips its check when testing_mode=True.
 os.environ.setdefault("TESTING_MODE", "true")
+os.environ.setdefault(
+    "DATABASE_URL",
+    os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5433/agm_test"),
+)
 
 import asyncpg
 import openpyxl
@@ -219,62 +223,14 @@ def reset_config_cache():
 
 
 @pytest.fixture(autouse=True)
-def patch_parallel_lot_lookup(db_session: AsyncSession):
-    """Patch the parallel lot-lookup helpers in auth_service to use the test session.
+def patch_parallel_lot_lookup():
+    """No-op fixture preserved for backward compatibility.
 
-    _load_direct_lot_owner_ids and _load_proxy_lot_owner_ids use AsyncSessionLocal()
-    to open separate sessions for concurrent execution.  In tests the test data is
-    only flushed (not committed) inside db_session's transaction, so a separate
-    connection would see no data.  Patching both helpers to run their queries on
-    db_session ensures they see the same test data as the rest of the test suite.
+    _load_direct_lot_owner_ids and _load_proxy_lot_owner_ids now accept db: AsyncSession
+    directly from the caller, so they automatically run within the test session's transaction
+    without monkey-patching.
     """
-    import uuid
-    from unittest.mock import patch
-    from sqlalchemy import select
-    from app.models.lot import Lot
-    from app.models.lot_person import lot_persons as _lot_persons
-    from app.models.lot_proxy import LotProxy
-    from app.models.person import Person
-
-    async def _direct_ids_via_test_session(voter_email: str, building_id: uuid.UUID) -> set[uuid.UUID]:
-        r = await db_session.execute(
-            select(_lot_persons.c.lot_id)
-            .join(Person, Person.id == _lot_persons.c.person_id)
-            .join(Lot, Lot.id == _lot_persons.c.lot_id)
-            .where(
-                Person.email.isnot(None),
-                Person.email == voter_email,
-                Lot.building_id == building_id,
-            )
-        )
-        return {row[0] for row in r.all()}
-
-    async def _proxy_ids_via_test_session(voter_email: str, building_id: uuid.UUID) -> set[uuid.UUID]:
-        r = await db_session.execute(
-            select(LotProxy.lot_id)
-            .join(Person, Person.id == LotProxy.person_id)
-            .join(Lot, Lot.id == LotProxy.lot_id)
-            .where(
-                Person.email == voter_email,
-                Lot.building_id == building_id,
-            )
-        )
-        return {row[0] for row in r.all()}
-
-    with patch(
-        "app.services.auth_service._load_direct_lot_owner_ids",
-        side_effect=_direct_ids_via_test_session,
-    ), patch(
-        "app.services.auth_service._load_proxy_lot_owner_ids",
-        side_effect=_proxy_ids_via_test_session,
-    ), patch(
-        "app.routers.voting._load_direct_lot_owner_ids",
-        side_effect=_direct_ids_via_test_session,
-    ), patch(
-        "app.routers.voting._load_proxy_lot_owner_ids",
-        side_effect=_proxy_ids_via_test_session,
-    ):
-        yield
+    yield
 
 
 @pytest.fixture
