@@ -22,6 +22,10 @@ from datetime import UTC, datetime, timedelta
 # This must be set BEFORE any app module is imported so the Settings singleton
 # picks up the env var.  The CSRF middleware skips its check when testing_mode=True.
 os.environ.setdefault("TESTING_MODE", "true")
+os.environ.setdefault(
+    "DATABASE_URL",
+    os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost:5433/agm_test"),
+)
 
 import asyncpg
 import openpyxl

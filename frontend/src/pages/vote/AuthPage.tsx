@@ -10,6 +10,9 @@ import { useBranding } from "../../context/BrandingContext";
 // Channel selector modal
 // ---------------------------------------------------------------------------
 
+const FOCUSABLE_SELECTORS =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 interface ChannelModalProps {
   channel: "email" | "sms";
   onChannelChange: (c: "email" | "sms") => void;
@@ -29,53 +32,63 @@ function ChannelModal({
   error,
   enabledChannels,
 }: ChannelModalProps) {
-  // Focus trap: move focus into the dialog on mount
   const dialogRef = useRef<HTMLDivElement>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+
   useEffect(() => {
-    const firstFocusable = dialogRef.current?.querySelector<HTMLElement>(
-      'input, button, [tabindex]:not([tabindex="-1"])'
-    );
-    firstFocusable?.focus();
+    // Save current focus so we can restore it when dialog closes
+    previousFocusRef.current = document.activeElement as HTMLElement;
+
+    // Move focus to first focusable element in dialog
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (focusable && focusable.length > 0) {
+      focusable[0].focus();
+    }
+
+    return () => {
+      // Restore focus when dialog unmounts
+      previousFocusRef.current?.focus();
+    };
   }, []);
 
-  // Close on Escape key
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  // Trap Tab/Shift+Tab focus within the dialog; Escape closes it
+  function handleKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") {
+      onCancel();
+      return;
+    }
+    if (e.key !== "Tab") return;
+
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
+    if (!focusable || focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (e.shiftKey) {
+      if (document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      }
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }
 
   return (
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Choose verification method"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.4)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 1000,
-      }}
+      aria-labelledby="channel-modal-title"
+      className="dialog-overlay channel-modal-overlay"
+      ref={dialogRef}
+      onKeyDown={handleKeyDown}
     >
-      <div
-        ref={dialogRef}
-        className="channel-modal"
-        style={{
-          background: "#fff",
-          borderRadius: "var(--r-md)",
-          padding: 32,
-          minWidth: 320,
-          maxWidth: 440,
-          width: "100%",
-          boxShadow: "var(--shadow-lg)",
-        }}
-      >
-        <h2 className="channel-modal__heading">
+      <div className="channel-modal">
+        <h2 className="channel-modal__heading" id="channel-modal-title">
           Choose verification method
         </h2>
 
@@ -85,8 +98,9 @@ function ChannelModal({
           className="channel-modal__radiogroup"
         >
           {enabledChannels.includes("email") && (
-            <label className="channel-modal__radio-label">
+            <label htmlFor="channel-email" className="channel-modal__radio-label">
               <input
+                id="channel-email"
                 type="radio"
                 name="otp-channel"
                 value="email"
@@ -97,8 +111,9 @@ function ChannelModal({
             </label>
           )}
           {enabledChannels.includes("sms") && (
-            <label className="channel-modal__radio-label">
+            <label htmlFor="channel-sms" className="channel-modal__radio-label">
               <input
+                id="channel-sms"
                 type="radio"
                 name="otp-channel"
                 value="sms"

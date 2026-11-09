@@ -1029,7 +1029,7 @@ describe("AuthPage — focus restoration on modal close", () => {
 // ACCESSIBILITY-1: ChannelModal interior CSS classes
 // ---------------------------------------------------------------------------
 
-describe("AuthPage — ChannelModal CSS classes", () => {
+describe("AuthPage — ChannelModal CSS classes & Accessibility", () => {
   beforeEach(() => {
     server.use(
       http.post(`${BASE}/api/auth/session`, () =>
@@ -1062,15 +1062,25 @@ describe("AuthPage — ChannelModal CSS classes", () => {
     expect(screen.getByRole("radiogroup")).toHaveClass("channel-modal__radiogroup");
   });
 
-  it("radio labels have channel-modal__radio-label class", async () => {
+  it("radio labels have channel-modal__radio-label class and htmlFor association with radio id", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByLabelText("Email address"));
     await user.type(screen.getByLabelText("Email address"), "owner@example.com");
     await user.click(screen.getByRole("button", { name: "Send Verification Code" }));
     await waitFor(() => screen.getByRole("radiogroup"));
+
     const emailRadio = screen.getByRole("radio", { name: /Email/i });
-    expect(emailRadio.closest("label")).toHaveClass("channel-modal__radio-label");
+    expect(emailRadio).toHaveAttribute("id", "channel-email");
+    const emailLabel = emailRadio.closest("label");
+    expect(emailLabel).toHaveClass("channel-modal__radio-label");
+    expect(emailLabel).toHaveAttribute("for", "channel-email");
+
+    const smsRadio = screen.getByRole("radio", { name: /SMS/i });
+    expect(smsRadio).toHaveAttribute("id", "channel-sms");
+    const smsLabel = smsRadio.closest("label");
+    expect(smsLabel).toHaveClass("channel-modal__radio-label");
+    expect(smsLabel).toHaveAttribute("for", "channel-sms");
   });
 
   it("actions div has channel-modal__actions class", async () => {
@@ -1084,15 +1094,62 @@ describe("AuthPage — ChannelModal CSS classes", () => {
     expect(cancelBtn.closest("div")).toHaveClass("channel-modal__actions");
   });
 
-  it("no inline style props on interior modal content (only backdrop and panel have inline styles)", async () => {
+  it("no inline style props on overlay, panel, or modal interior", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => screen.getByLabelText("Email address"));
     await user.type(screen.getByLabelText("Email address"), "owner@example.com");
     await user.click(screen.getByRole("button", { name: "Send Verification Code" }));
     await waitFor(() => screen.getByRole("dialog"));
-    // The heading must not have inline style
+
+    const overlay = screen.getByRole("dialog");
+    expect(overlay).toHaveClass("channel-modal-overlay");
+    expect(overlay.getAttribute("style")).toBeFalsy();
+
+    const panel = overlay.querySelector(".channel-modal");
+    expect(panel).toBeInTheDocument();
+    expect(panel?.getAttribute("style")).toBeFalsy();
+
     const heading = screen.getByRole("heading", { name: "Choose verification method" });
-    expect(heading).not.toHaveStyle("marginTop: 0");
+    expect(heading.getAttribute("style")).toBeFalsy();
+  });
+
+  it("modal has aria-labelledby pointing to heading id", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText("Email address"));
+    await user.type(screen.getByLabelText("Email address"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Send Verification Code" }));
+    await waitFor(() => screen.getByRole("dialog"));
+
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-labelledby", "channel-modal-title");
+    const heading = document.getElementById("channel-modal-title");
+    expect(heading).toBeInTheDocument();
+    expect(heading).toHaveTextContent("Choose verification method");
+  });
+
+  it("traps Tab and Shift+Tab keyboard focus within the modal", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => screen.getByLabelText("Email address"));
+    await user.type(screen.getByLabelText("Email address"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Send Verification Code" }));
+    await waitFor(() => screen.getByRole("dialog"));
+
+    const emailRadio = screen.getByRole("radio", { name: /Email/i });
+    const sendBtn = screen.getByRole("button", { name: "Send code" });
+
+    // Focus starts inside dialog on first focusable element
+    expect(emailRadio).toHaveFocus();
+
+    // Shift+Tab from first focusable wraps to last focusable element (Send code)
+    await user.tab({ shift: true });
+    expect(sendBtn).toHaveFocus();
+
+    // Tab from last focusable element wraps back to first focusable element
+    await user.tab();
+    expect(emailRadio).toHaveFocus();
   });
 });
+

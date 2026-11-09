@@ -139,7 +139,7 @@ class EmailService:
         """
         Attempt to send the results report email for the given AGM.
 
-        Fetches AGM data, renders HTML template, sends via Resend SDK,
+        Fetches AGM data, renders HTML template, sends via SMTP (aiosmtplib),
         and updates the EmailDelivery record on success or failure.
 
         base_url: the scheme+host of the originating request (e.g.
