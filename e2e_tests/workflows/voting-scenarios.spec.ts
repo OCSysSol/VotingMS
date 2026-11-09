@@ -23,6 +23,7 @@ import {
   uploadProxyCsv,
   createOpenMeeting,
   closeMeeting,
+  deleteMeeting,
   clearBallots,
   getMeetingDetails,
   assertTally,
@@ -975,13 +976,10 @@ test.describe("Voter — motion position labels with hidden motions", () => {
     const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
     const api = await makeAdminApi(baseURL);
     if (meetingIdHidden) {
-      // Close before delete since it's open
-      await api.post(`/api/admin/general-meetings/${meetingIdHidden}/close`).catch(() => {});
-      await api.delete(`/api/admin/general-meetings/${meetingIdHidden}`);
+      await deleteMeeting(api, meetingIdHidden);
     }
     if (meetingIdCustomNumber) {
-      await api.post(`/api/admin/general-meetings/${meetingIdCustomNumber}/close`).catch(() => {});
-      await api.delete(`/api/admin/general-meetings/${meetingIdCustomNumber}`);
+      await deleteMeeting(api, meetingIdCustomNumber);
     }
     await api.dispose();
   });

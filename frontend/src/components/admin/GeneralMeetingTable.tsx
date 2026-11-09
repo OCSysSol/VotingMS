@@ -15,9 +15,19 @@ interface GeneralMeetingTableProps {
   sortBy?: string;
   sortDir?: SortDir;
   onSort?: (col: string) => void;
+  onArchive?: (meeting: GeneralMeetingListItem) => void;
+  onUnarchive?: (meeting: GeneralMeetingListItem) => void;
 }
 
-export default function GeneralMeetingTable({ meetings, isLoading, sortBy, sortDir, onSort }: GeneralMeetingTableProps) {
+export default function GeneralMeetingTable({
+  meetings,
+  isLoading,
+  sortBy,
+  sortDir,
+  onSort,
+  onArchive,
+  onUnarchive,
+}: GeneralMeetingTableProps) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
 
@@ -104,16 +114,17 @@ export default function GeneralMeetingTable({ meetings, isLoading, sortBy, sortD
             ) : (
               <th>Created At</th>
             )}
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {isLoading && !meetings.length ? (
             <tr>
-              <td colSpan={6} className="state-message">Loading General Meetings...</td>
+              <td colSpan={7} className="state-message">Loading General Meetings...</td>
             </tr>
           ) : meetings.length === 0 ? (
             <tr>
-              <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
+              <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
                 No General Meetings found.
               </td>
             </tr>
@@ -121,12 +132,25 @@ export default function GeneralMeetingTable({ meetings, isLoading, sortBy, sortD
             visible.map((meeting) => (
               <tr
                 key={meeting.id}
-                style={{ cursor: "pointer" }}
+                style={{
+                  cursor: "pointer",
+                  ...(meeting.is_archived ? { opacity: 0.6 } : undefined),
+                }}
                 onClick={() => navigate(`/admin/general-meetings/${meeting.id}`)}
               >
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{meeting.building_name}</td>
                 <td style={{ fontWeight: 600 }}>{meeting.title}</td>
-                <td><StatusBadge status={meeting.status} /></td>
+                <td>
+                  <StatusBadge status={meeting.status} />
+                  {meeting.is_archived && (
+                    <span
+                      className="status-badge status-badge--closed"
+                      style={{ marginLeft: 6, background: "var(--surface-muted, #f1f5f9)", color: "var(--text-muted, #475569)" }}
+                    >
+                      Archived
+                    </span>
+                  )}
+                </td>
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
                   {formatLocalDateTime(meeting.meeting_at)}
                 </td>
@@ -135,6 +159,27 @@ export default function GeneralMeetingTable({ meetings, isLoading, sortBy, sortD
                 </td>
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
                   {formatLocalDateTime(meeting.created_at)}
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {meeting.is_archived ? (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={() => onUnarchive?.(meeting)}
+                      aria-label={`Unarchive ${meeting.title}`}
+                    >
+                      Unarchive
+                    </button>
+                  ) : meeting.status === "closed" ? (
+                    <button
+                      type="button"
+                      className="btn btn--secondary btn--sm"
+                      onClick={() => onArchive?.(meeting)}
+                      aria-label={`Archive ${meeting.title}`}
+                    >
+                      Archive
+                    </button>
+                  ) : null}
                 </td>
               </tr>
             ))

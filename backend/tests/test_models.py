@@ -418,7 +418,32 @@ class TestAGM:
         assert agm.id is not None
         assert agm.status == GeneralMeetingStatus.open
         assert agm.closed_at is None
+        assert agm.is_archived is False
         assert agm.building_id == b.id
+
+    async def test_agm_archive_flag(self, db_session: AsyncSession):
+        b = make_building("Archive Flag Bldg")
+        db_session.add(b)
+        await db_session.flush()
+
+        agm = make_agm(b)
+        db_session.add(agm)
+        await db_session.flush()
+        assert agm.is_archived is False
+
+        agm.is_archived = True
+        await db_session.flush()
+        assert agm.is_archived is True
+
+    def test_meeting_retention_indexes_defined(self):
+        vote_indexes = {idx.name for idx in Vote.__table__.indexes}
+        assert "ix_votes_meeting_lot_owner" in vote_indexes
+
+        weight_indexes = {idx.name for idx in GeneralMeetingLotWeight.__table__.indexes}
+        assert "ix_general_meeting_lot_weights_lot_id" in weight_indexes
+
+        ballot_indexes = {idx.name for idx in BallotSubmission.__table__.indexes}
+        assert "ix_ballot_submissions_lot_owner_id" in ballot_indexes
 
     async def test_agm_title_stored(self, db_session: AsyncSession):
         b = make_building("Title Test Bldg")

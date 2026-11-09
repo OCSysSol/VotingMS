@@ -25,6 +25,7 @@ class BallotSubmission(Base):
     lot_owner_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("lots.id", ondelete="CASCADE"),
         nullable=False,
+        index=True,
     )
     voter_email: Mapped[str] = mapped_column(String, nullable=False)
     proxy_email: Mapped[str | None] = mapped_column(String, nullable=True, default=None)

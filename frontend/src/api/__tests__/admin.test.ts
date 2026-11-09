@@ -19,6 +19,8 @@ import {
   searchPersons,
   updatePerson,
   updateGeneralMeeting,
+  archiveGeneralMeeting,
+  unarchiveGeneralMeeting,
 } from "../admin";
 
 const BASE = "http://localhost";
@@ -974,5 +976,128 @@ describe("updateGeneralMeeting", () => {
     await expect(
       updateGeneralMeeting("invalid-id", { voting_closes_at: "2020-01-01T00:00:00Z" })
     ).rejects.toThrow("422");
+  });
+});
+
+describe("archiveGeneralMeeting", () => {
+  it("successfully archives a general meeting", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/agm-arch-1/archive`, () =>
+        HttpResponse.json({
+          id: "agm-arch-1",
+          building_id: "b1",
+          title: "Closed AGM",
+          status: "closed",
+          meeting_at: "2024-01-01T00:00:00Z",
+          voting_closes_at: "2024-01-02T00:00:00Z",
+          created_at: "2023-12-01T00:00:00Z",
+          closed_at: "2024-01-02T00:00:00Z",
+          is_archived: true,
+        })
+      )
+    );
+    const result = await archiveGeneralMeeting("agm-arch-1");
+    expect(result.id).toBe("agm-arch-1");
+    expect(result.is_archived).toBe(true);
+  });
+
+  it("throws on 409 when meeting is open or already archived", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/open-id/archive`, () =>
+        HttpResponse.json({ detail: "Cannot archive an open General Meeting" }, { status: 409 })
+      )
+    );
+    await expect(archiveGeneralMeeting("open-id")).rejects.toThrow("409");
+  });
+
+  it("throws on 404 when meeting not found", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/not-found/archive`, () =>
+        HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 })
+      )
+    );
+    await expect(archiveGeneralMeeting("not-found")).rejects.toThrow("404");
+  });
+});
+
+describe("unarchiveGeneralMeeting", () => {
+  it("successfully unarchives a general meeting", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/agm-arch-1/unarchive`, () =>
+        HttpResponse.json({
+          id: "agm-arch-1",
+          building_id: "b1",
+          title: "Closed AGM",
+          status: "closed",
+          meeting_at: "2024-01-01T00:00:00Z",
+          voting_closes_at: "2024-01-02T00:00:00Z",
+          created_at: "2023-12-01T00:00:00Z",
+          closed_at: "2024-01-02T00:00:00Z",
+          is_archived: false,
+        })
+      )
+    );
+    const result = await unarchiveGeneralMeeting("agm-arch-1");
+    expect(result.id).toBe("agm-arch-1");
+    expect(result.is_archived).toBe(false);
+  });
+
+  it("throws on 409 when meeting is not archived", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/not-arch/unarchive`, () =>
+        HttpResponse.json({ detail: "General Meeting is not archived" }, { status: 409 })
+      )
+    );
+    await expect(unarchiveGeneralMeeting("not-arch")).rejects.toThrow("409");
+  });
+
+  it("throws on 404 when meeting not found", async () => {
+    server.use(
+      http.post(`${BASE}/api/admin/general-meetings/not-found/unarchive`, () =>
+        HttpResponse.json({ detail: "General Meeting not found" }, { status: 404 })
+      )
+    );
+    await expect(unarchiveGeneralMeeting("not-found")).rejects.toThrow("404");
+  });
+});
+
+describe("listGeneralMeetings is_archived param", () => {
+  it("sends is_archived=true when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listGeneralMeetings({ is_archived: true });
+    expect(capturedUrl).toContain("is_archived=true");
+  });
+
+  it("sends is_archived=false when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listGeneralMeetings({ is_archived: false });
+    expect(capturedUrl).toContain("is_archived=false");
+  });
+});
+
+describe("getGeneralMeetingsCount is_archived param", () => {
+  it("sends is_archived=true when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings/count`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ count: 7 });
+      })
+    );
+    const res = await getGeneralMeetingsCount({ is_archived: true });
+    expect(res).toEqual({ count: 7 });
+    expect(capturedUrl).toContain("is_archived=true");
   });
 });

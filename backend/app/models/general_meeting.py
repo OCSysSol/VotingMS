@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     Enum,
@@ -100,6 +101,7 @@ class GeneralMeeting(Base):
         DateTime(timezone=True),
         nullable=True,
     )
+    is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
 
     # Relationships
     building: Mapped["Building"] = relationship(  # noqa: F821

@@ -1,12 +1,18 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { listGeneralMeetings, getGeneralMeetingsCount } from "../../api/admin";
+import {
+  listGeneralMeetings,
+  getGeneralMeetingsCount,
+  archiveGeneralMeeting,
+  unarchiveGeneralMeeting,
+} from "../../api/admin";
 import type { GeneralMeetingListItem } from "../../api/admin";
 import GeneralMeetingTable from "../../components/admin/GeneralMeetingTable";
 import type { SortDir } from "../../components/admin/SortableColumnHeader";
 import Pagination from "../../components/admin/Pagination";
 import BuildingSearchCombobox from "../../components/admin/BuildingSearchCombobox";
+import ConfirmDialog from "../../components/admin/ConfirmDialog";
 
 const PAGE_SIZE = 20;
 
@@ -23,6 +29,11 @@ export default function GeneralMeetingListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedBuildingId = searchParams.get("building") ?? "";
   const selectedStatus = searchParams.get("status") ?? "";
+
+  const [showArchived, setShowArchived] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<GeneralMeetingListItem | null>(null);
+  const [isPending, setIsPending] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // RR2-06: Read page from URL search params; default to 1
   const pageParam = parseInt(searchParams.get("page") ?? "1", 10);
@@ -43,12 +54,49 @@ export default function GeneralMeetingListPage() {
     setSearchParams(next);
   }
 
+  function handleShowArchivedChange(checked: boolean) {
+    setShowArchived(checked);
+    const next = new URLSearchParams(searchParams);
+    next.delete("page");
+    setSearchParams(next, { replace: true });
+  }
+
+  async function handleConfirmArchive() {
+    /* v8 ignore next 2 -- defensive guard; archiveTarget is non-null when ConfirmDialog is open */
+    if (!archiveTarget) return;
+    setIsPending(true);
+    setActionError(null);
+    try {
+      await archiveGeneralMeeting(archiveTarget.id);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] });
+      setArchiveTarget(null);
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to archive General Meeting");
+    } finally {
+      setIsPending(false);
+    }
+  }
+
+  async function handleUnarchive(meeting: GeneralMeetingListItem) {
+    setIsPending(true);
+    setActionError(null);
+    try {
+      await unarchiveGeneralMeeting(meeting.id);
+      void queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] });
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : "Failed to unarchive General Meeting");
+    } finally {
+      setIsPending(false);
+    }
+  }
+
   const { data: countData } = useQuery<{ count: number }>({
-    queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus],
+    queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus, showArchived],
     queryFn: () =>
       getGeneralMeetingsCount({
         building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
+        is_archived: showArchived ? true : false,
       }),
   });
 
@@ -57,13 +105,14 @@ export default function GeneralMeetingListPage() {
   const safePage = Math.min(page, totalPages);
 
   const { data: meetings = [], isLoading, error } = useQuery<GeneralMeetingListItem[]>({
-    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, sortBy, sortDir],
+    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
     queryFn: () =>
       listGeneralMeetings({
         limit: PAGE_SIZE,
         offset: (safePage - 1) * PAGE_SIZE,
         building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
+        is_archived: showArchived ? true : false,
         sort_by: sortBy,
         sort_dir: sortDir,
       }),
@@ -74,19 +123,20 @@ export default function GeneralMeetingListPage() {
     const nextOffset = safePage * PAGE_SIZE;
     if (nextOffset < totalCount) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, sortBy, sortDir],
+        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
         queryFn: () =>
           listGeneralMeetings({
             limit: PAGE_SIZE,
             offset: nextOffset,
             building_id: selectedBuildingId || undefined,
             status: selectedStatus || undefined,
+            is_archived: showArchived ? true : false,
             sort_by: sortBy,
             sort_dir: sortDir,
           }),
       });
     }
-  }, [safePage, selectedBuildingId, selectedStatus, totalCount, queryClient, sortBy, sortDir]);
+  }, [safePage, selectedBuildingId, selectedStatus, showArchived, totalCount, queryClient, sortBy, sortDir]);
 
   function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;
@@ -137,10 +187,30 @@ export default function GeneralMeetingListPage() {
     <div>
       <div className="admin-page-header">
         <h1>General Meetings</h1>
-        <button className="btn btn--primary" onClick={() => navigate("/admin/general-meetings/new")}>
-          Create General Meeting
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <label className="toggle-switch">
+            <input
+              id="show-archived-toggle"
+              className="toggle-switch__input"
+              type="checkbox"
+              checked={showArchived}
+              onChange={(e) => handleShowArchivedChange(e.target.checked)}
+            />
+            <span className="toggle-switch__track" />
+            Show archived meetings
+          </label>
+          <button className="btn btn--primary" onClick={() => navigate("/admin/general-meetings/new")}>
+            Create General Meeting
+          </button>
+        </div>
       </div>
+      {actionError && !archiveTarget && (
+        <div style={{ marginBottom: 16 }}>
+          <p className="state-message state-message--error" role="alert">
+            {actionError}
+          </p>
+        </div>
+      )}
       <div className="admin-card">
         <div className="admin-card__header">
           <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
@@ -187,6 +257,11 @@ export default function GeneralMeetingListPage() {
             sortBy={sortBy}
             sortDir={sortDir}
             onSort={handleSortChange}
+            onArchive={(meeting) => {
+              setActionError(null);
+              setArchiveTarget(meeting);
+            }}
+            onUnarchive={handleUnarchive}
           />
         </div>
         <Pagination
@@ -198,6 +273,22 @@ export default function GeneralMeetingListPage() {
           isLoading={isLoading}
         />
       </div>
+
+      <ConfirmDialog
+        isOpen={archiveTarget !== null}
+        onClose={() => {
+          setArchiveTarget(null);
+          setActionError(null);
+        }}
+        onConfirm={handleConfirmArchive}
+        isPending={isPending}
+        error={actionError}
+        title="Archive General Meeting"
+        titleId="archive-meeting-title"
+        message={`Are you sure you want to archive "${archiveTarget?.title}"? Closed meetings must be retained for audit compliance and will be hidden from the active list.`}
+        confirmLabel="Archive"
+        confirmClassName="btn btn--danger"
+      />
     </div>
   );
 }

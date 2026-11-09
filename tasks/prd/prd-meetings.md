@@ -221,6 +221,25 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 
 ---
 
+### US-MTG-ARCHIVE: Archive and unarchive General Meetings
+
+**Status:** ✅ Implemented — branch: `feat/meeting-archive-retention`, committed 2026-11-09
+
+**Description:** As a building manager, I want to archive closed General Meetings to retain vote records for audit compliance while removing them from the active meetings list, and prevent deleting meetings with vote history.
+
+**Acceptance Criteria:**
+
+- [x] `is_archived` boolean column on `general_meetings` table (default: `false`, indexed)
+- [x] `POST /api/admin/general-meetings/{id}/archive` archives a closed meeting (409 if open or already archived, 404 if not found)
+- [x] `POST /api/admin/general-meetings/{id}/unarchive` unarchives an archived meeting (409 if not archived, 404 if not found)
+- [x] Data retention guard on `DELETE /api/admin/general-meetings/{id}` blocks deletion if meeting has recorded votes or ballot submissions (returns 409)
+- [x] Foreign key indexes on `votes(general_meeting_id, lot_owner_id)`, `general_meeting_lot_weights(lot_id)`, `ballot_submissions(lot_owner_id)`
+- [x] `GET /api/admin/general-meetings` and `/count` default to active meetings only (`is_archived=false`)
+- [x] Admin UI shows a "Show archived meetings" toggle switch; closed meetings show an "Archive" action button with confirmation dialog; archived meetings show an "Unarchive" action button and an "Archived" badge
+- [x] Typecheck/lint passes
+
+---
+
 ### US-UI05: Building filter on General Meetings list
 
 **Status:** ✅ Implemented

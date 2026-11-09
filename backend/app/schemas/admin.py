@@ -461,7 +461,8 @@ class GeneralMeetingOut(BaseModel):
     status: str
     meeting_at: datetime
     voting_closes_at: datetime
-    motions: list[MotionOut]
+    motions: list[MotionOut] = []
+    is_archived: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -475,6 +476,7 @@ class GeneralMeetingListItem(BaseModel):
     meeting_at: datetime
     voting_closes_at: datetime
     created_at: datetime
+    is_archived: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -584,6 +586,7 @@ class GeneralMeetingDetail(BaseModel):
     meeting_at: datetime
     voting_closes_at: datetime
     closed_at: datetime | None
+    is_archived: bool = False
     total_eligible_voters: int
     total_submitted: int
     total_entitlement: int
