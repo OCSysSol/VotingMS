@@ -34,6 +34,7 @@ class GeneralMeetingWithBuildingOut(BaseModel):
     meeting_at: datetime
     voting_closes_at: datetime
     building_name: str
+    oc_plan_number: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -46,4 +47,5 @@ class GeneralMeetingSummaryOut(BaseModel):
     meeting_at: datetime
     voting_closes_at: datetime
     building_name: str
+    oc_plan_number: str | None = None
     motions: list[MotionSummaryOut]

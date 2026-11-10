@@ -897,6 +897,7 @@ async def get_my_ballot(
         voter_email=voter_email,
         meeting_title=general_meeting.title,
         building_name=building.name if building else "",
+        oc_plan_number=building.oc_plan_number if building else None,
         submitted_lots=submitted_lots,
         remaining_lot_owner_ids=remaining_lot_owner_ids,
     )

@@ -46,6 +46,25 @@ describe("ConfirmationPage", () => {
     });
   });
 
+  it("renders building name and oc_plan_number when present", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/:meetingId/my-ballot`, () => {
+        return HttpResponse.json({
+          voter_email: "voter@test.com",
+          meeting_title: "2024 AGM",
+          building_name: "Harbour View",
+          oc_plan_number: "OC-55555",
+          submitted_lots: [],
+          remaining_lot_owner_ids: [],
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Harbour View — OC-55555")).toBeInTheDocument();
+    });
+  });
+
   it("renders voter email", async () => {
     renderPage();
     await waitFor(() => {

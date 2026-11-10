@@ -10,6 +10,7 @@ export type FinancialPosition = "normal" | "in_arrear";
 export interface Building {
   id: string;
   name: string;
+  oc_plan_number?: string | null;
   manager_email: string;
   is_archived: boolean;
   unarchive_count: number;

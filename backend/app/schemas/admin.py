@@ -43,6 +43,7 @@ class AdminUserInviteRequest(BaseModel):
 class BuildingOut(BaseModel):
     id: uuid.UUID
     name: str
+    oc_plan_number: str | None = None
     manager_email: str
     is_archived: bool
     unarchive_count: int
@@ -54,6 +55,7 @@ class BuildingOut(BaseModel):
 class BuildingCreate(BaseModel):
     name: str = Field(..., max_length=255)
     manager_email: str = Field(..., max_length=254)
+    oc_plan_number: str | None = Field(default=None, max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -69,10 +71,19 @@ class BuildingCreate(BaseModel):
             raise ValueError("manager_email must not be empty")
         return v
 
+    @field_validator("oc_plan_number")
+    @classmethod
+    def oc_plan_number_strip(cls, v: str | None) -> str | None:
+        if v is not None:
+            stripped = v.strip()
+            return stripped if stripped else None
+        return None
+
 
 class BuildingUpdate(BaseModel):
     name: str | None = Field(default=None, max_length=255)
     manager_email: str | None = Field(default=None, max_length=254)
+    oc_plan_number: str | None = Field(default=None, max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -88,10 +99,23 @@ class BuildingUpdate(BaseModel):
             raise ValueError("manager_email must not be empty")
         return v
 
+    @field_validator("oc_plan_number")
+    @classmethod
+    def oc_plan_number_strip(cls, v: str | None) -> str | None:
+        if v is not None:
+            stripped = v.strip()
+            return stripped if stripped else None
+        return None
+
     @model_validator(mode="after")
     def at_least_one_field(self) -> "BuildingUpdate":
-        if self.name is None and self.manager_email is None:
-            raise ValueError("At least one of name or manager_email must be provided")
+        if (
+            self.name is None
+            and self.manager_email is None
+            and self.oc_plan_number is None
+            and "oc_plan_number" not in self.model_fields_set
+        ):
+            raise ValueError("At least one of name, manager_email, or oc_plan_number must be provided")
         return self
 
 

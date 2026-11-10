@@ -18,6 +18,7 @@ const PAGE_SIZE = 20;
 // Text columns default to asc, date columns default to desc
 const DEFAULT_SORT_DIR: Record<string, SortDir> = {
   name: "asc",
+  oc_plan_number: "asc",
   created_at: "desc",
 };
 
@@ -28,6 +29,7 @@ export default function BuildingsPage() {
   const [showArchived, setShowArchived] = useState(false);
   const [name, setName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
+  const [ocPlanNumber, setOcPlanNumber] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const newBuildingBtnRef = useRef<HTMLButtonElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -121,7 +123,7 @@ export default function BuildingsPage() {
     }
   }, [safePage, showArchived, totalCount, queryClient, sortBy, sortDir, nameFilterParam]);
 
-  const mutation = useMutation<Building, Error, { name: string; manager_email: string }>({
+  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number?: string | null }>({
     mutationFn: (data) => createBuilding(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin", "buildings"] });
@@ -190,6 +192,7 @@ export default function BuildingsPage() {
   function openModal() {
     setName("");
     setManagerEmail("");
+    setOcPlanNumber("");
     setFormError(null);
     setShowCreateModal(true);
   }
@@ -198,6 +201,7 @@ export default function BuildingsPage() {
     setShowCreateModal(false);
     setName("");
     setManagerEmail("");
+    setOcPlanNumber("");
     setFormError(null);
   }
 
@@ -207,7 +211,11 @@ export default function BuildingsPage() {
     if (!name.trim()) { setFormError("Building name is required."); return; }
     if (!managerEmail.trim()) { setFormError("Manager email is required."); return; }
     if (!isValidEmail(managerEmail)) { setFormError("Please enter a valid email address."); return; }
-    mutation.mutate({ name: name.trim(), manager_email: managerEmail.trim() });
+    mutation.mutate({
+      name: name.trim(),
+      manager_email: managerEmail.trim(),
+      oc_plan_number: ocPlanNumber.trim() || null,
+    });
   }
 
   function handleModalKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
@@ -324,6 +332,17 @@ export default function BuildingsPage() {
                   aria-required="true"
                   required
                   placeholder="e.g. manager@example.com"
+                />
+              </div>
+              <div className="field">
+                <label className="field__label" htmlFor="building-oc-plan-number">OC Plan Number</label>
+                <input
+                  id="building-oc-plan-number"
+                  className="field__input"
+                  type="text"
+                  value={ocPlanNumber}
+                  onChange={(e) => setOcPlanNumber(e.target.value)}
+                  placeholder="e.g. OC123456"
                 />
               </div>
               {formError && (

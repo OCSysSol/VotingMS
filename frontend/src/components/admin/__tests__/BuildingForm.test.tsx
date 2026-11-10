@@ -64,6 +64,33 @@ describe("BuildingForm", () => {
     });
   });
 
+  it("submits oc_plan_number when provided", async () => {
+    let captured: { name?: string; manager_email?: string; oc_plan_number?: string | null } | null = null;
+    server.use(
+      http.post("http://localhost/api/admin/buildings", async ({ request }) => {
+        captured = await request.json() as typeof captured;
+        return HttpResponse.json({
+          id: "b-new",
+          name: captured?.name,
+          manager_email: captured?.manager_email,
+          oc_plan_number: captured?.oc_plan_number,
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        }, { status: 201 });
+      })
+    );
+    const user = userEvent.setup();
+    const { onSuccess } = renderComponent();
+    await user.type(screen.getByLabelText("Building Name"), "New Tower");
+    await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
+    await user.type(screen.getByLabelText("OC Plan Number"), "OC1234");
+    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await waitFor(() => {
+      expect(onSuccess).toHaveBeenCalled();
+    });
+    expect((captured as any)?.oc_plan_number).toBe("OC1234");
+  });
+
   it("shows API error on failure", async () => {
     server.use(
       http.post("http://localhost/api/admin/buildings", () => {

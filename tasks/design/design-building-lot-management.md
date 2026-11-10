@@ -1720,3 +1720,72 @@ The following existing E2E journey specs exercise the lot owner edit modal and p
 
 All such specs must update their locators to use `aria-label` or `id` rather than positional selectors.
 - Name/phone fields are sanitised with bleach (strip HTML tags) before storage — same as current implementation.
+
+---
+
+# US-BLD-04: OC Plan Attribute & Building Name Non-Uniqueness
+
+PRD reference: \`tasks/prd/prd-buildings-and-lots.md\` (US-BLD-04)
+
+**Status:** ✅ Implemented
+
+## 1. Overview
+
+This design addresses the architectural need to elevate Owners Corporation (OC) Plan numbers (\`oc_plan_number\`) as the primary domain entity identifier, while maintaining PostgreSQL \`UUID\` primary keys on \`buildings\` for relational integrity.
+
+In multi-lot strata schemes, physical buildings often house multiple separate legal OC entities (e.g., Residential OC1, Commercial OC2, Shared Services OC3). Under the previous schema, \`buildings.name\` had a global unique constraint (\`uq_buildings_name\`) and \`oc_plan_number\` was not captured.
+
+This feature:
+1. Adds \`oc_plan_number\` (\`VARCHAR(100)\`, nullable, indexed) to \`buildings\`.
+2. Drops the unique constraint on \`buildings.name\` (\`uq_buildings_name\`).
+3. Preserves \`id: UUID\` as the PK on \`buildings\` with zero disruption to existing foreign keys.
+4. Requires no backfill for existing rows (\`oc_plan_number\` defaults to \`NULL\`).
+5. Updates Admin UI (table columns, create/edit modals, search filtering by both name and OC plan).
+6. Updates Voter UI (public meeting endpoints, combobox, and meeting headers formatted as \`\${building_name} — \${oc_plan_number}\`).
+7. Enhances CSV/Excel bulk import to accept \`oc_plan_number\` as an optional column.
+
+## 2. Technical Design
+
+### 2.1 Database Changes
+
+#### Schema Alterations
+- **Table:** \`buildings\`
+- **New Column:** \`oc_plan_number VARCHAR(100) NULL\`
+- **New Index:** \`ix_buildings_oc_plan_number\` on \`buildings (oc_plan_number)\` (non-unique index for fast lookup and sorting).
+- **Dropped Constraint:** \`uq_buildings_name\` on \`buildings (name)\` (or default Postgres unique constraint name \`buildings_name_key\`).
+
+### 2.2 Backend Changes
+
+#### 1. SQLAlchemy Model (\`backend/app/models/building.py\`)
+- Remove \`unique=True\` from \`name\`.
+- Add \`oc_plan_number\`:
+\`\`\`python
+name: Mapped[str] = mapped_column(String, unique=False, nullable=False)
+oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+\`\`\`
+
+#### 2. Pydantic Schemas
+- Add \`oc_plan_number: str | None = None\` to:
+  - \`BuildingOut\` (in \`building.py\` and \`admin.py\`)
+  - \`BuildingCreate\` (optional \`oc_plan_number\`)
+  - \`BuildingUpdate\` (optional \`oc_plan_number\`)
+  - \`GeneralMeetingWithBuildingOut\`
+  - \`GeneralMeetingSummaryOut\`
+  - \`AuthVerifyResponse\`
+  - \`MyBallotResponse\`
+
+#### 3. Service Layer (\`backend/app/services/admin_service.py\`)
+- \`create_building\`: remove uniqueness check on building name; accept optional \`oc_plan_number\`.
+- \`update_building\`: support updating \`oc_plan_number\`.
+- \`list_buildings\` and \`count_buildings\`: filter across \`name\` OR \`oc_plan_number\`; support \`sort_by="oc_plan_number"\`.
+- \`import_buildings_from_csv\` & \`import_buildings_from_excel\`: accept optional \`oc_plan_number\` column.
+
+### 2.3 Frontend Changes
+- Add \`oc_plan_number\` to TypeScript types (\`Building\`, \`BuildingOut\`, \`GeneralMeetingWithBuildingOut\`, etc.).
+- Admin \`BuildingTable\`: add "OC Plan" column (renders \`—\` when null/empty).
+- Admin \`BuildingsPage\`: add OC Plan input in create modal; search bar filters by name or plan.
+- Admin \`BuildingDetailPage\`: edit modal allows updating \`oc_plan_number\`; header shows OC plan.
+- Voter \`VoterBuildingCombobox\`, \`VotingPage\`, \`ConfirmationPage\`, \`GeneralMeetingSummaryPage\`: display formatted \`\${building_name} — \${oc_plan_number}\` (or just \`\${building_name}\` if plan is absent).
+
+## 3. Schema Migration Required
+**Yes.** New Alembic revision to add \`oc_plan_number\`, add index, and drop \`uq_buildings_name\`.

@@ -45,13 +45,23 @@ export default function BuildingTable({ buildings, isLoading, sortBy, sortDir, o
           <tr>
             {onSort ? (
               <SortableColumnHeader
-                label="Name"
+                label="OC Plan"
+                column="oc_plan_number"
+                currentSort={currentSort}
+                onSort={onSort}
+              />
+            ) : (
+              <th>OC Plan</th>
+            )}
+            {onSort ? (
+              <SortableColumnHeader
+                label="Building Name"
                 column="name"
                 currentSort={currentSort}
                 onSort={onSort}
               />
             ) : (
-              <th>Name</th>
+              <th>Building Name</th>
             )}
             {onSort ? (
               <SortableColumnHeader
@@ -78,17 +88,18 @@ export default function BuildingTable({ buildings, isLoading, sortBy, sortDir, o
         <tbody>
           {isLoading && !buildings.length ? (
             <tr>
-              <td colSpan={3} className="state-message">Loading buildings...</td>
+              <td colSpan={4} className="state-message">Loading buildings...</td>
             </tr>
           ) : buildings.length === 0 ? (
             <tr>
-              <td colSpan={3} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
+              <td colSpan={4} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
                 No buildings found.
               </td>
             </tr>
           ) : (
             visible.map((b) => (
               <tr key={b.id} style={b.is_archived ? { opacity: 0.6 } : undefined}>
+                <td>{b.oc_plan_number && b.oc_plan_number.trim() ? b.oc_plan_number.trim() : "—"}</td>
                 <td>
                   <button
                     className="admin-table__link"

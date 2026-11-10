@@ -110,5 +110,6 @@ class MyBallotResponse(BaseModel):
     voter_email: str
     meeting_title: str
     building_name: str
+    oc_plan_number: str | None = None
     submitted_lots: list[LotBallotSummary]
     remaining_lot_owner_ids: list[uuid.UUID]

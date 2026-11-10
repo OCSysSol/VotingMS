@@ -64,6 +64,22 @@ describe("GeneralMeetingSummaryPage", () => {
     });
   });
 
+  it("renders building name and oc_plan_number when set", async () => {
+    server.use(
+      http.get(`${BASE}/api/general-meeting/:meetingId/summary`, () => {
+        return HttpResponse.json({
+          ...agmSummaryFixture,
+          building_name: "Summit Lodge",
+          oc_plan_number: "OC-4444",
+        });
+      })
+    );
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Building: Summit Lodge — OC-4444")).toBeInTheDocument();
+    });
+  });
+
   it("renders meeting date", async () => {
     renderPage();
     await waitFor(() => {
