@@ -68,9 +68,36 @@ describe("BuildingTable", () => {
 
   it("renders static table headers when no onSort prop provided", () => {
     renderBuildingTable({ buildings });
-    expect(screen.getByText("Name")).toBeInTheDocument();
+    expect(screen.getByText("OC Plan")).toBeInTheDocument();
+    expect(screen.getByText("Building Name")).toBeInTheDocument();
     expect(screen.getByText("Manager Email")).toBeInTheDocument();
     expect(screen.getByText("Created At")).toBeInTheDocument();
+  });
+
+  it("renders oc_plan_number when present, and dash when absent or blank", () => {
+    const testBuildings: Building[] = [
+      {
+        id: "b1",
+        name: "Building 1",
+        oc_plan_number: "OC-111",
+        manager_email: "b1@test.com",
+        is_archived: false,
+        unarchive_count: 0,
+        created_at: "2024-01-01T00:00:00Z",
+      },
+      {
+        id: "b2",
+        name: "Building 2",
+        oc_plan_number: "   ",
+        manager_email: "b2@test.com",
+        is_archived: false,
+        unarchive_count: 0,
+        created_at: "2024-01-01T00:00:00Z",
+      },
+    ];
+    renderBuildingTable({ buildings: testBuildings });
+    expect(screen.getByText("OC-111")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
   });
 
   it("does not render a Status column", () => {
@@ -85,6 +112,7 @@ describe("BuildingTable", () => {
         name: "Old Tower",
         manager_email: "old@example.com",
         is_archived: true,
+        unarchive_count: 0,
         created_at: "2023-01-01T00:00:00Z",
       },
     ];
@@ -102,12 +130,21 @@ describe("BuildingTable", () => {
 
   // --- Sort props ---
 
-  it("renders sortable Name, Manager Email and Created At headers when onSort is provided", () => {
+  it("renders sortable OC Plan, Building Name, Manager Email and Created At headers when onSort is provided", () => {
     const onSort = vi.fn();
     renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
-    expect(screen.getByRole("button", { name: /Name/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /OC Plan/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Building Name/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Manager Email/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
+  });
+
+  it("calls onSort with 'oc_plan_number' when OC Plan header button is clicked", async () => {
+    const user = userEvent.setup();
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    await user.click(screen.getByRole("button", { name: /OC Plan/ }));
+    expect(onSort).toHaveBeenCalledWith("oc_plan_number");
   });
 
   it("calls onSort with 'name' when Name header button is clicked", async () => {

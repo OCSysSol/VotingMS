@@ -236,6 +236,37 @@ describe("BuildingsPage", () => {
     });
   });
 
+  it("submits the form with oc_plan_number and closes modal on success", async () => {
+    let capturedBody: { name?: string; manager_email?: string; oc_plan_number?: string | null } | null = null;
+    server.use(
+      http.post("http://localhost/api/admin/buildings", async ({ request }) => {
+        capturedBody = await request.json() as typeof capturedBody;
+        return HttpResponse.json({
+          id: "b-new-oc",
+          name: capturedBody?.name,
+          manager_email: capturedBody?.manager_email,
+          oc_plan_number: capturedBody?.oc_plan_number,
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        }, { status: 201 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.type(screen.getByLabelText("Building Name"), "OC Tower");
+    await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
+    await user.type(screen.getByLabelText("OC Plan Number"), "OC98765");
+    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+    });
+    expect((capturedBody as any)?.oc_plan_number).toBe("OC98765");
+  });
+
   // --- State / precondition errors ---
 
   it("shows API error inline in modal on failure", async () => {

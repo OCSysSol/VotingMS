@@ -3524,18 +3524,19 @@ class TestCreateBuildingEndpoint:
 
     # --- State / precondition errors ---
 
-    async def test_duplicate_name_returns_409(
+    async def test_duplicate_name_is_allowed(
         self, client: AsyncClient
     ):
-        await client.post(
+        r1 = await client.post(
             "/api/admin/buildings",
             json={"name": "Dup Form Building", "manager_email": "dup@test.com"},
         )
+        assert r1.status_code == 201
         response = await client.post(
             "/api/admin/buildings",
             json={"name": "Dup Form Building", "manager_email": "other@test.com"},
         )
-        assert response.status_code == 409
+        assert response.status_code == 201
 
 
 # ---------------------------------------------------------------------------

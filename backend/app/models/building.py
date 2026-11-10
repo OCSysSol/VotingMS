@@ -14,7 +14,8 @@ class Building(Base):
         primary_key=True,
         default=uuid.uuid4,
     )
-    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     manager_email: Mapped[str] = mapped_column(String, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     unarchive_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

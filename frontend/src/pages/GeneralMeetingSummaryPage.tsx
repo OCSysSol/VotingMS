@@ -44,7 +44,12 @@ export default function GeneralMeetingSummaryPage() {
       <style>{`@media print { .no-print { display: none !important; } }`}</style>
 
       <h1>{meeting.title}</h1>
-      <p>Building: {meeting.building_name}</p>
+      <p>
+        Building:{" "}
+        {meeting.oc_plan_number && meeting.oc_plan_number.trim()
+          ? `${meeting.building_name} — ${meeting.oc_plan_number.trim()}`
+          : meeting.building_name}
+      </p>
       <p>Meeting: {formatLocalDateTime(meeting.meeting_at)}</p>
       <p>Voting closes: {formatLocalDateTime(meeting.voting_closes_at)}</p>
       <p>

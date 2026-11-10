@@ -355,11 +355,16 @@ async def create_building(
     data: BuildingCreate,
     db: AsyncSession = Depends(get_db),
 ) -> BuildingOut:
-    building = await admin_service.create_building(data.name, data.manager_email, db)
+    building = await admin_service.create_building(
+        data.name,
+        data.manager_email,
+        db,
+        oc_plan_number=data.oc_plan_number,
+    )
     return BuildingOut.model_validate(building)
 
 
-_VALID_BUILDINGS_SORT_BY = {"name", "manager_email", "created_at"}
+_VALID_BUILDINGS_SORT_BY = {"name", "manager_email", "created_at", "oc_plan_number"}
 _VALID_LOT_OWNERS_SORT_BY = {"lot_number", "unit_entitlement", "financial_position", "email", "proxy_email"}
 _VALID_SORT_DIRS = {"asc", "desc"}
 

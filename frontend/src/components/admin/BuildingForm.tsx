@@ -11,9 +11,10 @@ interface BuildingFormProps {
 export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps) {
   const [name, setName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
+  const [ocPlanNumber, setOcPlanNumber] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const mutation = useMutation<Building, Error, { name: string; manager_email: string }>({
+  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number?: string | null }>({
     mutationFn: (data) => createBuilding(data),
     onSuccess: () => {
       onSuccess();
@@ -28,7 +29,11 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
     setFormError(null);
     if (!name.trim()) { setFormError("Building name is required."); return; }
     if (!managerEmail.trim()) { setFormError("Manager email is required."); return; }
-    mutation.mutate({ name: name.trim(), manager_email: managerEmail.trim() });
+    mutation.mutate({
+      name: name.trim(),
+      manager_email: managerEmail.trim(),
+      oc_plan_number: ocPlanNumber.trim() || null,
+    });
   }
 
   return (
@@ -64,6 +69,17 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
             onChange={(e) => setManagerEmail(e.target.value)}
             placeholder="e.g. manager@example.com"
             aria-required="true"
+          />
+        </div>
+        <div className="field">
+          <label className="field__label" htmlFor="building-oc-plan-number">OC Plan Number</label>
+          <input
+            id="building-oc-plan-number"
+            className="field__input"
+            type="text"
+            value={ocPlanNumber}
+            onChange={(e) => setOcPlanNumber(e.target.value)}
+            placeholder="e.g. OC123456"
           />
         </div>
         {formError && (

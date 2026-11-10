@@ -463,6 +463,54 @@ describe("BuildingDetailPage", () => {
     });
   });
 
+  it("submits with updated oc_plan_number only and closes modal", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          oc_plan_number: "OC-OLD",
+          manager_email: "alpha@example.com",
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("b1");
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Edit Building" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    const ocInput = screen.getByLabelText("OC Plan Number");
+    expect(ocInput).toHaveValue("OC-OLD");
+    await user.clear(ocInput);
+    await user.type(ocInput, "OC-UPDATED");
+    await user.click(screen.getByRole("button", { name: "Save Changes" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: "Edit Building" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("renders building name and oc_plan_number in header when set", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b-oc",
+          name: "Highland Residences",
+          oc_plan_number: "OC-777",
+          manager_email: "highland@example.com",
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
+    renderPage("b-oc");
+    await waitFor(() => {
+      expect(screen.getByText("Highland Residences — OC-777")).toBeInTheDocument();
+    });
+  });
+
   it("shows server error when PATCH fails", async () => {
     server.use(
       http.patch("http://localhost/api/admin/buildings/:buildingId", () => {

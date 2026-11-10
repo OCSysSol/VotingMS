@@ -18,10 +18,18 @@ export function VoterBuildingCombobox({
   const listboxId = useId();
   const errorId = useId();
 
+  function formatBuildingLabel(b: BuildingOut): string {
+    if (b.oc_plan_number && b.oc_plan_number.trim()) {
+      return `${b.name} — ${b.oc_plan_number.trim()}`;
+    }
+    return b.name;
+  }
+
   // Resolve the display name for the current value
   function getNameForId(id: string): string {
     if (!id) return "";
-    return buildings.find((b) => b.id === id)?.name ?? "";
+    const b = buildings.find((b) => b.id === id);
+    return b ? formatBuildingLabel(b) : "";
   }
 
   const [inputText, setInputText] = useState(() => getNameForId(value));
@@ -37,12 +45,22 @@ export function VoterBuildingCombobox({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
 
-  // Filter buildings by inputText (case-insensitive substring)
+  // Filter buildings by inputText (matches either name or oc_plan_number)
   const filtered: Array<{ id: string; name: string }> = [
     { id: "", name: "All buildings" },
-    ...buildings.filter((b) =>
-      b.name.toLowerCase().includes(inputText.toLowerCase())
-    ),
+    ...buildings
+      .filter((b) => {
+        const query = inputText.toLowerCase();
+        const matchesName = b.name.toLowerCase().includes(query);
+        const matchesPlan = b.oc_plan_number
+          ? b.oc_plan_number.toLowerCase().includes(query)
+          : false;
+        return matchesName || matchesPlan;
+      })
+      .map((b) => ({
+        id: b.id,
+        name: formatBuildingLabel(b),
+      })),
   ];
 
   function openDropdown() {

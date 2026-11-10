@@ -61,7 +61,7 @@ async def list_buildings(request: Request, db: AsyncSession = Depends(get_db)) -
         .order_by(Building.name)
     )
     buildings = result.scalars().all()
-    return [BuildingOut(id=b.id, name=b.name) for b in buildings]
+    return [BuildingOut(id=b.id, name=b.name, oc_plan_number=b.oc_plan_number) for b in buildings]
 
 
 @router.get("/buildings/{building_id}/general-meetings", response_model=list[GeneralMeetingOut])
@@ -129,6 +129,7 @@ async def get_general_meeting(
         meeting_at=meeting.meeting_at,
         voting_closes_at=meeting.voting_closes_at,
         building_name=building.name,
+        oc_plan_number=building.oc_plan_number,
     )
 
 
@@ -177,6 +178,7 @@ async def get_general_meeting_summary(
         meeting_at=meeting.meeting_at,
         voting_closes_at=meeting.voting_closes_at,
         building_name=building.name,
+        oc_plan_number=building.oc_plan_number,
         motions=[
             MotionSummaryOut(
                 display_order=m.display_order,

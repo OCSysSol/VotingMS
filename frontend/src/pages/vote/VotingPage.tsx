@@ -468,7 +468,11 @@ export function VotingPage() {
 
       {currentMeeting && (
         <div className="agm-header">
-          <p className="agm-header__building">{currentMeeting.building_name}</p>
+          <p className="agm-header__building">
+            {currentMeeting.oc_plan_number && currentMeeting.oc_plan_number.trim()
+              ? `${currentMeeting.building_name} — ${currentMeeting.oc_plan_number.trim()}`
+              : currentMeeting.building_name}
+          </p>
           <h1 className="agm-header__title">{currentMeeting.title}</h1>
           <div className="agm-header__meta">
             <span>
