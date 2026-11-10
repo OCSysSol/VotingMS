@@ -1153,6 +1153,18 @@ async def import_lot_owners_from_csv(
                                 "phone_number": phone_number,
                             }
                         )
+            # Owner with a name/phone but no email: still create a person (email=None).
+            if not any(a.strip() for a in email.split(";")) and (
+                row_given_name or row_surname or phone_number
+            ):
+                lot_data[lot_number]["email_entries"].append(
+                    {
+                        "email": None,
+                        "given_name": row_given_name,
+                        "surname": row_surname,
+                        "phone_number": phone_number,
+                    }
+                )
 
     # Check for duplicate lot numbers and report them with row details (RR3-31)
     for lot_num, row_nums in lot_number_rows.items():
@@ -1325,6 +1337,18 @@ async def import_lot_owners_from_excel(
                                 "phone_number": phone_number,
                             }
                         )
+            # Owner with a name/phone but no email: still create a person (email=None).
+            if not any(a.strip() for a in email.split(";")) and (
+                row_given_name or row_surname or phone_number
+            ):
+                lot_data[lot_number]["email_entries"].append(
+                    {
+                        "email": None,
+                        "given_name": row_given_name,
+                        "surname": row_surname,
+                        "phone_number": phone_number,
+                    }
+                )
 
     # Check for duplicate lot numbers and report them with row details (RR3-31)
     for lot_num, row_nums in lot_number_rows.items():
@@ -1412,6 +1436,8 @@ async def _upsert_lot_owners(
             delete(lot_persons).where(lot_persons.c.lot_id.in_(all_lot_ids))
         )
 
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     # Step 3: Rebuild lot_persons from CSV rows
     total_emails = 0
     for lot_number, data in lot_data.items():
@@ -1426,13 +1452,26 @@ async def _upsert_lot_owners(
                     db,
                 )
                 # on_conflict_do_nothing handles duplicate emails on same lot row
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 await db.execute(
                     pg_insert(lot_persons)
                     .values(lot_id=lo.id, person_id=person.id)
                     .on_conflict_do_nothing()
                 )
                 total_emails += 1
+            else:
+                # No email: create a standalone person (identified by UUID) so the
+                # name/phone is preserved. Stale ones are removed by step 4 below.
+                person = Person(
+                    email=None,
+                    given_name=entry.get("given_name"),
+                    surname=entry.get("surname"),
+                    phone_number=entry.get("phone_number"),
+                )
+                db.add(person)
+                await db.flush()
+                await db.execute(
+                    pg_insert(lot_persons).values(lot_id=lo.id, person_id=person.id)
+                )
 
     # Step 4: Delete orphaned persons — persons no longer linked to any lot or proxy.
     # After rebuilding lot_persons for this building, any person who has no remaining

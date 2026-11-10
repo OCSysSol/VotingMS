@@ -123,7 +123,7 @@ describe("LotOwnerForm - Add mode", () => {
     expect(screen.getByText("Lot number is required.")).toBeInTheDocument();
   });
 
-  it("submits add form with no email and calls onSuccess", async () => {
+  it("shows 'Email is required.' and does not submit when add form email is blank", async () => {
     const user = userEvent.setup();
     const onSuccess = vi.fn();
     renderAddForm(onSuccess);
@@ -132,9 +132,8 @@ describe("LotOwnerForm - Add mode", () => {
     await user.type(screen.getByLabelText("Unit Entitlement"), "100");
     // email left blank intentionally
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
-    await waitFor(() => {
-      expect(onSuccess).toHaveBeenCalled();
-    });
+    expect(screen.getByText("Email is required.")).toBeInTheDocument();
+    expect(onSuccess).not.toHaveBeenCalled();
   });
 
   it("shows validation error for malformed email format", async () => {
@@ -156,9 +155,10 @@ describe("LotOwnerForm - Add mode", () => {
     expect(emailInput).toHaveAttribute("type", "email");
   });
 
-  it("shows hint text below email input", () => {
+  it("marks the email input as required (no 'leave blank' hint)", () => {
     renderAddForm();
-    expect(screen.getByText("Leave blank if no email address")).toBeInTheDocument();
+    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-required", "true");
+    expect(screen.queryByText("Leave blank if no email address")).not.toBeInTheDocument();
   });
 
   it("shows validation error when unit entitlement is not a number", async () => {
@@ -2074,5 +2074,32 @@ describe("LotOwnerForm - proxy conflict modal", () => {
     });
     await user.keyboard("{Escape}");
     expect(onCancel).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email-less owners (existing data) — display tolerated, email required on edit
+// ---------------------------------------------------------------------------
+describe("LotOwnerForm - owner without email", () => {
+  const noEmailOwner: LotOwner = {
+    ...existingLotOwner,
+    owner_emails: [{ id: "em-null", email: null, given_name: "Jane", surname: "Doe", phone_number: null }],
+    emails: [],
+  };
+
+  it("renders an email-less owner with a '(no email)' placeholder without crashing", () => {
+    renderEditForm(noEmailOwner);
+    expect(screen.getByText("Jane Doe")).toBeInTheDocument();
+    expect(screen.getByText("(no email)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit owner" })).toBeInTheDocument();
+  });
+
+  it("requires an email when editing an email-less owner", async () => {
+    const user = userEvent.setup();
+    renderEditForm(noEmailOwner);
+    await user.click(screen.getByRole("button", { name: "Edit owner" }));
+    expect(screen.getByLabelText("Edit email")).toHaveValue("");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Email is required.")).toBeInTheDocument();
   });
 });

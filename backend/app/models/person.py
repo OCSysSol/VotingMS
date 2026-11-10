@@ -11,7 +11,7 @@ class Person(Base):
     __tablename__ = "persons"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
-    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    email: Mapped[str | None] = mapped_column(String, nullable=True, unique=True)
     phone_number: Mapped[str | None] = mapped_column(String(20), nullable=True)
     given_name: Mapped[str | None] = mapped_column(String, nullable=True)
     surname: Mapped[str | None] = mapped_column(String, nullable=True)

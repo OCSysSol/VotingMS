@@ -610,7 +610,7 @@ function EditModal({
                           : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
                         }
                         {" "}
-                        <span style={{ color: "var(--text-secondary)" }}>{entry.email ?? ""}</span>
+                        <span style={{ color: "var(--text-secondary)" }}>{entry.email ?? <em style={{ color: "var(--text-muted)" }}>(no email)</em>}</span>
                         {entry.phone_number && (
                           <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
                             {entry.phone_number}
@@ -652,7 +652,7 @@ function EditModal({
                 value={newOwnerEmail}
                 onChange={(v) => { setNewOwnerEmail(v); setAddOwnerSuggestedPerson(null); }}
                 onSelect={(person) => {
-                  setNewOwnerEmail(person.email);
+                  setNewOwnerEmail(person.email ?? "");
                   setNewOwnerGivenName(person.given_name ?? "");
                   setNewOwnerSurname(person.surname ?? "");
                   setNewOwnerPhone(person.phone_number ?? "");
@@ -750,7 +750,7 @@ function EditModal({
                   value={newProxyEmail}
                   onChange={(v) => { setNewProxyEmail(v); setProxySuggestedPerson(null); }}
                   onSelect={(person) => {
-                    setNewProxyEmail(person.email);
+                    setNewProxyEmail(person.email ?? "");
                     setProxyGivenName(person.given_name ?? "");
                     setProxySurname(person.surname ?? "");
                     setProxyPhone(person.phone_number ?? "");
@@ -958,14 +958,18 @@ function AddForm({
       setFormError("Lot number is required.");
       return;
     }
-    if (email.trim() && !isValidEmail(email)) {
+    if (!email.trim()) {
+      setFormError("Email is required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
       setFormError("Please enter a valid email address.");
       return;
     }
 
     addMutation.mutate({
       lot_number: lotNumber,
-      emails: email.trim() ? [email.trim().toLowerCase()] : [],
+      emails: [email.trim().toLowerCase()],
       unit_entitlement: parsed,
       financial_position: financialPosition,
     });
@@ -1019,7 +1023,7 @@ function AddForm({
           </div>
 
           <div className="field">
-            <label className="field__label" htmlFor="lot-email">
+            <label className="field__label field__label--required" htmlFor="lot-email">
               Email
             </label>
             <input
@@ -1028,8 +1032,8 @@ function AddForm({
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              aria-required="true"
             />
-            <span className="field__hint">Leave blank if no email address</span>
           </div>
 
           <div className="field">
