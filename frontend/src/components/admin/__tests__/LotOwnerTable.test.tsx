@@ -385,3 +385,21 @@ describe("LotOwnerTable", () => {
     expect(screen.getByText("1A")).toBeInTheDocument();
   });
 });
+
+describe("LotOwnerTable - owner without email", () => {
+  it("renders a dash for an email-less owner (with and without a name)", () => {
+    const owners: LotOwner[] = [
+      {
+        ...lotOwners[0],
+        owner_emails: [
+          { id: "n1", email: null, given_name: "Jane", surname: "Doe" },
+          { id: "n2", email: null, given_name: null, surname: null },
+        ],
+        emails: [],
+      },
+    ];
+    render(<LotOwnerTable lotOwners={owners} onEdit={() => {}} />);
+    expect(screen.getByText("Jane Doe <—>")).toBeInTheDocument();
+    expect(screen.getByText("—")).toBeInTheDocument();
+  });
+});

@@ -131,7 +131,7 @@ class BuildingImportResult(BaseModel):
 
 class PersonOut(BaseModel):
     id: uuid.UUID
-    email: str
+    email: str | None = None
     given_name: str | None = None
     surname: str | None = None
     phone_number: str | None = None
@@ -160,7 +160,7 @@ class LotOwnerOut(BaseModel):
     @property
     def emails(self) -> list[str]:
         """Backward-compatible flat list of email strings."""
-        return [p.email for p in self.persons]
+        return [p.email for p in self.persons if p.email]
 
     @computed_field  # type: ignore[prop-decorator]
     @property

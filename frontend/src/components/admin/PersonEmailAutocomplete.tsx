@@ -18,7 +18,8 @@ function formatPersonLabel(person: PersonOut): string {
     person.given_name || person.surname
       ? `${person.given_name ?? ""} ${person.surname ?? ""}`.trim()
       : null;
-  return name ? `${name} <${person.email}>` : person.email;
+  const email = person.email ?? "(no email)";
+  return name ? `${name} <${email}>` : email;
 }
 
 export default function PersonEmailAutocomplete({
@@ -66,7 +67,7 @@ export default function PersonEmailAutocomplete({
   }
 
   function handleSelect(person: PersonOut) {
-    onChange(person.email);
+    onChange(person.email ?? "");
     onSelect(person);
     setSuggestions([]);
     setOpen(false);

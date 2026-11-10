@@ -27,7 +27,7 @@ export interface LotOwnerEmailEntry {
 
 export interface Person {
   id: string;
-  email: string;
+  email: string | null;
   given_name: string | null;
   surname: string | null;
   phone_number: string | null;

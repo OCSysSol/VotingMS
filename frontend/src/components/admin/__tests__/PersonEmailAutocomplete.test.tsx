@@ -493,3 +493,28 @@ describe("PersonEmailAutocomplete - listbox aria-label", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("PersonEmailAutocomplete - person without email", () => {
+  const personNoEmail: PersonOut = {
+    id: "p3",
+    email: null,
+    given_name: "Jane",
+    surname: "Doe",
+    phone_number: null,
+  };
+
+  it("labels an email-less suggestion with a placeholder and selects it with a blank email", async () => {
+    const onChange = vi.fn();
+    const onSelect = vi.fn();
+    await renderAndOpenDropdown([personNoEmail], "jan", onChange, onSelect);
+    const option = screen.getByText("Jane Doe <(no email)>");
+    fireEvent.mouseDown(option);
+    expect(onChange).toHaveBeenLastCalledWith("");
+    expect(onSelect).toHaveBeenCalledWith(personNoEmail);
+  });
+
+  it("labels an email-less, nameless suggestion as just the placeholder", async () => {
+    await renderAndOpenDropdown([{ ...personNoEmail, given_name: null, surname: null }], "x");
+    expect(screen.getByText("(no email)")).toBeInTheDocument();
+  });
+});
