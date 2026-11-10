@@ -195,6 +195,7 @@ interface BuildingEditModalProps {
 function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalProps) {
   const [name, setName] = useState(building.name);
   const [managerEmail, setManagerEmail] = useState(building.manager_email);
+  const [ocPlanNumber, setOcPlanNumber] = useState(building.oc_plan_number ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -230,13 +231,20 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (name === building.name && managerEmail === building.manager_email) {
+    const trimmedOcPlan = ocPlanNumber.trim() || null;
+    const currentOcPlan = building.oc_plan_number ?? null;
+    if (
+      name === building.name &&
+      managerEmail === building.manager_email &&
+      trimmedOcPlan === currentOcPlan
+    ) {
       setError("No changes detected");
       return;
     }
-    const payload: { name?: string; manager_email?: string } = {};
+    const payload: { name?: string; manager_email?: string; oc_plan_number?: string | null } = {};
     if (name !== building.name) payload.name = name;
     if (managerEmail !== building.manager_email) payload.manager_email = managerEmail;
+    if (trimmedOcPlan !== currentOcPlan) payload.oc_plan_number = trimmedOcPlan;
     setSaving(true);
     setError(null);
     try {
@@ -299,6 +307,17 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
               value={managerEmail}
               onChange={(e) => setManagerEmail(e.target.value)}
               required
+            />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor="edit-building-oc-plan-number">OC Plan Number</label>
+            <input
+              id="edit-building-oc-plan-number"
+              type="text"
+              className="field__input"
+              value={ocPlanNumber}
+              onChange={(e) => setOcPlanNumber(e.target.value)}
+              placeholder="e.g. OC123456"
             />
           </div>
           {error && <p className="field__error" style={{ marginBottom: 12 }}>{error}</p>}
@@ -492,7 +511,13 @@ export default function BuildingDetailPage() {
       <div className="admin-page-header">
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ marginBottom: 2 }}>{building ? building.name : "Building"}</h1>
+            <h1 style={{ marginBottom: 2 }}>
+              {building ? (
+                building.oc_plan_number && building.oc_plan_number.trim()
+                  ? `${building.name} — ${building.oc_plan_number.trim()}`
+                  : building.name
+              ) : "Building"}
+            </h1>
             {building?.is_archived && (
               <span
                 style={{

@@ -15,6 +15,7 @@ export interface GeneralMeetingSummaryData {
   meeting_at: string;
   voting_closes_at: string;
   building_name: string;
+  oc_plan_number?: string | null;
   motions: GeneralMeetingSummaryMotion[];
 }
 

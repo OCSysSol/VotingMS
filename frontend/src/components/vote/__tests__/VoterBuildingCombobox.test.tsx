@@ -313,4 +313,33 @@ describe("VoterBuildingCombobox", () => {
     const alphaOption = screen.getByRole("option", { name: "Alpha Tower" });
     expect(alphaOption).toHaveAttribute("aria-selected", "true");
   });
+
+  // --- US-BLD-04: OC Plan Number ---
+
+  it("renders option as name — oc_plan_number when oc_plan_number is present", async () => {
+    const user = userEvent.setup();
+    const buildingsWithPlan: BuildingOut[] = [
+      { id: "b1", name: "Tower 1", oc_plan_number: "OC-888" },
+      { id: "b2", name: "Tower 2", oc_plan_number: null },
+      { id: "b3", name: "Tower 3", oc_plan_number: "   " },
+    ];
+    renderCombobox({ buildings: buildingsWithPlan });
+    await user.click(screen.getByRole("combobox"));
+    expect(screen.getByRole("option", { name: "Tower 1 — OC-888" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Tower 2" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Tower 3" })).toBeInTheDocument();
+  });
+
+  it("filters buildings when searching by oc_plan_number substring", async () => {
+    const user = userEvent.setup();
+    const buildingsWithPlan: BuildingOut[] = [
+      { id: "b1", name: "Alpha Tower", oc_plan_number: "SP-9999" },
+      { id: "b2", name: "Beta Court", oc_plan_number: "SP-1111" },
+    ];
+    renderCombobox({ buildings: buildingsWithPlan });
+    const input = screen.getByRole("combobox");
+    await user.type(input, "9999");
+    expect(screen.getByRole("option", { name: "Alpha Tower — SP-9999" })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "Beta Court — SP-1111" })).not.toBeInTheDocument();
+  });
 });

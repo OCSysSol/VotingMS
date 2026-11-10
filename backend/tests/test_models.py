@@ -120,25 +120,24 @@ class TestBuilding:
 
     # --- Input validation / constraints ---
 
-    async def test_building_name_uniqueness(self, db_session: AsyncSession):
-        """Two buildings with the same name violate the unique constraint."""
+    async def test_building_name_duplicate_allowed(self, db_session: AsyncSession):
+        """Two buildings with the same name are allowed after dropping uq_buildings_name."""
         b1 = make_building("Duplicate Name")
         db_session.add(b1)
         await db_session.flush()
 
         b2 = make_building("Duplicate Name")
         db_session.add(b2)
-        with pytest.raises(IntegrityError):
-            await db_session.flush()
-
-    async def test_building_name_case_sensitive_uniqueness(self, db_session: AsyncSession):
-        """Different-case names are treated as distinct by PostgreSQL."""
-        b1 = make_building("CaseSensitive")
-        b2 = make_building("casesensitive")
-        db_session.add_all([b1, b2])
-        await db_session.flush()  # Should NOT raise — different strings
+        await db_session.flush()
 
         assert b1.id != b2.id
+
+    async def test_building_oc_plan_number(self, db_session: AsyncSession):
+        """Building accepts oc_plan_number attribute."""
+        b = Building(name="OC Plan Bldg", manager_email="m@test.com", oc_plan_number="OC123456")
+        db_session.add(b)
+        await db_session.flush()
+        assert b.oc_plan_number == "OC123456"
 
     # --- Boundary values ---
 

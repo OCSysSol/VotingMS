@@ -684,7 +684,13 @@ export const adminHandlers = [
     const name = url.searchParams.get("name");
     const isArchivedParam = url.searchParams.get("is_archived");
     let filtered = ADMIN_BUILDINGS;
-    if (name) filtered = filtered.filter((b) => b.name.toLowerCase().includes(name.toLowerCase()));
+    if (name) {
+      filtered = filtered.filter(
+        (b) =>
+          b.name.toLowerCase().includes(name.toLowerCase()) ||
+          (b.oc_plan_number ? b.oc_plan_number.toLowerCase().includes(name.toLowerCase()) : false)
+      );
+    }
     if (isArchivedParam !== null) {
       const isArchived = isArchivedParam === "true";
       filtered = filtered.filter((b) => b.is_archived === isArchived);
@@ -696,6 +702,8 @@ export const adminHandlers = [
     const url = new URL(request.url);
     const isArchivedParam = url.searchParams.get("is_archived");
     const nameParam = url.searchParams.get("name");
+    const sortByParam = url.searchParams.get("sort_by");
+    const sortDirParam = url.searchParams.get("sort_dir") ?? "desc";
     const limitParam = url.searchParams.get("limit");
     const offsetParam = url.searchParams.get("offset");
     let filtered = ADMIN_BUILDINGS;
@@ -704,7 +712,18 @@ export const adminHandlers = [
       filtered = filtered.filter((b) => b.is_archived === isArchived);
     }
     if (nameParam) {
-      filtered = filtered.filter((b) => b.name.toLowerCase().includes(nameParam.toLowerCase()));
+      filtered = filtered.filter(
+        (b) =>
+          b.name.toLowerCase().includes(nameParam.toLowerCase()) ||
+          (b.oc_plan_number ? b.oc_plan_number.toLowerCase().includes(nameParam.toLowerCase()) : false)
+      );
+    }
+    if (sortByParam === "oc_plan_number") {
+      filtered = [...filtered].sort((a, b) => {
+        const valA = a.oc_plan_number ?? "";
+        const valB = b.oc_plan_number ?? "";
+        return sortDirParam === "asc" ? valA.localeCompare(valB) : valB.localeCompare(valA);
+      });
     }
     const offset = offsetParam !== null ? parseInt(offsetParam, 10) : 0;
     const limit = limitParam !== null ? parseInt(limitParam, 10) : filtered.length;
@@ -720,11 +739,12 @@ export const adminHandlers = [
   }),
 
   http.post(`${BASE}/api/admin/buildings`, async ({ request }) => {
-    const body = await request.json() as { name?: string; manager_email?: string };
+    const body = await request.json() as { name?: string; manager_email?: string; oc_plan_number?: string | null };
     const newBuilding: Building = {
       id: "b-new",
       name: body?.name ?? "New Building",
       manager_email: body?.manager_email ?? "mgr@example.com",
+      oc_plan_number: body?.oc_plan_number ?? null,
       is_archived: false,
       unarchive_count: 0,
       created_at: "2024-03-01T00:00:00Z",
@@ -745,11 +765,12 @@ export const adminHandlers = [
     if (!building) {
       return HttpResponse.json({ detail: "Building not found" }, { status: 404 });
     }
-    const body = await request.json() as { name?: string; manager_email?: string };
+    const body = await request.json() as { name?: string; manager_email?: string; oc_plan_number?: string | null };
     const updated: Building = {
       ...building,
       name: body?.name ?? building.name,
       manager_email: body?.manager_email ?? building.manager_email,
+      oc_plan_number: body?.oc_plan_number !== undefined ? body.oc_plan_number : building.oc_plan_number,
     };
     return HttpResponse.json(updated);
   }),

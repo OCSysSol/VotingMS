@@ -495,6 +495,7 @@ async def verify_auth(
         # even before the auto-close job has run (US-CD03).
         agm_status=get_effective_status(meeting).value,
         building_name=building.name,
+        oc_plan_number=building.oc_plan_number,
         meeting_title=meeting.title,
         unvoted_visible_count=unvoted_visible_count,
         # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat. (RR5-02)
@@ -605,6 +606,7 @@ async def restore_session(
         voter_email=voter_email,
         agm_status=get_effective_status(meeting).value,
         building_name=building.name,
+        oc_plan_number=building.oc_plan_number,
         meeting_title=meeting.title,
         unvoted_visible_count=unvoted_visible_count,
         # Deprecated: token is now delivered via HttpOnly cookie only. Field retained for backward compat. (RR5-02)

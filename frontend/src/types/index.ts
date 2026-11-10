@@ -10,6 +10,7 @@ export type FinancialPosition = "normal" | "in_arrear";
 export interface Building {
   id: string;
   name: string;
+  oc_plan_number?: string | null;
   manager_email: string;
   is_archived: boolean;
   unarchive_count: number;
@@ -26,7 +27,7 @@ export interface LotOwnerEmailEntry {
 
 export interface Person {
   id: string;
-  email: string;
+  email: string | null;
   given_name: string | null;
   surname: string | null;
   phone_number: string | null;

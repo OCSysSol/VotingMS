@@ -14,7 +14,7 @@ import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, case, delete, func, literal, select
+from sqlalchemy import Integer, case, delete, func, literal, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -91,6 +91,33 @@ def _parse_name(raw: str) -> tuple[str | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
+def _match_building_for_import(
+    pool: list[Building],
+    building_name: str,
+    oc_plan_number: str | None,
+) -> Building | None:
+    """Match building by oc_plan_number first (if provided) else by name,
+    or if oc_plan_number is None, match by name where oc_plan_number is None."""
+    if oc_plan_number:
+        # Match by oc_plan_number first (case-insensitive)
+        matched = next(
+            (b for b in pool if b.oc_plan_number and b.oc_plan_number.lower() == oc_plan_number.lower()),
+            None,
+        )
+        if matched is not None:
+            return matched
+        # If no match by oc_plan_number, match by building_name (case-insensitive)
+        return next(
+            (b for b in pool if b.name.lower() == building_name.lower()),
+            None,
+        )
+    # If oc_plan_number is absent/blank, match by building_name where oc_plan_number is NULL
+    return next(
+        (b for b in pool if b.name.lower() == building_name.lower() and b.oc_plan_number is None),
+        None,
+    )
+
+
 async def import_buildings_from_csv(
     content: bytes,
     db: AsyncSession,
@@ -115,46 +142,68 @@ async def import_buildings_from_csv(
             detail=f"Missing required CSV headers: {sorted(missing)}",
         )
 
+    has_oc_col = "oc_plan_number" in fieldnames_lower
     rows = list(reader)
 
     # Validate all rows first, collect errors
     errors: list[str] = []
+    parsed: list[dict] = []
     for i, row in enumerate(rows, start=2):  # row 1 is header
         building_name = row.get("building_name", "").strip()
         manager_email = row.get("manager_email", "").strip()
+        raw_oc = row.get("oc_plan_number", "").strip() if has_oc_col else ""
+        oc_plan_number = raw_oc or None
         if not building_name:
             errors.append(f"Row {i}: building_name is empty")
         if not manager_email:
             errors.append(f"Row {i}: manager_email is empty")
+        parsed.append({
+            "building_name": building_name,
+            "manager_email": manager_email,
+            "oc_plan_number": oc_plan_number,
+        })
 
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
-    # Bulk-load all matching buildings in a single query (N+1 fix).
-    all_names_lower = [row["building_name"].strip().lower() for row in rows]
+    # Bulk-load all candidate buildings in a single query (N+1 fix).
+    all_names_lower = [r["building_name"].lower() for r in parsed]
+    row_oc_plans = [
+        r["oc_plan_number"].lower()
+        for r in parsed
+        if r["oc_plan_number"]
+    ]
+    conditions = [func.lower(Building.name).in_(all_names_lower)]
+    if row_oc_plans:
+        conditions.append(func.lower(Building.oc_plan_number).in_(row_oc_plans))
     bulk_result = await db.execute(
-        select(Building).where(func.lower(Building.name).in_(all_names_lower))
+        select(Building).where(or_(*conditions))
     )
-    buildings_by_lower_name: dict[str, Building] = {
-        b.name.lower(): b for b in bulk_result.scalars().all()
-    }
+    pool: list[Building] = list(bulk_result.scalars().all())
 
     created = 0
     updated = 0
 
     try:
-        for row in rows:
-            building_name = row["building_name"].strip()
-            manager_email = row["manager_email"].strip()
+        for r in parsed:
+            building_name = r["building_name"]
+            manager_email = r["manager_email"]
+            oc_plan_number = r["oc_plan_number"]
 
-            existing = buildings_by_lower_name.get(building_name.lower())
+            existing = _match_building_for_import(pool, building_name, oc_plan_number)
 
             if existing is None:
-                new_building = Building(name=building_name, manager_email=manager_email)
+                new_building = Building(
+                    name=building_name,
+                    manager_email=manager_email,
+                    oc_plan_number=oc_plan_number,
+                )
                 db.add(new_building)
+                pool.append(new_building)
                 created += 1
             else:
                 existing.manager_email = manager_email
+                existing.oc_plan_number = oc_plan_number
                 updated += 1
 
         await db.commit()
@@ -204,8 +253,10 @@ async def import_buildings_from_excel(
             detail=f"Missing required Excel headers: {sorted(missing)}",
         )
 
+    has_oc_col = "oc_plan_number" in headers
     building_name_idx = headers.index("building_name")
     manager_email_idx = headers.index("manager_email")
+    oc_plan_number_idx = headers.index("oc_plan_number") if has_oc_col else -1
 
     data_rows = list(rows_iter)
     wb.close()
@@ -221,12 +272,14 @@ async def import_buildings_from_excel(
         row_num += 1
 
         def _cell(idx: int) -> str:
-            if idx < len(raw_row) and raw_row[idx] is not None:
+            if idx >= 0 and idx < len(raw_row) and raw_row[idx] is not None:
                 return str(raw_row[idx]).strip()
             return ""
 
         building_name = _cell(building_name_idx)
         manager_email = _cell(manager_email_idx)
+        raw_oc = _cell(oc_plan_number_idx) if has_oc_col else ""
+        oc_plan_number = raw_oc or None
 
         row_errors = []
         if not building_name:
@@ -237,19 +290,29 @@ async def import_buildings_from_excel(
         if row_errors:
             errors.extend(row_errors)
         else:
-            parsed.append({"building_name": building_name, "manager_email": manager_email})
+            parsed.append({
+                "building_name": building_name,
+                "manager_email": manager_email,
+                "oc_plan_number": oc_plan_number,
+            })
 
     if errors:
         raise HTTPException(status_code=422, detail=errors)
 
-    # Bulk-load all matching buildings in a single query (N+1 fix).
+    # Bulk-load all candidate buildings in a single query (N+1 fix).
     all_names_lower = [r["building_name"].lower() for r in parsed]
+    row_oc_plans = [
+        r["oc_plan_number"].lower()
+        for r in parsed
+        if r["oc_plan_number"]
+    ]
+    conditions = [func.lower(Building.name).in_(all_names_lower)]
+    if row_oc_plans:
+        conditions.append(func.lower(Building.oc_plan_number).in_(row_oc_plans))
     bulk_result = await db.execute(
-        select(Building).where(func.lower(Building.name).in_(all_names_lower))
+        select(Building).where(or_(*conditions))
     )
-    buildings_by_lower_name: dict[str, Building] = {
-        b.name.lower(): b for b in bulk_result.scalars().all()
-    }
+    pool: list[Building] = list(bulk_result.scalars().all())
 
     created = 0
     updated = 0
@@ -258,15 +321,22 @@ async def import_buildings_from_excel(
         for row_data in parsed:
             building_name = row_data["building_name"]
             manager_email = row_data["manager_email"]
+            oc_plan_number = row_data["oc_plan_number"]
 
-            existing = buildings_by_lower_name.get(building_name.lower())
+            existing = _match_building_for_import(pool, building_name, oc_plan_number)
 
             if existing is None:
-                new_building = Building(name=building_name, manager_email=manager_email)
+                new_building = Building(
+                    name=building_name,
+                    manager_email=manager_email,
+                    oc_plan_number=oc_plan_number,
+                )
                 db.add(new_building)
+                pool.append(new_building)
                 created += 1
             else:
                 existing.manager_email = manager_email
+                existing.oc_plan_number = oc_plan_number
                 updated += 1
 
         await db.commit()
@@ -416,7 +486,12 @@ async def unarchive_building(building_id: uuid.UUID, db: AsyncSession) -> Buildi
 # ---------------------------------------------------------------------------
 
 
-async def create_building(name: str, manager_email: str, db: AsyncSession) -> Building:
+async def create_building(
+    name: str,
+    manager_email: str,
+    db: AsyncSession,
+    oc_plan_number: str | None = None,
+) -> Building:
     # Enforce subscription building limit (if set).
     sub_result = await db.execute(select(TenantSettings).where(TenantSettings.id == 1))
     settings = sub_result.scalar_one_or_none()
@@ -433,25 +508,22 @@ async def create_building(name: str, manager_email: str, db: AsyncSession) -> Bu
                 ),
             )
 
-    result = await db.execute(
-        select(Building).where(func.lower(Building.name) == func.lower(name))
+    building = Building(
+        name=name,
+        manager_email=manager_email,
+        oc_plan_number=oc_plan_number.strip() if oc_plan_number and oc_plan_number.strip() else None,
     )
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(
-            status_code=409,
-            detail=f"A building named '{name}' already exists",
-        )
-    building = Building(name=name, manager_email=manager_email)
     db.add(building)
     await db.commit()
     await db.refresh(building)
     return building
 
 
-_BUILDINGS_TEXT_SORT_COLUMNS = {"name", "manager_email"}
+_BUILDINGS_TEXT_SORT_COLUMNS = {"name", "manager_email", "oc_plan_number"}
 _BUILDINGS_SORT_COLUMNS = {
     "name": Building.name,
     "manager_email": Building.manager_email,
+    "oc_plan_number": Building.oc_plan_number,
     "created_at": Building.created_at,
 }
 
@@ -477,7 +549,13 @@ async def list_buildings(
 ) -> list[Building]:
     q = select(Building).order_by(_buildings_order_clause(sort_by, sort_dir))
     if name is not None:
-        q = q.where(func.lower(Building.name).contains(name.lower()))
+        term = name.lower()
+        q = q.where(
+            or_(
+                func.lower(Building.name).contains(term),
+                func.lower(func.coalesce(Building.oc_plan_number, "")).contains(term),
+            )
+        )
     if is_archived is not None:
         q = q.where(Building.is_archived == is_archived)
     result = await db.execute(q.offset(offset).limit(limit))
@@ -492,7 +570,13 @@ async def count_buildings(
     """Return total count of buildings matching the optional name and is_archived filters."""
     q = select(func.count()).select_from(Building)
     if name is not None:
-        q = q.where(func.lower(Building.name).contains(name.lower()))
+        term = name.lower()
+        q = q.where(
+            or_(
+                func.lower(Building.name).contains(term),
+                func.lower(func.coalesce(Building.oc_plan_number, "")).contains(term),
+            )
+        )
     if is_archived is not None:
         q = q.where(Building.is_archived == is_archived)
     result = await db.execute(q)
@@ -567,12 +651,14 @@ async def update_building(
     data: BuildingUpdate,
     db: AsyncSession,
 ) -> Building:
-    """Update name and/or manager_email on an existing building."""
+    """Update name, manager_email, and/or oc_plan_number on an existing building."""
     building = await get_building_or_404(building_id, db)
     if data.name is not None:
         building.name = data.name
     if data.manager_email is not None:
         building.manager_email = data.manager_email
+    if "oc_plan_number" in data.model_fields_set:
+        building.oc_plan_number = data.oc_plan_number
     await db.commit()
     await db.refresh(building)
     return building
@@ -1067,6 +1153,18 @@ async def import_lot_owners_from_csv(
                                 "phone_number": phone_number,
                             }
                         )
+            # Owner with a name/phone but no email: still create a person (email=None).
+            if not any(a.strip() for a in email.split(";")) and (
+                row_given_name or row_surname or phone_number
+            ):
+                lot_data[lot_number]["email_entries"].append(
+                    {
+                        "email": None,
+                        "given_name": row_given_name,
+                        "surname": row_surname,
+                        "phone_number": phone_number,
+                    }
+                )
 
     # Check for duplicate lot numbers and report them with row details (RR3-31)
     for lot_num, row_nums in lot_number_rows.items():
@@ -1239,6 +1337,18 @@ async def import_lot_owners_from_excel(
                                 "phone_number": phone_number,
                             }
                         )
+            # Owner with a name/phone but no email: still create a person (email=None).
+            if not any(a.strip() for a in email.split(";")) and (
+                row_given_name or row_surname or phone_number
+            ):
+                lot_data[lot_number]["email_entries"].append(
+                    {
+                        "email": None,
+                        "given_name": row_given_name,
+                        "surname": row_surname,
+                        "phone_number": phone_number,
+                    }
+                )
 
     # Check for duplicate lot numbers and report them with row details (RR3-31)
     for lot_num, row_nums in lot_number_rows.items():
@@ -1326,6 +1436,8 @@ async def _upsert_lot_owners(
             delete(lot_persons).where(lot_persons.c.lot_id.in_(all_lot_ids))
         )
 
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
     # Step 3: Rebuild lot_persons from CSV rows
     total_emails = 0
     for lot_number, data in lot_data.items():
@@ -1340,13 +1452,26 @@ async def _upsert_lot_owners(
                     db,
                 )
                 # on_conflict_do_nothing handles duplicate emails on same lot row
-                from sqlalchemy.dialects.postgresql import insert as pg_insert
                 await db.execute(
                     pg_insert(lot_persons)
                     .values(lot_id=lo.id, person_id=person.id)
                     .on_conflict_do_nothing()
                 )
                 total_emails += 1
+            else:
+                # No email: create a standalone person (identified by UUID) so the
+                # name/phone is preserved. Stale ones are removed by step 4 below.
+                person = Person(
+                    email=None,
+                    given_name=entry.get("given_name"),
+                    surname=entry.get("surname"),
+                    phone_number=entry.get("phone_number"),
+                )
+                db.add(person)
+                await db.flush()
+                await db.execute(
+                    pg_insert(lot_persons).values(lot_id=lo.id, person_id=person.id)
+                )
 
     # Step 4: Delete orphaned persons — persons no longer linked to any lot or proxy.
     # After rebuilding lot_persons for this building, any person who has no remaining

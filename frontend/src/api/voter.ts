@@ -4,6 +4,7 @@ import type { GeneralMeetingStatus, MotionType, VoteChoice } from "../types";
 export interface BuildingOut {
   id: string;
   name: string;
+  oc_plan_number?: string | null;
 }
 
 export interface GeneralMeetingOut {
@@ -21,6 +22,7 @@ export interface GeneralMeetingWithBuildingOut {
   meeting_at: string;
   voting_closes_at: string;
   building_name: string;
+  oc_plan_number?: string | null;
 }
 
 export interface OtpRequestBody {
@@ -56,6 +58,7 @@ export interface AuthVerifyResponse {
   voter_email: string;
   agm_status: string;
   building_name: string;
+  oc_plan_number?: string | null;
   meeting_title: string;
   unvoted_visible_count: number;
   session_token: string;
@@ -148,6 +151,7 @@ export interface MyBallotResponse {
   voter_email: string;
   meeting_title: string;
   building_name: string;
+  oc_plan_number?: string | null;
   submitted_lots: LotBallotSummary[];
   remaining_lot_owner_ids: string[];
 }

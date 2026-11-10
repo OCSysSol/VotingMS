@@ -13,6 +13,7 @@ This document covers all building management, lot owner management, CSV/Excel im
 - Support financial positions (in-arrear/normal) per lot, bulk-importable and editable in the admin UI
 - Support proxy nominations per lot, bulk-importable and editable in the admin UI
 - Store person identity (name, email, phone) once per real-world person, shared across all lots they own or proxy for
+- Support `oc_plan_number` as an entity attribute on buildings alongside the primary technical UUID, enabling multiple distinct OC plans to share the same building name (e.g. multi-tier or staged strata schemes)
 
 ---
 
@@ -740,9 +741,53 @@ This document covers all building management, lot owner management, CSV/Excel im
 
 ---
 
+### US-BLD-04: Elevate OC Plan as primary entity with building name as descriptive attribute
+
+**Status:** ✅ Implemented
+
+**Description:** As a strata manager / meeting host, I want OC Plan numbers to be tracked as first-class attributes on buildings while retaining technical UUIDs, and allow multiple OC plans to share the same building name (e.g. staged developments or multi-tier strata schemes), so that the system accurately reflects real-world strata structures.
+
+**Background:** Previously, `buildings.name` was enforced as globally unique via a database constraint (`uq_buildings_name`), and buildings lacked an explicit OC plan number attribute. In real-world strata management, multiple distinct Owners Corporations (OC plans) frequently share the same physical building complex or estate name (for example, "Sandridge Bay Towers - OC1", "Sandridge Bay Towers - OC2", or staged plans). Furthermore, OC plan numbers are the official legal designation for strata schemes, while building names are descriptive. This story introduces `oc_plan_number` as an indexed nullable attribute, removes the unique constraint on `buildings.name`, updates the admin UI to display and manage both attributes distinctly, enables filtering/search across both attributes, and surfaces the combined label in the voter flow.
+
+**Acceptance Criteria:**
+- [x] Database schema adds `oc_plan_number` column (`VARCHAR(100)`, nullable, indexed via `ix_buildings_oc_plan_number`) to `buildings` table.
+- [x] Technical identifier remains `buildings.id` (`UUID PK`) to avoid conflicts and preserve relational integrity across meetings, lots, ballots, and snapshots.
+- [x] Unique constraint on `buildings.name` (`uq_buildings_name`) is dropped. Multiple buildings/OC plans can have the same name.
+- [x] No unique constraint on `oc_plan_number` (duplicates/variations tolerated if real-world records require).
+- [x] Existing building records retain `oc_plan_number = NULL` (no data backfill required).
+- [x] Backend `BuildingOut` (admin and public) includes `oc_plan_number: str | None`.
+- [x] Backend `BuildingCreate` accepts `name: str` (required), `manager_email: str` (required), and optional `oc_plan_number: str | None = None`.
+- [x] Backend `BuildingCreate` no longer rejects duplicate building names with 409 Conflict.
+- [x] Backend `BuildingUpdate` accepts optional `name: str | None`, `manager_email: str | None`, and `oc_plan_number: str | None`.
+- [x] Backend `list_buildings` and `count_buildings` accept search filtering across both `name` and `oc_plan_number` (case-insensitive substring match).
+- [x] Backend `list_buildings` supports sorting by `oc_plan_number` (`asc` and `desc`).
+- [x] Bulk import (`POST /api/admin/buildings/import`) accepts `.csv` and `.xlsx`/`.xls` with optional `oc_plan_number` column:
+  - If `oc_plan_number` is provided in the row, matches existing records by `oc_plan_number` (case-insensitive) first; if no match, matches by `building_name`.
+  - If `oc_plan_number` is absent/blank, matches existing records by `building_name` where `oc_plan_number` is NULL.
+  - New buildings are created when no match is found; existing records update `manager_email` and `oc_plan_number`.
+- [x] Admin Buildings table (`BuildingTable`) displays separate columns for "OC Plan" and "Building Name":
+  - When `oc_plan_number` is null, empty, or whitespace, renders a dash (`—`).
+  - Supports sorting on both OC Plan and Building Name columns.
+- [x] Admin "+ New Building" modal form includes an optional "OC Plan Number" text input alongside "Building Name" and "Manager Email".
+- [x] Admin "Edit Building" modal form includes an "OC Plan Number" text input pre-filled with current value, allowing adding, updating, or clearing the OC plan number.
+- [x] Admin building search bar filters buildings matching either building name or OC plan number.
+- [x] Admin Building Detail page header displays building name and OC plan number (when set).
+- [x] Voter flow public endpoints return `oc_plan_number`:
+  - `GET /api/buildings` returns `BuildingOut` with `id`, `name`, `oc_plan_number`.
+  - `GET /api/general-meeting/{id}` returns `GeneralMeetingWithBuildingOut` with `building_name` and `oc_plan_number`.
+  - `GET /api/general-meeting/{id}/summary` returns `GeneralMeetingSummaryOut` with `building_name` and `oc_plan_number`.
+  - `POST /api/auth/verify` returns `AuthVerifyResponse` with `building_name` and `oc_plan_number`.
+  - `GET /api/general-meeting/{id}/my-ballot` returns `MyBallotResponse` with `building_name` and `oc_plan_number`.
+- [x] Voter Building Combobox (`VoterBuildingCombobox`) renders options as `${building_name} — ${oc_plan_number}` when `oc_plan_number` is present, or `${building_name}` when null/empty.
+- [x] Voter Building Combobox search filters match either building name or OC plan number.
+- [x] Voter meeting headers (VotingPage, ConfirmationPage, SummaryPage) display `${building_name} — ${oc_plan_number}` when `oc_plan_number` is present, or `${building_name}` when null/empty.
+- [x] Typecheck/lint passes; all unit, integration, and E2E tests pass at 100% coverage.
+
+---
+
 ## Functional Requirements
 
-- FR-1: A building record contains: name, manager email address, and associated lot owner records. Buildings can be created individually via a form or bulk-created/updated via CSV or Excel upload. Building names must be globally unique (case-insensitive).
+- FR-1: A building record contains: technical ID (UUID PK), name (string, non-unique), optional OC plan number (`oc_plan_number`, nullable VARCHAR, indexed), manager email address, and associated lot owner records. Buildings can be created individually via a form or bulk-created/updated via CSV or Excel upload. Multiple OC plans may share the same building name (the database unique constraint `uq_buildings_name` is removed).
 - FR-3: A lot owner record contains: building ID, lot number (string), unit entitlement (non-negative integer), financial position (`normal` | `in_arrear`). Lot number must be unique per building. Multiple lots may share the same person (email) within a building (multi-lot owners). Lot owner records cannot be deleted — only created or edited.
 - FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). Import performs upsert semantics (never deletes lots). Changes do not affect the weight snapshot of any already-open meeting.
 - FR-V2: `LotOwner.financial_position` is a non-nullable enum: `'normal'` | `'in_arrear'`. Default is `'normal'`. Can be updated via import, manual edit, or admin form.

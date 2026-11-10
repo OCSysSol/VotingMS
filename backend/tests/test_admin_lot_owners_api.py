@@ -652,6 +652,98 @@ class TestImportLotOwners:
         assert data["imported"] == 1
         assert data["emails"] == 0
 
+    async def test_import_name_without_email_saved(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """A row with a name but no email still creates a person with that name."""
+        csv_data = make_csv(
+            ["lot_number", "given_name", "surname", "email", "unit_entitlement"],
+            [["NAME-ONLY", "Jane", "Doe", "", "50"]],
+        )
+        for _ in range(2):  # re-import must not duplicate the email-less person
+            response = await client.post(
+                f"/api/admin/buildings/{building.id}/lot-owners/import",
+                files={"file": ("owners.csv", csv_data, "text/csv")},
+            )
+            assert response.status_code == 200
+            assert response.json()["emails"] == 0
+
+        owners = (
+            await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        ).json()
+        assert len(owners[0]["persons"]) == 1
+        person = owners[0]["persons"][0]
+        assert person["email"] is None
+        assert person["given_name"] == "Jane"
+        assert person["surname"] == "Doe"
+        assert owners[0]["emails"] == []
+
+    async def test_import_excel_name_without_email_saved(
+        self, client: AsyncClient, building: Building
+    ):
+        """Excel import: a row with a name but no email still creates a person."""
+        excel_data = make_excel(
+            ["Lot#", "Email", "UOE2", "Name"],
+            [["XL-NAME-ONLY", None, 40, "Carol White"]],
+        )
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={
+                "file": (
+                    "owners.xlsx",
+                    excel_data,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert response.status_code == 200
+        owners = (
+            await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        ).json()
+        person = owners[0]["persons"][0]
+        assert person["email"] is None
+        assert person["given_name"] == "Carol"
+        assert person["surname"] == "White"
+
+    async def test_null_email_person_api_paths(
+        self, client: AsyncClient, building: Building, db_session: AsyncSession
+    ):
+        """An email-less person is listed, excluded from search, editable and removable."""
+        csv_data = make_csv(
+            ["lot_number", "given_name", "surname", "email", "unit_entitlement"],
+            [["NULL-EMAIL", "Jane", "Doe", "", "50"]],
+        )
+        await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners/import",
+            files={"file": ("owners.csv", csv_data, "text/csv")},
+        )
+        owners = (
+            await client.get(f"/api/admin/buildings/{building.id}/lot-owners")
+        ).json()
+        lot_id = owners[0]["id"]
+        person_id = owners[0]["persons"][0]["id"]
+        assert owners[0]["owner_emails"][0]["email"] is None
+
+        # Prefix search never matches NULL emails
+        search = await client.get("/api/admin/persons/search", params={"q": "j"})
+        assert search.status_code == 200
+        assert person_id not in [p["id"] for p in search.json()]
+
+        # Name can be edited without supplying an email
+        patch = await client.patch(
+            f"/api/admin/persons/{person_id}", json={"given_name": "Janet"}
+        )
+        assert patch.status_code == 200
+        assert patch.json()["email"] is None
+        assert patch.json()["given_name"] == "Janet"
+
+        # Removing the email-less owner by id works
+        removed = await client.delete(
+            f"/api/admin/lot-owners/{lot_id}/owner-emails/{person_id}"
+        )
+        assert removed.status_code == 200
+        assert removed.json()["persons"] == []
+
     async def test_import_email_normalised_to_lowercase(
         self, client: AsyncClient, building: Building, db_session: AsyncSession
     ):

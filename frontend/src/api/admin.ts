@@ -287,7 +287,7 @@ export async function setLotOwnerProxy(
 
 export interface PersonOut {
   id: string;
-  email: string;
+  email: string | null;
   given_name: string | null;
   surname: string | null;
   phone_number: string | null;
@@ -348,11 +348,13 @@ export interface GeneralMeetingCreateRequest {
 export interface BuildingCreateRequest {
   name: string;
   manager_email: string;
+  oc_plan_number?: string | null;
 }
 
 export interface BuildingUpdateRequest {
   name?: string;
   manager_email?: string;
+  oc_plan_number?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +372,7 @@ export interface ListBuildingsParams {
   offset?: number;
   name?: string;
   is_archived?: boolean;
-  sort_by?: "name" | "manager_email" | "created_at" | string;
+  sort_by?: "name" | "manager_email" | "created_at" | "oc_plan_number" | string;
   sort_dir?: "asc" | "desc";
 }
 

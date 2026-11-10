@@ -159,7 +159,11 @@ export function ConfirmationPage() {
         <div className="vote-meta">
           <div className="vote-meta__row">
             <span className="vote-meta__label">Building</span>
-            <span className="vote-meta__value">{data.building_name}</span>
+            <span className="vote-meta__value">
+              {data.oc_plan_number && data.oc_plan_number.trim()
+                ? `${data.building_name} — ${data.oc_plan_number.trim()}`
+                : data.building_name}
+            </span>
           </div>
           <div className="vote-meta__row">
             <span className="vote-meta__label">Meeting</span>

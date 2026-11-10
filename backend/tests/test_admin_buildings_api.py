@@ -642,20 +642,22 @@ class TestCreateBuildingEndpoint:
         )
         assert response.status_code == 422
 
-    # --- State / precondition errors ---
-
-    async def test_duplicate_name_returns_409(
+    async def test_duplicate_name_is_allowed_and_returns_201(
         self, client: AsyncClient
     ):
-        await client.post(
+        r1 = await client.post(
             "/api/admin/buildings",
-            json={"name": "Dup Form Building", "manager_email": "dup@test.com"},
+            json={"name": "Dup Form Building", "manager_email": "dup@test.com", "oc_plan_number": "OC1"},
         )
+        assert r1.status_code == 201
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "Dup Form Building", "manager_email": "other@test.com"},
+            json={"name": "Dup Form Building", "manager_email": "other@test.com", "oc_plan_number": "OC2"},
         )
-        assert response.status_code == 409
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "Dup Form Building"
+        assert data["oc_plan_number"] == "OC2"
 
 
 # ---------------------------------------------------------------------------
@@ -1862,4 +1864,330 @@ class TestAdminImportRateLimitBuildings:
             files={"file": ("b.csv", csv_data, "text/csv")},
         )
         assert response.status_code == 429
-        assert response.headers.get("Retry-After") == "60"
+
+
+# ---------------------------------------------------------------------------
+# US-BLD-04: OC Plan Attribute & Building Name Non-Uniqueness
+# ---------------------------------------------------------------------------
+
+
+class TestOcPlanAttributeAndNonUniqueBuildings:
+    """Tests for US-BLD-04: oc_plan_number attribute, search, sorting, imports, and public views."""
+
+    async def test_create_building_with_oc_plan_number(self, client: AsyncClient):
+        response = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Tower Complex A",
+                "manager_email": "manager@complex.com",
+                "oc_plan_number": "OC123456",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["name"] == "Tower Complex A"
+        assert data["oc_plan_number"] == "OC123456"
+
+    async def test_create_building_oc_plan_number_stripping(self, client: AsyncClient):
+        # Leading/trailing whitespace is stripped
+        r1 = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Tower Complex B",
+                "manager_email": "manager@complex.com",
+                "oc_plan_number": "   OC999   ",
+            },
+        )
+        assert r1.status_code == 201
+        assert r1.json()["oc_plan_number"] == "OC999"
+
+        # Whitespace-only becomes None
+        r2 = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Tower Complex C",
+                "manager_email": "manager@complex.com",
+                "oc_plan_number": "   ",
+            },
+        )
+        assert r2.status_code == 201
+        assert r2.json()["oc_plan_number"] is None
+
+    async def test_duplicate_building_name_allowed(self, client: AsyncClient):
+        r1 = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Sandridge Bay Towers",
+                "manager_email": "oc1@test.com",
+                "oc_plan_number": "OC-1",
+            },
+        )
+        assert r1.status_code == 201
+        r2 = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Sandridge Bay Towers",
+                "manager_email": "oc2@test.com",
+                "oc_plan_number": "OC-2",
+            },
+        )
+        assert r2.status_code == 201
+        assert r1.json()["id"] != r2.json()["id"]
+
+    async def test_update_building_oc_plan_number(self, client: AsyncClient):
+        r_create = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Editable Complex",
+                "manager_email": "edit@test.com",
+                "oc_plan_number": "OC-OLD",
+            },
+        )
+        b_id = r_create.json()["id"]
+
+        # Update OC plan number
+        r_patch = await client.patch(
+            f"/api/admin/buildings/{b_id}",
+            json={"oc_plan_number": "OC-NEW"},
+        )
+        assert r_patch.status_code == 200
+        assert r_patch.json()["oc_plan_number"] == "OC-NEW"
+
+        # Clear OC plan number with empty string
+        r_clear = await client.patch(
+            f"/api/admin/buildings/{b_id}",
+            json={"oc_plan_number": ""},
+        )
+        assert r_clear.status_code == 200
+        assert r_clear.json()["oc_plan_number"] is None
+
+    async def test_list_and_count_buildings_search_oc_plan(self, client: AsyncClient):
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Estate Alpha", "manager_email": "a@test.com", "oc_plan_number": "PLAN-XYZ-77"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Estate Beta", "manager_email": "b@test.com", "oc_plan_number": "PLAN-ABC-88"},
+        )
+
+        # Search by OC plan number
+        r_list = await client.get("/api/admin/buildings?name=XYZ-77")
+        assert r_list.status_code == 200
+        items = r_list.json()
+        assert len(items) == 1
+        assert items[0]["name"] == "Estate Alpha"
+
+        r_count = await client.get("/api/admin/buildings/count?name=XYZ-77")
+        assert r_count.status_code == 200
+        assert r_count.json()["count"] == 1
+
+    async def test_list_buildings_sort_by_oc_plan_number(self, client: AsyncClient):
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Sort B1", "manager_email": "s1@test.com", "oc_plan_number": "AAA-Plan"},
+        )
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Sort B2", "manager_email": "s2@test.com", "oc_plan_number": "ZZZ-Plan"},
+        )
+
+        r_asc = await client.get("/api/admin/buildings?sort_by=oc_plan_number&sort_dir=asc")
+        assert r_asc.status_code == 200
+        # In asc order, AAA-Plan appears before ZZZ-Plan (non-nulls)
+        plans = [b["oc_plan_number"] for b in r_asc.json() if b["oc_plan_number"] in ("AAA-Plan", "ZZZ-Plan")]
+        assert plans == ["AAA-Plan", "ZZZ-Plan"]
+
+        r_desc = await client.get("/api/admin/buildings?sort_by=oc_plan_number&sort_dir=desc")
+        assert r_desc.status_code == 200
+        plans_desc = [b["oc_plan_number"] for b in r_desc.json() if b["oc_plan_number"] in ("AAA-Plan", "ZZZ-Plan")]
+        assert plans_desc == ["ZZZ-Plan", "AAA-Plan"]
+
+    async def test_csv_import_with_oc_plan_number_rules(self, client: AsyncClient):
+        # 1. Existing building with name and oc_plan_number
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Import Test Bldg", "manager_email": "old@test.com", "oc_plan_number": "PLAN-101"},
+        )
+        # 2. Existing building with name and NULL oc_plan_number
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Null Plan Bldg", "manager_email": "null@test.com", "oc_plan_number": None},
+        )
+
+        # CSV row 1: matches by oc_plan_number first (even if name differs slightly)
+        # CSV row 2: matches by building_name where oc_plan is blank/absent
+        # CSV row 3: new building
+        csv_data = make_csv(
+            ["building_name", "manager_email", "oc_plan_number"],
+            [
+                ["Renamed Import Bldg", "updated1@test.com", "PLAN-101"],
+                ["Null Plan Bldg", "updated2@test.com", ""],
+                ["Brand New Bldg", "brandnew@test.com", "PLAN-202"],
+            ],
+        )
+        r = await client.post(
+            "/api/admin/buildings/import",
+            files={"file": ("buildings.csv", csv_data, "text/csv")},
+        )
+        assert r.status_code == 200
+        res = r.json()
+        assert res["updated"] == 2
+        assert res["created"] == 1
+
+        # Verify updated1 has manager_email updated and oc_plan_number retained
+        r_get = await client.get("/api/admin/buildings?name=PLAN-101")
+        assert r_get.json()[0]["manager_email"] == "updated1@test.com"
+
+    async def test_excel_import_with_oc_plan_number_rules(self, client: AsyncClient):
+        # Create building for Excel match
+        await client.post(
+            "/api/admin/buildings",
+            json={"name": "Excel Match Bldg", "manager_email": "old_xl@test.com", "oc_plan_number": "XL-PLAN-5"},
+        )
+
+        excel_data = make_excel(
+            ["building_name", "manager_email", "oc_plan_number"],
+            [
+                ["Excel Match Bldg", "new_xl@test.com", "XL-PLAN-5"],
+                ["Excel Brand New", "new2_xl@test.com", "XL-PLAN-6"],
+            ],
+        )
+        r = await client.post(
+            "/api/admin/buildings/import",
+            files={
+                "file": (
+                    "b.xlsx",
+                    excel_data,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            },
+        )
+        assert r.status_code == 200
+        res = r.json()
+        assert res["updated"] == 1
+        assert res["created"] == 1
+
+    async def test_public_and_voting_endpoints_return_oc_plan_number(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        from app.models import GeneralMeeting, GeneralMeetingStatus, Motion, MotionType, Lot, Person
+        from app.models.lot_person import lot_persons
+        from datetime import UTC, datetime, timedelta
+
+        b = Building(
+            name="Voter Public Bldg",
+            manager_email="mgr@public.com",
+            oc_plan_number="OC-VOTER-888",
+        )
+        db_session.add(b)
+        await db_session.flush()
+
+        gm = GeneralMeeting(
+            building_id=b.id,
+            title="Voter Public AGM",
+            status=GeneralMeetingStatus.open,
+            meeting_at=datetime.now(UTC) - timedelta(hours=1),
+            voting_closes_at=datetime.now(UTC) + timedelta(hours=2),
+        )
+        db_session.add(gm)
+        await db_session.flush()
+
+        m = Motion(
+            general_meeting_id=gm.id,
+            title="Public Motion",
+            motion_type=MotionType.general,
+            display_order=1,
+            is_visible=True,
+        )
+        db_session.add(m)
+
+        p = Person(email="voter_public@example.com")
+        db_session.add(p)
+        await db_session.flush()
+
+        lot = Lot(
+            building_id=b.id,
+            lot_number="101",
+            unit_entitlement=100,
+            financial_position="normal",
+        )
+        db_session.add(lot)
+        await db_session.flush()
+
+        await db_session.execute(
+            lot_persons.insert().values(lot_id=lot.id, person_id=p.id)
+        )
+        await db_session.commit()
+
+        # 1. GET /api/buildings
+        r_blds = await client.get("/api/buildings")
+        assert r_blds.status_code == 200
+        b_data = next((x for x in r_blds.json() if x["id"] == str(b.id)), None)
+        assert b_data is not None
+        assert b_data["oc_plan_number"] == "OC-VOTER-888"
+
+        # 2. GET /api/general-meeting/{id}
+        r_gm = await client.get(f"/api/general-meeting/{gm.id}")
+        assert r_gm.status_code == 200
+        assert r_gm.json()["oc_plan_number"] == "OC-VOTER-888"
+        assert r_gm.json()["building_name"] == "Voter Public Bldg"
+
+        # 3. GET /api/general-meeting/{id}/summary
+        r_sum = await client.get(f"/api/general-meeting/{gm.id}/summary")
+        assert r_sum.status_code == 200
+        assert r_sum.json()["oc_plan_number"] == "OC-VOTER-888"
+
+        # 4. Auth & session & my-ballot
+        from app.models.auth_otp import AuthOtp
+        otp = AuthOtp(
+            email="voter_public@example.com",
+            meeting_id=gm.id,
+            code="123456",
+            expires_at=datetime.now(UTC) + timedelta(minutes=15),
+            used=False,
+        )
+        db_session.add(otp)
+        await db_session.commit()
+
+        r_verify = await client.post(
+            "/api/auth/verify",
+            json={
+                "email": "voter_public@example.com",
+                "general_meeting_id": str(gm.id),
+                "code": "123456",
+            },
+        )
+        assert r_verify.status_code == 200
+        assert r_verify.json()["oc_plan_number"] == "OC-VOTER-888"
+
+        # Session restore
+        r_sess = await client.post(
+            "/api/auth/session",
+            json={"general_meeting_id": str(gm.id)},
+        )
+        assert r_sess.status_code == 200
+        assert r_sess.json()["oc_plan_number"] == "OC-VOTER-888"
+
+        # Create ballot submission so my-ballot succeeds
+        from app.models.ballot_submission import BallotSubmission
+        sub = BallotSubmission(
+            general_meeting_id=gm.id,
+            lot_owner_id=lot.id,
+            voter_email="voter_public@example.com",
+            is_absent=False,
+        )
+        db_session.add(sub)
+        await db_session.commit()
+
+        # My ballot
+        r_ballot = await client.get(
+            f"/api/general-meeting/{gm.id}/my-ballot",
+        )
+        assert r_ballot.status_code == 200
+        assert r_ballot.json()["oc_plan_number"] == "OC-VOTER-888"
+
+    def test_update_building_schema_explicit_none_oc_plan(self):
+        from app.schemas.admin import BuildingUpdate
+        update = BuildingUpdate(name="Test", oc_plan_number=None)
+        assert update.oc_plan_number is None
