@@ -446,3 +446,13 @@ The following existing specs cover the Admin persona journey and include the Gen
 ## Schema Migration Required
 
 No — `voting_closes_at` already exists on the `general_meetings` table. No new columns, tables, or enum values are needed for this feature.
+
+## OC Plan lookup and meeting list UX
+
+Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the existing building/status/archive filters and pagination. No new schema is required.
+
+## Reopen meeting lifecycle
+
+Reopen only a stored `closed` meeting through an authenticated admin endpoint and require a new `voting_closes_at` strictly after now and `meeting_at`. In one transaction: set status to open, clear `closed_at`, set the new close time, delete only `BallotSubmission.is_absent=true` rows created by the close sweep, and reopen motions tagged as closed by the meeting. Preserve all submitted ballots and individually closed motions. Recompute multi-choice outcomes from retained submitted votes.
+
+Add `motions.closed_by_meeting BOOLEAN NOT NULL DEFAULT false`; meeting close marks this true only when it sets a previously-null `voting_closed_at`. Reopen clears the close timestamp only for those marked rows, then clears the marker. Backfill existing closed meetings by matching motion `voting_closed_at` to parent `closed_at`, where possible. This is the only required schema migration. UI should use an explicit confirmation and collect a new close time. Existing archive/unarchive list controls are already implemented and remain unaffected.

@@ -143,7 +143,7 @@ describe("AdminVoteEntryPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("shows all lots including app-submitted ones (app-submitted shown as disabled)", async () => {
+  it("shows all lots as selectable in step 1", async () => {
     // The ADMIN_MEETING_DETAIL has voter list entries without lot_number, so no lots are app-submitted.
     // All ADMIN_LOT_OWNERS should appear as enabled checkboxes.
     renderPanel();
@@ -156,9 +156,9 @@ describe("AdminVoteEntryPanel", () => {
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
   });
 
-  // New behaviour: app-submitted lots appear in step 1 with disabled checkbox and badge
-  it("app-submitted lots appear in step 1 with disabled checkbox and 'Already submitted' badge", async () => {
-    // Create a meeting where lot 1A has been app-submitted
+  it("allows selecting app-submitted lots and preserves their prior motion while enabling unvoted motions", async () => {
+    const user = userEvent.setup();
+    // Lot 1A has voted on Motion 1; Motion 2 remains available for admin entry.
     const meetingWithSubmittedLot: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
       motions: [
@@ -171,101 +171,38 @@ describe("AdminVoteEntryPanel", () => {
             ],
           },
         },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m2",
+          title: "Motion 2",
+          display_order: 2,
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+            yes: [],
+            no: [],
+            abstained: [],
+            absent: [],
+            not_eligible: [],
+          },
+        },
       ],
     };
     renderPanel({ meeting: meetingWithSubmittedLot });
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
-    // Lot 1A should appear but with a disabled checkbox
-    expect(screen.getByLabelText("Select lot 1A")).toBeDisabled();
-    // "Already submitted" badge should appear for lot 1A
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
-    // Lot 2B is not app-submitted — checkbox should be enabled
+    expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
+    expect(screen.getByText("Already voted online")).toBeInTheDocument();
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
-  });
-
-  it("app-submitted lots cannot be selected (disabled checkbox stays unchecked)", async () => {
-    const user = userEvent.setup();
-    const meetingWithSubmittedLot: GeneralMeetingDetail = {
-      ...ADMIN_MEETING_DETAIL,
-      motions: [
-        {
-          ...ADMIN_MEETING_DETAIL.motions[0],
-          voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
-            ],
-          },
-        },
-      ],
-    };
-    renderPanel({ meeting: meetingWithSubmittedLot });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
-    });
-    const checkbox1A = screen.getByLabelText("Select lot 1A");
-    expect(checkbox1A).toBeDisabled();
-    // Clicking a disabled checkbox must not change state
-    await user.click(checkbox1A);
-    expect(checkbox1A).not.toBeChecked();
-  });
-
-  // Fix 8: Already submitted badge in step 2 header for app-submitted lot
-  it("Fix 8: shows 'Already submitted' badge in step 2 header for already-submitted lot", async () => {
-    // Use a meeting where lot 2B is app-submitted so we can still select lot 1A and proceed
-    const meetingWithSubmittedLot2B: GeneralMeetingDetail = {
-      ...ADMIN_MEETING_DETAIL,
-      motions: [
-        {
-          ...ADMIN_MEETING_DETAIL.motions[0],
-          voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "owner2@example.com", lot_number: "2B", entitlement: 200, submitted_by_admin: false },
-            ],
-          },
-        },
-      ],
-    };
-    const user = userEvent.setup();
-    renderPanel({ meeting: meetingWithSubmittedLot2B });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
-    });
-    // Lot 2B should appear but be disabled with badge
-    expect(screen.getByLabelText("Select lot 2B")).toBeDisabled();
-    // Select lot 1A (not app-submitted) and proceed to step 2
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
-    // Step 2 does not include lot 2B (it was not selected) — no "Already submitted" badge in step 2
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
     });
-  });
-
-  it("shows 'All lots submitted' message when all lots are app-submitted", async () => {
-    // Create a meeting detail where all lots have non-admin submissions
-    const meetingWithAllSubmitted: GeneralMeetingDetail = {
-      ...ADMIN_MEETING_DETAIL,
-      motions: [
-        {
-          ...ADMIN_MEETING_DETAIL.motions[0],
-          voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "o@t.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
-              { voter_email: "o2@t.com", lot_number: "2B", entitlement: 200, submitted_by_admin: false },
-            ],
-          },
-        },
-      ],
-    };
-    renderPanel({ meeting: meetingWithAllSubmitted });
-    await waitFor(() => {
-      expect(screen.getByText("All lots have already submitted via the app.")).toBeInTheDocument();
-    });
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).not.toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" }));
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).toHaveAttribute("aria-pressed", "true");
   });
 
   // Step 2: Vote entry grid
@@ -1490,7 +1427,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
   });
 
   // Non-admin voter-submitted lot badge (AVE-RV-02 boundary: no badge when submitted_by_admin is false)
-  it("No 'Previously entered by admin' badge when lot has only non-admin voter_list entries", async () => {
+  it("keeps app-submitted lots selectable without marking them as prior admin entries", async () => {
     // Build a meeting where lot 1A appears in yes but with submitted_by_admin: false
     const meetingWithVoterSubmitted: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
@@ -1520,12 +1457,12 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
         </MemoryRouter>
       </QueryClientProvider>
     );
-    // 1A is app-submitted — it must be visible but disabled with "Already submitted" badge
+    // Prior app votes are preserved per motion, while admins can select the lot to enter other motions.
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Select lot 1A")).toBeDisabled();
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
+    expect(screen.getByText("Already voted online")).toBeInTheDocument();
     // 2B has no prior entry and should be enabled
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
     // No 'Previously entered by admin' badge — that's only for admin-submitted lots

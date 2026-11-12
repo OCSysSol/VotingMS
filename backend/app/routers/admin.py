@@ -40,6 +40,8 @@ from app.schemas.admin import (
     GeneralMeetingListItem,
     GeneralMeetingOut,
     GeneralMeetingStartOut,
+    GeneralMeetingReopenRequest,
+    GeneralMeetingReopenOut,
     BuildingArchiveOut,
     BuildingCreate,
     SubscriptionChangeRequest,
@@ -528,6 +530,7 @@ async def list_lot_owners(
     offset: int = Query(default=0, ge=0),
     sort_by: str | None = Query(None),
     sort_dir: str | None = Query(None),
+    search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
     if sort_by is not None and sort_by not in _VALID_LOT_OWNERS_SORT_BY:
@@ -535,7 +538,8 @@ async def list_lot_owners(
     if sort_dir is not None and sort_dir not in _VALID_SORT_DIRS:
         raise HTTPException(status_code=400, detail="Invalid sort_dir value")
     owners = await admin_service.list_lot_owners(
-        building_id, db, limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir
+        building_id, db, limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir,
+        search=search,
     )
     return [LotOwnerOut(**o) for o in owners]
 
@@ -543,9 +547,10 @@ async def list_lot_owners(
 @router.get("/buildings/{building_id}/lot-owners/count")
 async def count_lot_owners_endpoint(
     building_id: uuid.UUID,
+    search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    count = await admin_service.count_lot_owners(building_id, db)
+    count = await admin_service.count_lot_owners(building_id, db, search=search)
     return {"count": count}
 
 
@@ -872,6 +877,16 @@ async def close_motion_endpoint(
     return MotionDetail(**result)
 
 
+@router.post("/motions/{motion_id}/reopen", response_model=MotionDetail)
+async def reopen_motion_endpoint(
+    motion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: BetterAuthUser = Depends(require_admin),
+) -> MotionDetail:
+    result = await admin_service.reopen_motion(motion_id, db)
+    return MotionDetail(**result)
+
+
 @router.patch("/motions/{motion_id}/visibility", response_model=MotionDetail)
 async def toggle_motion_visibility_endpoint(
     motion_id: uuid.UUID,
@@ -1096,20 +1111,34 @@ async def start_general_meeting_endpoint(
     response_model=GeneralMeetingCloseOut,
 )
 async def close_general_meeting(
-    request: Request,
     general_meeting_id: uuid.UUID,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: BetterAuthUser = Depends(require_admin),
 ) -> GeneralMeetingCloseOut:
     admin_close_limiter.check(current_user.user_id)
     meeting = await admin_service.close_general_meeting(general_meeting_id, db)
-    email_service = EmailService()
-    base_url = str(request.base_url).rstrip("/")
-    background_tasks.add_task(email_service.trigger_with_retry, meeting.id, base_url)
     return GeneralMeetingCloseOut(
         id=meeting.id,
         status=meeting.status.value if hasattr(meeting.status, "value") else meeting.status,
+        closed_at=meeting.closed_at,
+        voting_closes_at=meeting.voting_closes_at,
+    )
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/reopen",
+    response_model=GeneralMeetingReopenOut,
+)
+async def reopen_general_meeting(
+    general_meeting_id: uuid.UUID,
+    data: GeneralMeetingReopenRequest,
+    db: AsyncSession = Depends(get_db),
+    _: BetterAuthUser = Depends(require_admin),
+) -> GeneralMeetingReopenOut:
+    meeting = await admin_service.reopen_general_meeting(general_meeting_id, data, db)
+    return GeneralMeetingReopenOut(
+        id=meeting.id,
+        status=meeting.status.value if hasattr(meeting.status, "value") else str(meeting.status),
         closed_at=meeting.closed_at,
         voting_closes_at=meeting.voting_closes_at,
     )

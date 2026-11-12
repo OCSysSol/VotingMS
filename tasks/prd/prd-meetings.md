@@ -134,20 +134,20 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 
 ---
 
-### US-007: Close meeting and send results report
+### US-007: Close meeting and manage results report delivery
 
-**Status:** ✅ Implemented
+**Status:** Close flow implemented; manual-send requirement proposed
 
-**Description:** As a meeting manager, I want to close voting and receive a results report so I can record the meeting outcome.
+**Description:** As a meeting manager, I want to close voting and decide when to send the results report so I can review the meeting outcome before distribution.
 
 **Acceptance Criteria:**
 
 - [ ] Manager can close an open meeting via a "Close Voting" button in the admin portal
 - [ ] On close: meeting status changes to "closed"; all voting inputs are disabled for lot owners; all remaining draft votes are discarded and those voters are recorded as absent
-- [ ] System attempts to send one HTML email to the manager email address stored against the building
-- [ ] If send fails, the system retries with exponential backoff up to a maximum of 30 attempts; retry schedule and outcomes are logged using OTEL-compliant structured logging
-- [ ] If all 30 retries are exhausted, the admin portal displays a clear, persistent error banner: "Results report could not be delivered to [email]. Please retry manually or download the report."
-- [ ] A "Retry Send" button resets and restarts the retry sequence for any meeting whose report failed to deliver
+- [ ] Closing a meeting does not automatically send a report or start a delivery retry sequence
+- [ ] An admin explicitly triggers sending from the closed meeting page; the system then sends one HTML email to the manager email address stored against the building
+- [ ] After the admin triggers sending, failures retry with exponential backoff up to a maximum of 30 attempts; retry schedule and outcomes are logged using structured logging
+- [ ] If all retries are exhausted, the admin portal displays a clear persistent error and allows the admin to trigger another send
 - [ ] The report (viewable in-app and sent by email) includes a summary and, for each motion: motion title and description, total Yes/No/Abstained/Absent (voter count + weighted unit entitlements), not-eligible counts for in-arrear lots, per-option tallies for multi-choice motions
 - [ ] Voter lists show **lot numbers and individual entitlements** (not email addresses) to protect privacy; one row per lot
 - [ ] Host can export the full voter breakdown as a CSV file via an "Export voter lists (CSV)" button
@@ -417,4 +417,23 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 - No `pending` → `closed` direct transition (a meeting must pass through `open` first, even if only transiently during a cold start)
 - No voter notification when a pending meeting opens
 - No editing of meeting title or meeting date/time (`meeting_at`) after creation
-- Reopening a per-motion-closed motion is not supported (irreversible once closed)
+
+### US-MTG-OC-01: Show and search OC Plans in meetings
+
+**Status:** Proposed
+
+- [ ] The General Meetings table displays separate “OC Plan” and “Building Name” columns.
+- [ ] The search filter matches case-insensitive text in OC Plan number and building name (and retains meeting title matching, if present). List and count endpoints use consistent filters.
+
+### US-MTG-REOPEN-01: Reopen a closed meeting
+
+**Status:** Proposed
+
+- [ ] Admins can reopen a closed meeting from its detail page after explicit confirmation and must set a new voting close time later than now and meeting start.
+- [ ] Reopening allows voter and admin vote entry. Existing submitted votes remain unchanged; absent ballot submissions created during close are removed.
+- [ ] Clear only motion close times applied by meeting closure; motions individually closed beforehand stay closed.
+- [ ] Reopen and subsequent close do not send reports automatically. A closed or pending meeting cannot be reopened; return a clear conflict.
+
+### US-MTG-ARCHIVE-02: Expose meeting archive controls
+
+**Status:** Existing capability (API, archived filter, archive/unarchive list actions, and tests are present). Confirm it remains accessible as part of this work; do not duplicate the feature or add a schema change.

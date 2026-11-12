@@ -17,7 +17,10 @@ vi.mock("react-router-dom", async () => {
 });
 
 // Use the open + closed entries from the shared MSW fixture (first two items).
-const meetings: GeneralMeetingListItem[] = ADMIN_MEETING_LIST.slice(0, 2);
+const meetings: GeneralMeetingListItem[] = ADMIN_MEETING_LIST.slice(0, 2).map((meeting, index) => ({
+  ...meeting,
+  oc_plan_number: index === 0 ? "OC 1001" : "OC 2002",
+}));
 
 function makeMeetings(count: number): GeneralMeetingListItem[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -58,6 +61,12 @@ describe("GeneralMeetingTable", () => {
     expect(screen.getByText("Beta Court")).toBeInTheDocument();
   });
 
+  it("renders OC Plan numbers in their own column", () => {
+    renderTable({ meetings });
+    expect(screen.getByText("OC 1001")).toBeInTheDocument();
+    expect(screen.getByText("OC 2002")).toBeInTheDocument();
+  });
+
   it("renders Open badge for open meeting", () => {
     renderTable({ meetings });
     expect(screen.getByText("Open")).toBeInTheDocument();
@@ -94,7 +103,8 @@ describe("GeneralMeetingTable", () => {
 
   it("renders static table headers when no onSort prop provided", () => {
     renderTable({ meetings });
-    expect(screen.getByText("Building")).toBeInTheDocument();
+    expect(screen.getByText("OC Plan")).toBeInTheDocument();
+    expect(screen.getByText("Building Name")).toBeInTheDocument();
     expect(screen.getByText("Title")).toBeInTheDocument();
     expect(screen.getByText("Status")).toBeInTheDocument();
     expect(screen.getByText("Meeting At")).toBeInTheDocument();
@@ -238,7 +248,7 @@ describe("GeneralMeetingTable", () => {
   it("Building column is a plain th (no sort button) when no onSort prop provided", () => {
     renderTable({ meetings });
     expect(screen.queryByRole("button", { name: /Building/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Building")).toBeInTheDocument();
+    expect(screen.getByText("Building Name")).toBeInTheDocument();
   });
 
   // --- Pagination ---

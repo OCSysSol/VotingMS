@@ -54,8 +54,43 @@ describe("BuildingDetailPage", () => {
   it("shows building name when building is found", async () => {
     renderPage();
     await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
       expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
     });
+  });
+
+  it("shows the building name as the subtitle beneath the OC Plans title", async () => {
+    renderPage();
+    const title = await screen.findByRole("heading", { name: "OC Plans" });
+    const buildingName = await screen.findByText("Alpha Tower");
+    const pageHeader = title.closest(".admin-page-header");
+
+    expect(pageHeader).not.toBeNull();
+    expect(pageHeader?.contains(buildingName)).toBe(true);
+    expect(buildingName.tagName).toBe("P");
+    expect(buildingName).toHaveStyle({ fontSize: "0.875rem" });
+  });
+
+  it("passes the owner filter to both paginated lot-owner requests", async () => {
+    let listSearch = "";
+    let countSearch = "";
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners", ({ request }) => {
+        listSearch = new URL(request.url).searchParams.get("search") ?? "";
+        return HttpResponse.json([]);
+      }),
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners/count", ({ request }) => {
+        countSearch = new URL(request.url).searchParams.get("search") ?? "";
+        return HttpResponse.json({ count: 0 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByRole("searchbox", { name: "Search owners" }), "Alice Smith");
+    await waitFor(() => {
+      expect(listSearch).toBe("Alice Smith");
+      expect(countSearch).toBe("Alice Smith");
+    }, { timeout: 3000 });
   });
 
   it("shows Add Lot Owner button", async () => {
@@ -157,7 +192,7 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("shows Building label when building is not found", async () => {
+  it("shows OC Plans title when building is not found", async () => {
     server.use(
       http.get("http://localhost/api/admin/buildings/:buildingId", () => {
         return HttpResponse.json({ detail: "Building not found" }, { status: 404 });
@@ -165,7 +200,7 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByText("Building")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
   });
 
@@ -184,7 +219,7 @@ describe("BuildingDetailPage", () => {
       expect(screen.getByRole("button", { name: "Create General Meeting" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/new");
+    expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/new?building=b1");
   });
 
   it("shows Archive Building button for active buildings", async () => {
@@ -389,7 +424,7 @@ describe("BuildingDetailPage", () => {
   it("does not show Edit Building button when building is not found", async () => {
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByText("Building")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Edit Building" })).not.toBeInTheDocument();
   });
@@ -492,7 +527,7 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("renders building name and oc_plan_number in header when set", async () => {
+  it("renders OC Plans title with building name and OC Plan number subtitles", async () => {
     server.use(
       http.get("http://localhost/api/admin/buildings/:buildingId", () => {
         return HttpResponse.json({
@@ -507,7 +542,9 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-oc");
     await waitFor(() => {
-      expect(screen.getByText("Highland Residences — OC-777")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByText("Highland Residences")).toBeInTheDocument();
+      expect(screen.getByText("OC Plan OC-777")).toBeInTheDocument();
     });
   });
 

@@ -58,7 +58,7 @@ export default function BuildingsPage() {
     [searchParams, setSearchParams]
   );
 
-  // US-ACC-02: Focus trap for New Building modal
+  // US-ACC-02: Focus trap for New OC Plan modal
   useEffect(() => {
     if (!showCreateModal) return;
     const focusable = modalRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
@@ -240,23 +240,23 @@ export default function BuildingsPage() {
     void queryClient.invalidateQueries({ queryKey: ["admin", "buildings"] });
   }
 
-  if (error) return <p className="state-message state-message--error">Failed to load buildings.</p>;
+  if (error) return <p className="state-message state-message--error">Failed to load OC Plans.</p>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Buildings</h1>
+        <h1>OC Plans</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
           {/* Fix 4: name filter input */}
           <div className="field" style={{ maxWidth: 320, marginBottom: 0 }}>
-            <label className="field__label" htmlFor="buildings-name-filter">Search buildings</label>
+            <label className="field__label" htmlFor="buildings-name-filter">Search OC Plans</label>
             <input
               id="buildings-name-filter"
               className="field__input"
               type="text"
               value={nameFilterInput}
               onChange={(e) => handleNameFilterChange(e.target.value)}
-              placeholder="Filter by name…"
+              placeholder="Filter by OC Plan or building name…"
             />
           </div>
           <label className="toggle-switch">
@@ -271,7 +271,7 @@ export default function BuildingsPage() {
             Show archived
           </label>
           <button ref={newBuildingBtnRef} className="btn btn--primary" onClick={openModal}>
-            + New Building
+            + New OC Plan
           </button>
         </div>
       </div>
@@ -288,7 +288,7 @@ export default function BuildingsPage() {
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label="New Building"
+            aria-label="New OC Plan"
             onKeyDown={handleModalKeyDown}
             style={{
               position: "fixed",
@@ -303,7 +303,7 @@ export default function BuildingsPage() {
               boxShadow: "var(--shadow-lg)",
             }}
           >
-            <h3 className="admin-card__title">New Building</h3>
+            <h3 className="admin-card__title">New OC Plan</h3>
             <p className="field__hint" style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
               <span aria-hidden="true">*</span> Required field
             </p>
@@ -354,7 +354,7 @@ export default function BuildingsPage() {
                   className="btn btn--primary"
                   disabled={mutation.isPending}
                 >
-                  {mutation.isPending ? "Creating..." : "Create Building"}
+                  {mutation.isPending ? "Creating..." : "Create OC Plan"}
                 </button>
                 <button
                   type="button"

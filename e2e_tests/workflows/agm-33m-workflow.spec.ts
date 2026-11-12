@@ -745,8 +745,8 @@ test("33M.10: admin closes voting for motion 5 via admin UI", async ({ page }) =
   await page.getByTestId("close-motion-confirm-btn").click();
   await expect(confirmDialog).not.toBeVisible({ timeout: 10000 });
 
-  // "Voting Closed" badge should appear for motion 5
-  await expect(page.getByTestId(`motion-voting-closed-badge-${m5Id}`)).toBeVisible({ timeout: 15000 });
+  // When the meeting is open, closing a motion replaces "Close Motion" with "Reopen Motion"
+  await expect(page.getByTestId(`reopen-motion-btn-${m5Id}`)).toBeVisible({ timeout: 15000 });
 
   // Verify via API that voting_closed_at is set
   const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
@@ -1320,8 +1320,8 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
   await page.getByTestId("close-motion-confirm-btn").click();
   await expect(confirmDialog).not.toBeVisible({ timeout: 10000 });
 
-  // M11 should show "Voting Closed"
-  await expect(page.getByTestId(`motion-voting-closed-badge-${m11Id}`)).toBeVisible({ timeout: 15000 });
+  // When the meeting is open, closing M11 replaces "Close Motion" with "Reopen Motion"
+  await expect(page.getByTestId(`reopen-motion-btn-${m11Id}`)).toBeVisible({ timeout: 15000 });
 
   // Enter in-person votes
   await page.getByRole("button", { name: "Enter In-Person Votes" }).click();

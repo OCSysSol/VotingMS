@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -19,6 +19,7 @@ const PAGE_SIZE = 20;
 // Text columns default to asc, date columns default to desc
 const DEFAULT_SORT_DIR: Record<string, SortDir> = {
   title: "asc",
+  oc_plan_number: "asc",
   building_name: "asc",
   created_at: "desc",
 };
@@ -29,6 +30,9 @@ export default function GeneralMeetingListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedBuildingId = searchParams.get("building") ?? "";
   const selectedStatus = searchParams.get("status") ?? "";
+  const meetingSearch = searchParams.get("name") ?? "";
+  const [meetingSearchInput, setMeetingSearchInput] = useState(meetingSearch);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showArchived, setShowArchived] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<GeneralMeetingListItem | null>(null);
@@ -53,6 +57,27 @@ export default function GeneralMeetingListPage() {
     next.delete("page");
     setSearchParams(next);
   }
+
+  function handleMeetingSearchChange(value: string) {
+    setMeetingSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      const trimmed = value.trim();
+      if (trimmed) next.set("name", trimmed);
+      else next.delete("name");
+      next.delete("page");
+      setSearchParams(next, { replace: true });
+    }, 300);
+  }
+
+  useEffect(() => {
+    setMeetingSearchInput(meetingSearch);
+  }, [meetingSearch]);
+
+  useEffect(() => () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  }, []);
 
   function handleShowArchivedChange(checked: boolean) {
     setShowArchived(checked);
@@ -91,12 +116,13 @@ export default function GeneralMeetingListPage() {
   }
 
   const { data: countData } = useQuery<{ count: number }>({
-    queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus, showArchived],
+    queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus, showArchived, meetingSearch],
     queryFn: () =>
       getGeneralMeetingsCount({
         building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
         is_archived: showArchived ? true : false,
+        name: meetingSearch || undefined,
       }),
   });
 
@@ -105,7 +131,7 @@ export default function GeneralMeetingListPage() {
   const safePage = Math.min(page, totalPages);
 
   const { data: meetings = [], isLoading, error } = useQuery<GeneralMeetingListItem[]>({
-    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
+    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir, meetingSearch],
     queryFn: () =>
       listGeneralMeetings({
         limit: PAGE_SIZE,
@@ -115,6 +141,7 @@ export default function GeneralMeetingListPage() {
         is_archived: showArchived ? true : false,
         sort_by: sortBy,
         sort_dir: sortDir,
+        name: meetingSearch || undefined,
       }),
   });
 
@@ -123,7 +150,7 @@ export default function GeneralMeetingListPage() {
     const nextOffset = safePage * PAGE_SIZE;
     if (nextOffset < totalCount) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
+        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir, meetingSearch],
         queryFn: () =>
           listGeneralMeetings({
             limit: PAGE_SIZE,
@@ -133,10 +160,11 @@ export default function GeneralMeetingListPage() {
             is_archived: showArchived ? true : false,
             sort_by: sortBy,
             sort_dir: sortDir,
+            name: meetingSearch || undefined,
           }),
       });
     }
-  }, [safePage, selectedBuildingId, selectedStatus, showArchived, totalCount, queryClient, sortBy, sortDir]);
+  }, [safePage, selectedBuildingId, selectedStatus, showArchived, totalCount, queryClient, sortBy, sortDir, meetingSearch]);
 
   function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;
@@ -214,6 +242,17 @@ export default function GeneralMeetingListPage() {
       <div className="admin-card">
         <div className="admin-card__header">
           <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
+            <div style={{ maxWidth: 280 }}>
+              <label className="field__label" htmlFor="meeting-search">Search</label>
+              <input
+                id="meeting-search"
+                className="field__input"
+                type="search"
+                value={meetingSearchInput}
+                onChange={(e) => handleMeetingSearchChange(e.target.value)}
+                placeholder="Meeting, OC Plan, or building"
+              />
+            </div>
             {/* Building search combobox */}
             <div style={{ maxWidth: 280 }}>
               <label className="field__label" htmlFor="building-combobox">Building</label>

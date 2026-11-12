@@ -454,6 +454,18 @@ describe("listLotOwners", () => {
     expect(capturedUrl).toContain("offset=40");
   });
 
+  it("sends owner search text when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { search: "Alice Smith" });
+    expect(capturedUrl).toContain("search=Alice+Smith");
+  });
+
   it("sends only limit when offset is undefined", async () => {
     let capturedUrl = "";
     server.use(
@@ -515,6 +527,18 @@ describe("countLotOwners", () => {
     );
     const result = await countLotOwners("b1");
     expect(result).toBe(42);
+  });
+
+  it("sends owner search text when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ count: 1 });
+      })
+    );
+    await countLotOwners("b1", "Proxy Person");
+    expect(capturedUrl).toContain("search=Proxy+Person");
   });
 
   it("returns 0 for empty building", async () => {

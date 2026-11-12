@@ -992,7 +992,7 @@ function AddForm({
     >
       <div
         className="dialog"
-        style={{ maxWidth: 480 }}
+        style={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}
       >
         <h3
           id="add-modal-title"

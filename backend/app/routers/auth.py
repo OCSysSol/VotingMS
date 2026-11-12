@@ -6,7 +6,9 @@ Authentication endpoints:
 """
 import asyncio
 import hmac
+import re
 import secrets
+import time
 import uuid
 from datetime import UTC, datetime, timedelta
 
@@ -70,6 +72,22 @@ _OTP_VERIFY_WINDOW_SECONDS = 300  # 5 minutes
 _OTP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
 
+def _sanitized_otp_provider_error(exc: Exception) -> str:
+    """Return a short provider diagnostic without email addresses or secrets."""
+    message = getattr(exc, "message", None) or str(exc)
+    if isinstance(message, bytes):
+        message = message.decode("utf-8", errors="replace")
+    message = re.sub(r"(?i)://[^/\s:@]+:[^/\s@]+@", "://[credentials]@", str(message))
+    message = re.sub(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", "[email]", message, flags=re.IGNORECASE)
+    message = re.sub(
+        r"(?i)\b(password|passwd|secret|token|credential|username|user_name)\b\s*[:=]\s*[^\s,;]+",
+        r"\1=[redacted]",
+        message,
+    )
+    message = re.sub(r"\b[A-HJ-NP-Z2-9]{8}\b", "[code]", message)
+    return " ".join(message.split())[:180]
+
+
 def _generate_otp_code() -> str:
     return "".join(secrets.choice(_OTP_ALPHABET) for _ in range(8))
 
@@ -95,6 +113,14 @@ async def request_otp(
 
     # Normalise email to lowercase for case-insensitive matching
     body = body.model_copy(update={"email": body.email.strip().lower()})
+    request_id = str(uuid.uuid4())
+    request_started_at = time.perf_counter()
+    logger.info(
+        "otp_request_received",
+        request_id=request_id,
+        agm_id=str(body.general_meeting_id),
+        requested_channel=body.channel or "auto",
+    )
 
     # 1. Fetch the GeneralMeeting
     meeting_result = await db.execute(
@@ -171,6 +197,13 @@ async def request_otp(
         )
     else:
         effective_channel = body.channel
+
+    logger.info(
+        "otp_request_channel_selected",
+        request_id=request_id,
+        agm_id=str(body.general_meeting_id),
+        channel=effective_channel,
+    )
 
     # 3. Check if email is known in this building (enumeration-safe: still return 200 if not found)
     # Direct owner: email matches a Person linked to a Lot in this building
@@ -265,6 +298,13 @@ async def request_otp(
                         "If you did not request this, please contact your OC manager immediately. "
                         "Do not reply to this SMS."
                     )
+                    delivery_started_at = time.perf_counter()
+                    logger.info(
+                        "otp_delivery_attempt_started",
+                        request_id=request_id,
+                        agm_id=str(body.general_meeting_id),
+                        channel="sms",
+                    )
                     try:
                         await sms_send(
                             to=phone_number,
@@ -272,13 +312,35 @@ async def request_otp(
                             **sms_kwargs,
                         )
                     except SmsDeliveryError as exc:
-                        logger.error("otp_sms_send_failed", email=body.email, error=str(exc))
+                        logger.error(
+                            "otp_delivery_attempt_failed",
+                            request_id=request_id,
+                            agm_id=str(body.general_meeting_id),
+                            channel="sms",
+                            provider_category=type(exc).__name__,
+                            provider_detail=_sanitized_otp_provider_error(exc),
+                            elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
+                        )
                         raise HTTPException(
                             status_code=422,
                             detail="SMS could not be sent. Please try again or use email instead.",
                         )
+                    logger.info(
+                        "otp_delivery_attempt_succeeded",
+                        request_id=request_id,
+                        agm_id=str(body.general_meeting_id),
+                        channel="sms",
+                        elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
+                    )
             else:
                 # Default email path
+                delivery_started_at = time.perf_counter()
+                logger.info(
+                    "otp_delivery_attempt_started",
+                    request_id=request_id,
+                    agm_id=str(body.general_meeting_id),
+                    channel="email",
+                )
                 try:
                     await send_otp_email(
                         to_email=body.email,
@@ -291,7 +353,23 @@ async def request_otp(
                     # in the DB, so the voter can still authenticate (or retry sending).
                     # A 500 here would expose SMTP misconfiguration and break the auth flow
                     # even though the OTP record was successfully created.
-                    logger.error("otp_email_send_failed", email=body.email, error=str(exc))
+                    logger.error(
+                        "otp_delivery_attempt_failed",
+                        request_id=request_id,
+                        agm_id=str(body.general_meeting_id),
+                        channel="email",
+                        provider_category=type(exc).__name__,
+                        provider_detail=_sanitized_otp_provider_error(exc),
+                        elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
+                    )
+                else:
+                    logger.info(
+                        "otp_delivery_attempt_succeeded",
+                        request_id=request_id,
+                        agm_id=str(body.general_meeting_id),
+                        channel="email",
+                        elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
+                    )
     else:
         # Still update the rate limit so attackers can't use "no rate limit" as
         # a signal that the email was not found.
@@ -308,6 +386,12 @@ async def request_otp(
     if has_phone and direct_person and direct_person.phone_number:
         phone_hint = mask_phone_hint(direct_person.phone_number)
 
+    logger.info(
+        "otp_request_completed",
+        request_id=request_id,
+        agm_id=str(body.general_meeting_id),
+        elapsed_ms=round((time.perf_counter() - request_started_at) * 1000),
+    )
     return OtpRequestResponse(
         sent=True,
         has_phone=has_phone,

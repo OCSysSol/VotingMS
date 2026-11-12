@@ -65,6 +65,7 @@ export interface GeneralMeetingListItem {
   id: string;
   building_id: string;
   building_name: string;
+  oc_plan_number?: string | null;
   title: string;
   status: string;
   meeting_at: string;
@@ -140,6 +141,7 @@ export interface MotionDetail {
   option_limit: number | null;
   options: MotionOptionOut[];
   voting_closed_at: string | null;
+  closed_by_meeting?: boolean;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
@@ -164,6 +166,14 @@ export interface GeneralMeetingCloseOut {
   id: string;
   status: string;
   closed_at: string;
+  voting_closes_at: string;
+}
+
+export interface GeneralMeetingReopenOut {
+  id: string;
+  status: string;
+  closed_at: string | null;
+  voting_closes_at: string;
 }
 
 export interface GeneralMeetingStartOut {
@@ -435,22 +445,26 @@ export async function importBuildings(file: File): Promise<BuildingImportResult>
 
 export async function listLotOwners(
   buildingId: string,
-  params?: { limit?: number; offset?: number; sort_by?: string; sort_dir?: string }
+  params?: { limit?: number; offset?: number; sort_by?: string; sort_dir?: string; search?: string }
 ): Promise<LotOwner[]> {
   const qs = new URLSearchParams();
   if (params?.limit !== undefined) qs.set("limit", String(params.limit));
   if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
   if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
+  if (params?.search !== undefined) qs.set("search", params.search);
   const query = qs.toString();
   return apiFetch<LotOwner[]>(
     `/api/admin/buildings/${buildingId}/lot-owners${query ? `?${query}` : ""}`
   );
 }
 
-export async function countLotOwners(buildingId: string): Promise<number> {
+export async function countLotOwners(buildingId: string, search?: string): Promise<number> {
+  const qs = new URLSearchParams();
+  if (search !== undefined) qs.set("search", search);
+  const query = qs.toString();
   const data = await apiFetch<{ count: number }>(
-    `/api/admin/buildings/${buildingId}/lot-owners/count`
+    `/api/admin/buildings/${buildingId}/lot-owners/count${query ? `?${query}` : ""}`
   );
   return data.count;
 }
@@ -568,6 +582,16 @@ export async function getGeneralMeetingDetail(meetingId: string): Promise<Genera
 export async function closeGeneralMeeting(meetingId: string): Promise<GeneralMeetingCloseOut> {
   return apiFetch<GeneralMeetingCloseOut>(`/api/admin/general-meetings/${meetingId}/close`, {
     method: "POST",
+  });
+}
+
+export async function reopenGeneralMeeting(
+  meetingId: string,
+  votingClosesAt: string,
+): Promise<GeneralMeetingReopenOut> {
+  return apiFetch<GeneralMeetingReopenOut>(`/api/admin/general-meetings/${meetingId}/reopen`, {
+    method: "POST",
+    body: JSON.stringify({ voting_closes_at: votingClosesAt }),
   });
 }
 
@@ -730,6 +754,12 @@ export async function deleteMotion(motionId: string): Promise<void> {
 
 export async function closeMotion(motionId: string): Promise<MotionDetail> {
   return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/close`, {
+    method: "POST",
+  });
+}
+
+export async function reopenMotion(motionId: string): Promise<MotionDetail> {
+  return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/reopen`, {
     method: "POST",
   });
 }

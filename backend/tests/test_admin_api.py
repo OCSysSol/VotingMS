@@ -2640,10 +2640,10 @@ class TestGetGeneralMeetingDetail:
         data = response.json()
         assert data["email_delivery"] is None
 
-    async def test_email_delivery_included_after_close(
+    async def test_email_delivery_remains_absent_after_close_until_admin_sends(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """email_delivery is present with correct status after meeting is closed."""
+        """Closing a meeting does not implicitly queue a report."""
         agm, _, _ = await self._setup_agm_with_votes(db_session)
 
         # Close the meeting to create the EmailDelivery record
@@ -2653,9 +2653,7 @@ class TestGetGeneralMeetingDetail:
         response = await client.get(f"/api/admin/general-meetings/{agm.id}")
         assert response.status_code == 200
         data = response.json()
-        assert data["email_delivery"] is not None
-        assert data["email_delivery"]["status"] == "pending"
-        assert data["email_delivery"]["last_error"] is None
+        assert data["email_delivery"] is None
 
     async def test_email_delivery_failed_status_included(
         self, client: AsyncClient, db_session: AsyncSession
@@ -2663,18 +2661,18 @@ class TestGetGeneralMeetingDetail:
         """email_delivery includes last_error when status is failed."""
         agm, _, _ = await self._setup_agm_with_votes(db_session)
 
-        # Close to create EmailDelivery record
+        # Close the meeting, then create a failed delivery to verify it is surfaced.
         await client.post(f"/api/admin/general-meetings/{agm.id}/close")
-
-        # Manually mark the delivery as failed with an error message
-        result = await db_session.execute(
-            select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
+        delivery = EmailDelivery(
+            general_meeting_id=agm.id,
+            status=EmailDeliveryStatus.failed,
+            total_attempts=1,
+            last_error="SMTP connection refused",
         )
-        delivery = result.scalar_one()
-        delivery.status = EmailDeliveryStatus.failed
-        delivery.last_error = "SMTP connection refused"
+        db_session.add(delivery)
         await db_session.commit()
 
+        # Verify the failed delivery error appears in meeting detail.
         response = await client.get(f"/api/admin/general-meetings/{agm.id}")
         assert response.status_code == 200
         data = response.json()
@@ -2781,7 +2779,7 @@ class TestCloseAGM:
         assert all(v.status == VoteStatus.submitted for v in remaining_votes)
         assert not any(v.voter_email == "draft@test.com" for v in remaining_votes)
 
-    async def test_email_delivery_record_created_on_close(
+    async def test_email_delivery_is_not_created_on_close(
         self, client: AsyncClient, db_session: AsyncSession
     ):
         agm = await self._create_open_agm(db_session, "Email Delivery Building")
@@ -2791,10 +2789,7 @@ class TestCloseAGM:
         result = await db_session.execute(
             select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
         )
-        delivery = result.scalar_one_or_none()
-        assert delivery is not None
-        assert delivery.status == EmailDeliveryStatus.pending
-        assert delivery.total_attempts == 0
+        assert result.scalar_one_or_none() is None
 
     # --- State / precondition errors ---
 
@@ -3083,7 +3078,7 @@ class TestResendReport:
         response = await client.post(f"/api/admin/general-meetings/{uuid.uuid4()}/resend-report")
         assert response.status_code == 404
 
-    async def test_resend_no_delivery_record_returns_404(
+    async def test_resend_creates_delivery_record_when_missing(
         self, client: AsyncClient, db_session: AsyncSession
     ):
         b = Building(name="No Delivery Building", manager_email="nd@test.com")
@@ -3101,7 +3096,14 @@ class TestResendReport:
         await db_session.commit()
 
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/resend-report")
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert response.json()["queued"] is True
+        delivery_result = await db_session.execute(
+            select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
+        )
+        delivery = delivery_result.scalar_one()
+        assert delivery.status == EmailDeliveryStatus.pending
+        assert delivery.total_attempts == 0
 
 
 # ---------------------------------------------------------------------------

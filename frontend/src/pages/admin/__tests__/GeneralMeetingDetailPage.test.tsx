@@ -148,6 +148,75 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
+  it("opens the meeting reopen dialog and submits the new close time", async () => {
+    const user = userEvent.setup();
+    let reopenPayload: Record<string, unknown> | null = null;
+    const closedMeeting = {
+      ...ADMIN_MEETING_DETAIL_CLOSED,
+      id: "agm-reopen-ui",
+      meeting_at: "2023-06-01T10:00:00Z",
+    };
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", ({ params }) =>
+        params.meetingId === "agm-reopen-ui"
+          ? HttpResponse.json(closedMeeting)
+          : HttpResponse.json({ detail: "not found" }, { status: 404 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/reopen", async ({ request, params }) => {
+        expect(params.meetingId).toBe("agm-reopen-ui");
+        reopenPayload = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ status: "open", voting_closes_at: "2026-12-31T12:00:00Z" });
+      })
+    );
+
+    renderPage("agm-reopen-ui");
+    await user.click(await screen.findByRole("button", { name: "Reopen Meeting" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Reopen this General Meeting?" });
+    expect(within(dialog).getByText(/Submitted votes will be kept/)).toBeInTheDocument();
+    const closeTime = within(dialog).getByLabelText("New voting close time");
+    fireEvent.change(closeTime, { target: { value: "2026-12-31T12:00" } });
+    await user.click(within(dialog).getByRole("button", { name: "Reopen Meeting" }));
+
+    await waitFor(() => {
+      expect(reopenPayload).toEqual({
+        voting_closes_at: new Date("2026-12-31T12:00").toISOString(),
+      });
+      expect(screen.queryByRole("dialog", { name: "Reopen this General Meeting?" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("confirms reopening a closed motion and calls the reopen API", async () => {
+    const user = userEvent.setup();
+    let reopenedMotionId: string | undefined;
+    const motion = {
+      ...ADMIN_MEETING_DETAIL.motions[0],
+      id: "motion-reopen-ui",
+      title: "Motion to Reopen",
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    };
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", ({ params }) =>
+        params.meetingId === "agm-motion-reopen-ui"
+          ? HttpResponse.json({ ...ADMIN_MEETING_DETAIL, id: "agm-motion-reopen-ui", motions: [motion] })
+          : HttpResponse.json({ detail: "not found" }, { status: 404 })
+      ),
+      http.post("http://localhost/api/admin/motions/:motionId/reopen", ({ params }) => {
+        reopenedMotionId = String(params.motionId);
+        return HttpResponse.json({ ...motion, voting_closed_at: null });
+      })
+    );
+
+    renderPage("agm-motion-reopen-ui");
+    await user.click(await screen.findByRole("button", { name: "Reopen Motion" }));
+    const dialog = screen.getByRole("dialog", { name: "Reopen Motion Voting" });
+    expect(within(dialog).getByText(/Existing submitted votes will remain unchanged/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Reopen Voting" }));
+
+    await waitFor(() => expect(reopenedMotionId).toBe("motion-reopen-ui"));
+    expect(screen.queryByRole("dialog", { name: "Reopen Motion Voting" })).not.toBeInTheDocument();
+  });
+
   it("shows EmailStatusBanner when email delivery failed", async () => {
     renderPage("agm-failed-email");
     await waitFor(() => {
@@ -236,12 +305,26 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
-  it("does not show Resend Summary Email button for closed meeting without email delivery", async () => {
+  it("shows Send Summary Email for a closed meeting without prior delivery and sends on request", async () => {
+    const user = userEvent.setup();
+    let sendRequested = false;
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/resend-report", ({ params }) => {
+        expect(params.meetingId).toBe("agm2");
+        sendRequested = true;
+        return HttpResponse.json({ queued: true });
+      })
+    );
     renderPage("agm2");
     await waitFor(() => {
       expect(screen.getByText("2023 AGM")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Resend Summary Email" })).not.toBeInTheDocument();
+    const sendButton = screen.getByRole("button", { name: "Send Summary Email" });
+    await user.click(sendButton);
+    await waitFor(() => {
+      expect(sendRequested).toBe(true);
+      expect(screen.getByText("Summary email queued for resend.")).toBeInTheDocument();
+    });
   });
 
   it("does not show Resend Summary Email button for open meeting", async () => {
@@ -2936,7 +3019,7 @@ describe("Close Motion", () => {
     });
   });
 
-  it("shows Closed badge for motion with voting_closed_at set", async () => {
+  it("shows reopen action for a closed motion while its meeting remains open", async () => {
     const meetingWithClosedMotion = {
       ...ADMIN_MEETING_DETAIL,
       id: "agm-closed-motion",
@@ -2955,7 +3038,7 @@ describe("Close Motion", () => {
     );
     renderPage("agm-closed-motion");
     await waitFor(() => {
-      expect(screen.getByTestId("motion-voting-closed-badge-m-closed-voting")).toBeInTheDocument();
+      expect(screen.getByTestId("reopen-motion-btn-m-closed-voting")).toBeInTheDocument();
     });
   });
 });

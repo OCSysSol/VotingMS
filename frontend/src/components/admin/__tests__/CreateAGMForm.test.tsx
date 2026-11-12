@@ -20,13 +20,13 @@ vi.mock("react-router-dom", async () => {
   };
 });
 
-function renderComponent() {
+function renderComponent(initialEntry = "/admin/general-meetings/new") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <CreateGeneralMeetingForm />
       </MemoryRouter>
     </QueryClientProvider>
@@ -94,6 +94,13 @@ describe("CreateGeneralMeetingForm", () => {
     await selectBuilding("Alpha Tower");
     const input = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
     expect(input.value).toBe("Alpha Tower");
+  });
+
+  it("preselects the building from the URL query parameter", async () => {
+    renderComponent("/admin/general-meetings/new?building=b1");
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "Building" })).toHaveValue("Alpha Tower");
+    });
   });
 
   it("shows error when building not selected", async () => {

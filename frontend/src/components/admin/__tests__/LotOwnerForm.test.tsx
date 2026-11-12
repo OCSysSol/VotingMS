@@ -78,6 +78,43 @@ function renderEditForm(lotOwner: LotOwner, onSuccess = vi.fn(), onCancel = vi.f
 // Add mode
 // ---------------------------------------------------------------------------
 describe("LotOwnerForm - Add mode", () => {
+  it("uses the same centered dialog sizing as the edit modal", () => {
+    renderAddForm();
+    const dialogContent = screen.getByRole("dialog").querySelector(".dialog");
+    expect(dialogContent).toHaveStyle({ maxWidth: "520px", maxHeight: "90vh", overflowY: "auto" });
+  });
+
+  it("matches the edit modal shell and heading treatment", () => {
+    const addRender = renderAddForm();
+    const addDialog = screen.getByRole("dialog");
+    const addContent = addDialog.querySelector(".dialog");
+    const addHeading = addDialog.querySelector("h3");
+    const addShell = {
+      dialogClass: addDialog.className,
+      contentClass: addContent?.className,
+      contentStyle: addContent?.getAttribute("style"),
+      headingTag: addHeading?.tagName,
+      headingClass: addHeading?.className,
+      headingStyle: addHeading?.getAttribute("style"),
+    };
+    expect(addHeading?.id).toBe(addDialog.getAttribute("aria-labelledby"));
+    addRender.unmount();
+
+    renderEditForm(existingLotOwner);
+    const editDialog = screen.getByRole("dialog");
+    const editContent = editDialog.querySelector(".dialog");
+    const editHeading = editDialog.querySelector("h3");
+
+    expect(editDialog).toHaveAttribute("aria-modal", "true");
+    expect(editDialog.className).toBe(addShell.dialogClass);
+    expect(editContent?.className).toBe(addShell.contentClass);
+    expect(editContent?.getAttribute("style")).toBe(addShell.contentStyle);
+    expect(editHeading?.tagName).toBe(addShell.headingTag);
+    expect(editHeading?.className).toBe(addShell.headingClass);
+    expect(editHeading?.getAttribute("style")).toBe(addShell.headingStyle);
+    expect(editHeading?.id).toBe(editDialog.getAttribute("aria-labelledby"));
+  });
+
   it("renders add form fields", () => {
     renderAddForm();
     expect(screen.getByLabelText("Lot Number")).toBeInTheDocument();

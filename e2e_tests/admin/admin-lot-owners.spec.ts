@@ -30,7 +30,8 @@ test.describe.serial("Admin Lot Owners", () => {
 
     await page.goto(`/admin/buildings/${building!.id}`);
     await expect(page.getByText(E2E_BUILDING)).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole("heading", { name: new RegExp(E2E_BUILDING) })).toBeVisible();
+    // US-OC-UI-01: the page title is "OC Plans"; the building name is shown as a subtitle.
+    await expect(page.getByRole("heading", { level: 1, name: "OC Plans" })).toBeVisible();
   });
 
   test("add lot owner form submits and shows in table", async ({ page, request }) => {

@@ -14,7 +14,7 @@ import openpyxl
 from openpyxl.utils.exceptions import InvalidFileException
 
 from fastapi import HTTPException
-from sqlalchemy import Integer, case, delete, func, literal, or_, select
+from sqlalchemy import Integer, case, delete, func, literal, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,6 +46,7 @@ from app.schemas.admin import (
     AdminVoteEntryRequest,
     BuildingUpdate,
     GeneralMeetingCreate,
+    GeneralMeetingReopenRequest,
     GeneralMeetingUpdate,
     LotOwnerCreate,
     LotOwnerUpdate,
@@ -711,12 +712,37 @@ async def _get_proxy_info(lot_id: uuid.UUID, db: AsyncSession) -> dict | None:
     return {"proxy_email": row[0], "given_name": row[1], "surname": row[2], "phone_number": row[3]}
 
 
-async def count_lot_owners(building_id: uuid.UUID, db: AsyncSession) -> int:
-    result = await db.execute(
-        select(func.count()).select_from(Lot).where(
-            Lot.building_id == building_id,
+def _lot_owner_search_filter(search: str | None):
+    term = search.strip().lower() if search else ""
+    if not term:
+        return None
+    owner_match = Lot.persons.any(
+        or_(
+            func.lower(Person.given_name).contains(term),
+            func.lower(Person.surname).contains(term),
+            func.lower(Person.email).contains(term),
         )
     )
+    proxy_match = Lot.lot_proxy.has(
+        LotProxy.person.has(
+            or_(
+                func.lower(Person.given_name).contains(term),
+                func.lower(Person.surname).contains(term),
+                func.lower(Person.email).contains(term),
+            )
+        )
+    )
+    return or_(func.lower(Lot.lot_number).contains(term), owner_match, proxy_match)
+
+
+async def count_lot_owners(
+    building_id: uuid.UUID, db: AsyncSession, search: str | None = None
+) -> int:
+    filters = [Lot.building_id == building_id]
+    search_filter = _lot_owner_search_filter(search)
+    if search_filter is not None:
+        filters.append(search_filter)
+    result = await db.execute(select(func.count()).select_from(Lot).where(*filters))
     return result.scalar_one()
 
 
@@ -897,13 +923,18 @@ async def list_lot_owners(
     offset: int = 0,
     sort_by: str | None = None,
     sort_dir: str | None = None,
+    search: str | None = None,
 ) -> list[dict]:
     await get_building_or_404(building_id, db)
     order = _lot_owners_order_clause(sort_by, sort_dir)
     order_args = order if isinstance(order, tuple) else (order,)
+    filters = [Lot.building_id == building_id]
+    search_filter = _lot_owner_search_filter(search)
+    if search_filter is not None:
+        filters.append(search_filter)
     result = await db.execute(
         select(Lot)
-        .where(Lot.building_id == building_id)
+        .where(*filters)
         .order_by(*order_args)
         .offset(offset)
         .limit(limit)
@@ -2155,12 +2186,23 @@ async def list_general_meetings(
     sort_dir: str | None = None,
 ) -> list[dict]:
     q = (
-        select(GeneralMeeting, Building.name.label("building_name"))
+        select(
+            GeneralMeeting,
+            Building.name.label("building_name"),
+            Building.oc_plan_number.label("oc_plan_number"),
+        )
         .join(Building, GeneralMeeting.building_id == Building.id)
         .order_by(_meetings_order_clause(sort_by, sort_dir))
     )
-    if name is not None:
-        q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
+    if name is not None and name.strip():
+        term = name.strip().lower()
+        q = q.where(
+            or_(
+                func.lower(GeneralMeeting.title).contains(term),
+                func.lower(Building.name).contains(term),
+                func.lower(Building.oc_plan_number).contains(term),
+            )
+        )
     if building_id is not None:
         q = q.where(GeneralMeeting.building_id == building_id)
     if status is not None:
@@ -2170,7 +2212,7 @@ async def list_general_meetings(
     result = await db.execute(q.offset(offset).limit(limit))
     rows = result.all()
     items = []
-    for general_meeting, building_name in rows:
+    for general_meeting, building_name, oc_plan_number in rows:
         effective = get_effective_status(general_meeting)
         effective_str = effective.value if hasattr(effective, "value") else effective
         items.append(
@@ -2178,6 +2220,7 @@ async def list_general_meetings(
                 "id": general_meeting.id,
                 "building_id": general_meeting.building_id,
                 "building_name": building_name,
+                "oc_plan_number": oc_plan_number,
                 "title": general_meeting.title,
                 "status": effective_str,
                 "meeting_at": general_meeting.meeting_at,
@@ -2206,9 +2249,18 @@ async def count_general_meetings(
       3. meeting_at > NOW()        → 'pending'
       4. otherwise                 → 'open'
     """
-    q = select(func.count()).select_from(GeneralMeeting)
-    if name is not None:
-        q = q.where(func.lower(GeneralMeeting.title).contains(name.lower()))
+    q = select(func.count()).select_from(GeneralMeeting).join(
+        Building, GeneralMeeting.building_id == Building.id
+    )
+    if name is not None and name.strip():
+        term = name.strip().lower()
+        q = q.where(
+            or_(
+                func.lower(GeneralMeeting.title).contains(term),
+                func.lower(Building.name).contains(term),
+                func.lower(Building.oc_plan_number).contains(term),
+            )
+        )
     if building_id is not None:
         q = q.where(GeneralMeeting.building_id == building_id)
     if status is not None:
@@ -2595,6 +2647,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 "is_visible": motion.is_visible,
                 "option_limit": motion.option_limit,
                 "voting_closed_at": motion.voting_closed_at,
+                "closed_by_meeting": motion.closed_by_meeting,
                 "options": [
                     {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
                     for opt in motion_opts
@@ -2688,6 +2741,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     "is_visible": motion.is_visible,
                     "option_limit": None,
                     "voting_closed_at": motion.voting_closed_at,
+                    "closed_by_meeting": motion.closed_by_meeting,
                     "options": [],
                     "tally": {
                         "yes": yes_tally,
@@ -2841,6 +2895,7 @@ async def toggle_motion_visibility(
         "is_visible": motion.is_visible,
         "option_limit": motion.option_limit,
         "voting_closed_at": motion.voting_closed_at,
+        "closed_by_meeting": motion.closed_by_meeting,
         "options": [
             {"id": opt.id, "text": opt.text, "display_order": opt.display_order}
             for opt in motion_options
@@ -2960,6 +3015,71 @@ async def close_motion(
             "absent": [],
             "not_eligible": [],
             "options": {},
+        },
+    }
+
+
+async def reopen_motion(motion_id: uuid.UUID, db: AsyncSession) -> dict:
+    """Reopen an individually closed motion while its meeting remains open."""
+    result = await db.execute(
+        select(Motion).where(Motion.id == motion_id).with_for_update()
+    )
+    motion = result.scalar_one_or_none()
+    if motion is None:
+        raise HTTPException(status_code=404, detail="Motion not found")
+
+    meeting_result = await db.execute(
+        select(GeneralMeeting).where(GeneralMeeting.id == motion.general_meeting_id)
+    )
+    meeting = meeting_result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+    if get_effective_status(meeting) != GeneralMeetingStatus.open:
+        raise HTTPException(status_code=409, detail="Cannot reopen a motion unless its meeting is open")
+    if motion.voting_closed_at is None:
+        raise HTTPException(status_code=409, detail="Motion voting is already open")
+
+    motion.voting_closed_at = None
+    motion.closed_by_meeting = False
+    await db.commit()
+    await db.refresh(motion)
+
+    options_result = await db.execute(
+        select(MotionOption)
+        .where(MotionOption.motion_id == motion.id)
+        .order_by(MotionOption.display_order)
+    )
+    options = list(options_result.scalars().all())
+    empty_tally = {
+        "yes": {"voter_count": 0, "entitlement_sum": 0},
+        "no": {"voter_count": 0, "entitlement_sum": 0},
+        "abstained": {"voter_count": 0, "entitlement_sum": 0},
+        "absent": {"voter_count": 0, "entitlement_sum": 0},
+        "not_eligible": {"voter_count": 0, "entitlement_sum": 0},
+        "options": [],
+    }
+    return {
+        "id": motion.id,
+        "title": motion.title,
+        "description": motion.description,
+        "display_order": motion.display_order,
+        "motion_number": motion.motion_number,
+        "motion_type": motion.motion_type.value if hasattr(motion.motion_type, "value") else motion.motion_type,
+        "is_multi_choice": motion.is_multi_choice,
+        "is_visible": motion.is_visible,
+        "option_limit": motion.option_limit,
+        "voting_closed_at": None,
+        "closed_by_meeting": False,
+        "closed_by_meeting": False,
+        "options": [
+            {"id": option.id, "text": option.text, "display_order": option.display_order}
+            for option in options
+        ],
+        "tally": empty_tally,
+        "voter_lists": {
+            "yes": [], "no": [], "abstained": [], "absent": [],
+            "not_eligible": [], "options_for": {}, "options_against": {},
+            "options_abstained": {}, "options": {},
         },
     }
 
@@ -3305,6 +3425,7 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
     )
     for open_motion in open_motions_result.scalars().all():
         open_motion.voting_closed_at = general_meeting.closed_at
+        open_motion.closed_by_meeting = True
 
     # Delete draft votes
     await db.execute(
@@ -3389,14 +3510,6 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
                     is_absent=True,
                 ))
 
-    # Create EmailDelivery record
-    email_delivery = EmailDelivery(
-        general_meeting_id=general_meeting_id,
-        status=EmailDeliveryStatus.pending,
-        total_attempts=0,
-    )
-    db.add(email_delivery)
-
     # RR4-04: Commit ballot data BEFORE computing multi-choice outcomes so that
     # compute_multi_choice_outcomes reads fully-committed Vote rows, not
     # in-flight rows that may be rolled back.
@@ -3414,10 +3527,73 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
         agm_id=str(general_meeting_id),
         lot_count=lot_count,
         absent_count=absent_count,
-        email_triggered=True,
+        email_triggered=False,
     )
 
     return general_meeting
+
+
+async def reopen_general_meeting(
+    general_meeting_id: uuid.UUID,
+    request: GeneralMeetingReopenRequest,
+    db: AsyncSession,
+) -> GeneralMeeting:
+    """Reopen a manually closed meeting with a newly scheduled close time.
+
+    Close-generated absence submissions are removed so voters may participate
+    again. Real submitted ballots and individually closed motions are preserved.
+    """
+    result = await db.execute(
+        select(GeneralMeeting)
+        .where(GeneralMeeting.id == general_meeting_id)
+        .with_for_update()
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="General Meeting not found")
+    if meeting.status != GeneralMeetingStatus.closed:
+        raise HTTPException(status_code=409, detail="Only a closed General Meeting can be reopened")
+
+    now = datetime.now(UTC)
+    new_close_time = request.voting_closes_at
+    if new_close_time.tzinfo is None:
+        new_close_time = new_close_time.replace(tzinfo=UTC)
+    else:
+        new_close_time = new_close_time.astimezone(UTC)
+    meeting_at = meeting.meeting_at
+    if meeting_at.tzinfo is None:
+        meeting_at = meeting_at.replace(tzinfo=UTC)
+    else:
+        meeting_at = meeting_at.astimezone(UTC)
+    if new_close_time <= now:
+        raise HTTPException(status_code=422, detail="New voting close time must be in the future")
+    if new_close_time <= meeting_at:
+        raise HTTPException(status_code=422, detail="New voting close time must be after meeting start")
+
+    meeting.status = GeneralMeetingStatus.open
+    meeting.closed_at = None
+    meeting.voting_closes_at = new_close_time
+
+    await db.execute(
+        delete(BallotSubmission).where(
+            BallotSubmission.general_meeting_id == general_meeting_id,
+            BallotSubmission.is_absent == True,  # noqa: E712
+        )
+    )
+    await db.execute(
+        update(Motion)
+        .where(
+            Motion.general_meeting_id == general_meeting_id,
+            Motion.closed_by_meeting == True,  # noqa: E712
+        )
+        .values(voting_closed_at=None, closed_by_meeting=False)
+    )
+
+    await db.commit()
+    await db.refresh(meeting)
+    await compute_multi_choice_outcomes(general_meeting_id, db)
+    logger.info("meeting_reopened", agm_id=str(general_meeting_id), voting_closes_at=new_close_time.isoformat())
+    return meeting
 
 
 async def compute_multi_choice_outcomes(general_meeting_id: uuid.UUID, db: AsyncSession) -> None:
@@ -3676,7 +3852,7 @@ async def resend_report(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict
     general_meeting = result.scalar_one_or_none()
     if general_meeting is None:
         raise HTTPException(status_code=404, detail="General Meeting not found")
-    if general_meeting.status == GeneralMeetingStatus.open:
+    if get_effective_status(general_meeting) != GeneralMeetingStatus.closed:
         raise HTTPException(status_code=409, detail="General Meeting is not closed")
 
     # Check EmailDelivery
@@ -3685,7 +3861,12 @@ async def resend_report(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict
     )
     delivery = delivery_result.scalar_one_or_none()
     if delivery is None:
-        raise HTTPException(status_code=404, detail="Email delivery record not found")
+        delivery = EmailDelivery(
+            general_meeting_id=general_meeting_id,
+            status=EmailDeliveryStatus.pending,
+            total_attempts=0,
+        )
+        db.add(delivery)
 
     # Reset delivery regardless of current status to allow resend on demand
     delivery.status = EmailDeliveryStatus.pending

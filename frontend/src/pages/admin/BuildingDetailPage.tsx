@@ -350,6 +350,30 @@ export default function BuildingDetailPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const ownerSearchParam = searchParams.get("owner_search") ?? "";
+  const [ownerSearchInput, setOwnerSearchInput] = useState(ownerSearchParam);
+  const ownerSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setOwnerSearchInput(ownerSearchParam);
+  }, [ownerSearchParam]);
+
+  useEffect(() => () => {
+    if (ownerSearchDebounceRef.current) clearTimeout(ownerSearchDebounceRef.current);
+  }, []);
+
+  function handleOwnerSearchChange(value: string) {
+    setOwnerSearchInput(value);
+    if (ownerSearchDebounceRef.current) clearTimeout(ownerSearchDebounceRef.current);
+    ownerSearchDebounceRef.current = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      const trimmed = value.trim();
+      if (trimmed) next.set("owner_search", trimmed);
+      else next.delete("owner_search");
+      next.delete("lotPage");
+      setSearchParams(next, { replace: true });
+    }, 300);
+  }
 
   // Read lotPage from URL search params; default to 1
   const lotPageParam = parseInt(searchParams.get("lotPage") ?? "1", 10);
@@ -366,8 +390,8 @@ export default function BuildingDetailPage() {
   });
 
   const { data: lotCountData } = useQuery<number>({
-    queryKey: ["admin", "lot-owners", "count", buildingId],
-    queryFn: () => countLotOwners(buildingId!),
+    queryKey: ["admin", "lot-owners", "count", buildingId, ownerSearchParam],
+    queryFn: () => countLotOwners(buildingId!, ownerSearchParam || undefined),
     enabled: !!buildingId,
   });
 
@@ -380,13 +404,14 @@ export default function BuildingDetailPage() {
     isLoading,
     error,
   } = useQuery<LotOwner[]>({
-    queryKey: ["admin", "lot-owners", buildingId, safeLotPage, lotSortBy, lotSortDir],
+    queryKey: ["admin", "lot-owners", buildingId, safeLotPage, lotSortBy, lotSortDir, ownerSearchParam],
     queryFn: () =>
       listLotOwners(buildingId!, {
         limit: PAGE_SIZE,
         offset: (safeLotPage - 1) * PAGE_SIZE,
         sort_by: lotSortBy,
         sort_dir: lotSortDir,
+        search: ownerSearchParam || undefined,
       }),
     enabled: !!buildingId,
   });
@@ -396,17 +421,18 @@ export default function BuildingDetailPage() {
     const nextOffset = safeLotPage * PAGE_SIZE;
     if (nextOffset < totalLotCount && buildingId) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "lot-owners", buildingId, safeLotPage + 1, lotSortBy, lotSortDir],
+        queryKey: ["admin", "lot-owners", buildingId, safeLotPage + 1, lotSortBy, lotSortDir, ownerSearchParam],
         queryFn: () =>
           listLotOwners(buildingId, {
             limit: PAGE_SIZE,
             offset: nextOffset,
             sort_by: lotSortBy,
             sort_dir: lotSortDir,
+            search: ownerSearchParam || undefined,
           }),
       });
     }
-  }, [safeLotPage, totalLotCount, buildingId, queryClient, lotSortBy, lotSortDir]);
+  }, [safeLotPage, totalLotCount, buildingId, queryClient, lotSortBy, lotSortDir, ownerSearchParam]);
 
   function handleLotPageChange(newPage: number) {
     const next = new URLSearchParams(searchParams);
@@ -511,13 +537,7 @@ export default function BuildingDetailPage() {
       <div className="admin-page-header">
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ marginBottom: 2 }}>
-              {building ? (
-                building.oc_plan_number && building.oc_plan_number.trim()
-                  ? `${building.name} — ${building.oc_plan_number.trim()}`
-                  : building.name
-              ) : "Building"}
-            </h1>
+            <h1 style={{ marginBottom: 2 }}>OC Plans</h1>
             {building?.is_archived && (
               <span
                 style={{
@@ -532,11 +552,8 @@ export default function BuildingDetailPage() {
               </span>
             )}
           </div>
-          {building && (
-            <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
-              {building.manager_email}
-            </p>
-          )}
+          {building && <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>{building.name}</p>}
+          {building?.oc_plan_number && <p style={{ margin: "2px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>OC Plan {building.oc_plan_number}</p>}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {building && (
@@ -566,7 +583,7 @@ export default function BuildingDetailPage() {
             </button>
           )}
           <button className="btn btn--secondary" onClick={handleAddNew}>Add Lot Owner</button>
-          <button className="btn btn--primary" onClick={() => navigate("/admin/general-meetings/new")}>Create General Meeting</button>
+          <button className="btn btn--primary" onClick={() => navigate(`/admin/general-meetings/new?building=${encodeURIComponent(buildingId ?? "")}`)}>Create General Meeting</button>
         </div>
       </div>
 
@@ -588,6 +605,19 @@ export default function BuildingDetailPage() {
       )}
 
       <div className="admin-card">
+        <div className="admin-card__header" style={{ display: "flex", alignItems: "end", gap: 12 }}>
+          <div className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
+            <label className="field__label" htmlFor="owner-search">Search owners</label>
+            <input
+              id="owner-search"
+              className="field__input"
+              type="search"
+              value={ownerSearchInput}
+              onChange={(e) => handleOwnerSearchChange(e.target.value)}
+              placeholder="Lot, owner, email, or proxy"
+            />
+          </div>
+        </div>
         <Pagination
           page={safeLotPage}
           totalPages={totalLotPages}

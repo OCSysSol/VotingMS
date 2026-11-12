@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { createGeneralMeeting } from "../../api/admin";
 import type { GeneralMeetingOut, GeneralMeetingCreateRequest } from "../../api/admin";
 import MotionEditor, { type MotionFormEntry } from "./MotionEditor";
@@ -11,8 +11,9 @@ import { formatApiErrorMessage, MOTION_LIMITS } from "../../utils/validation";
 
 export default function CreateGeneralMeetingForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [buildingId, setBuildingId] = useState("");
+  const [buildingId, setBuildingId] = useState(() => searchParams.get("building") ?? "");
   const [title, setTitle] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
   const [votingClosesAt, setVotingClosesAt] = useState("");

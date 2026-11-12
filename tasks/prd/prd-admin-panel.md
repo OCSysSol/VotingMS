@@ -389,17 +389,17 @@ This document covers admin portal authentication, the admin in-person vote entry
 
 ---
 
-### US-EMAIL-03: Resend summary email button on admin meeting detail page
+### US-EMAIL-03: Manually send or resend summary email on admin meeting detail page
 
 **Status:** ✅ Implemented
 
-**Description:** As a meeting host, I want a "Resend Summary Email" button on the closed meeting detail page so I can re-trigger the results email at any time.
+**Description:** As a meeting host, I want to explicitly send or resend the summary email from a closed meeting page so I control when results are distributed.
 
 **Acceptance Criteria:**
 
-- [ ] A "Resend Summary Email" button is visible on the admin meeting detail page when `meeting.status === "closed"`
+- [ ] A "Send Results Report" button is visible when no report has been delivered; otherwise an explicit resend action is available on closed meetings.
 - [ ] Clicking the button calls `POST /api/admin/general-meetings/{id}/resend-report` and shows a loading state while in flight
-- [ ] On success the button shows a transient "Queued for resend" confirmation message
+- [ ] On success the button shows a transient queued/sent confirmation message
 - [ ] On error the button shows an inline error message
 - [ ] The backend `resend_report` service function allows resend regardless of the current `EmailDelivery.status`
 - [ ] The endpoint still returns 404 if the meeting does not exist and 409 if the meeting is not closed
@@ -666,3 +666,11 @@ This document covers admin portal authentication, the admin in-person vote entry
 - QR code customisation is limited to the tenant logo in the centre (no colour or style options)
 - Automatically resolving multi-choice ties is not supported (admin must resolve manually)
 - Voter name column in the drill-down table (requires backend query change; tracked as a separate story)
+
+### US-AVE-REMAINING-01: Enter in-person votes for unvoted motions on a partially voted lot
+
+**Status:** Proposed (the backend already skips previously voted motions per lot; the UI currently prevents selecting any lot with an app-submitted vote)
+
+- [ ] Admins can select a lot even if its owner or proxy submitted votes on other motions.
+- [ ] Previously submitted motions are shown read-only and cannot be overwritten; admin can enter votes only for unanswered motions. The existing per-motion backend skip behavior remains authoritative.
+- [ ] Preserve voter/proxy audit identity and never replace the original ballot. Show a useful result when no unanswered motions remain.

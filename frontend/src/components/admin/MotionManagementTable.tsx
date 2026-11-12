@@ -36,6 +36,9 @@ export interface MotionManagementTableProps {
   onCloseMotion?: (motionId: string) => void;
   closeMotionErrors?: Record<string, string>;
   pendingCloseMotionId?: string | null;
+  onReopenMotion?: (motionId: string) => void;
+  reopenMotionErrors?: Record<string, string>;
+  pendingReopenMotionId?: string | null;
 }
 
 interface SortableRowProps {
@@ -58,6 +61,9 @@ interface SortableRowProps {
   onCloseMotion?: (motionId: string) => void;
   closeMotionErrors?: Record<string, string>;
   pendingCloseMotionId?: string | null;
+  onReopenMotion?: (motionId: string) => void;
+  reopenMotionErrors?: Record<string, string>;
+  pendingReopenMotionId?: string | null;
 }
 
 function SortableRow({
@@ -80,6 +86,9 @@ function SortableRow({
   onCloseMotion,
   closeMotionErrors,
   pendingCloseMotionId,
+  onReopenMotion,
+  reopenMotionErrors,
+  pendingReopenMotionId,
 }: SortableRowProps) {
   const {
     attributes,
@@ -104,6 +113,7 @@ function SortableRow({
   const isClosed = meetingStatus === "closed";
   const isMotionVotingClosed = !!motion.voting_closed_at;
   const isCloseMotionPending = pendingCloseMotionId === motion.id;
+  const isReopenMotionPending = pendingReopenMotionId === motion.id;
 
   const isVisLoading = pendingVisibilityMotionId === motion.id;
   const isVisDisabled =
@@ -251,6 +261,17 @@ function SortableRow({
             </button>
             {onCloseMotion && (
               isMotionVotingClosed ? (
+                meetingStatus === "open" && onReopenMotion ? (
+                  <button
+                    type="button"
+                    className="btn btn--secondary btn--sm"
+                    data-testid={`reopen-motion-btn-${motion.id}`}
+                    disabled={isReopenMotionPending}
+                    onClick={() => onReopenMotion(motion.id)}
+                  >
+                    {isReopenMotionPending ? "Reopening…" : "Reopen Motion"}
+                  </button>
+                ) : (
                 <span
                   className="motion-type-badge motion-type-badge--closed motion-voting-closed-badge"
                   data-testid={`motion-voting-closed-badge-${motion.id}`}
@@ -258,6 +279,7 @@ function SortableRow({
                 >
                   Voting Closed
                 </span>
+                )
               ) : (
                 <button
                   type="button"
@@ -280,6 +302,11 @@ function SortableRow({
           {closeMotionErrors?.[motion.id] && (
             <span style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginTop: 4 }} role="alert" data-testid={`close-motion-error-${motion.id}`}>
               {closeMotionErrors[motion.id]}
+            </span>
+          )}
+          {reopenMotionErrors?.[motion.id] && (
+            <span style={{ display: "block", color: "var(--red)", fontSize: "0.875rem", marginTop: 4 }} role="alert">
+              {reopenMotionErrors[motion.id]}
             </span>
           )}
         </td>
@@ -305,6 +332,9 @@ export default function MotionManagementTable({
   onCloseMotion,
   closeMotionErrors,
   pendingCloseMotionId,
+  onReopenMotion,
+  reopenMotionErrors,
+  pendingReopenMotionId,
 }: MotionManagementTableProps) {
   const isEditable = meetingStatus === "open" || meetingStatus === "pending";
   const isClosed = meetingStatus === "closed";
@@ -429,6 +459,9 @@ export default function MotionManagementTable({
                       onCloseMotion={onCloseMotion}
                       closeMotionErrors={closeMotionErrors}
                       pendingCloseMotionId={pendingCloseMotionId}
+                      onReopenMotion={onReopenMotion}
+                      reopenMotionErrors={reopenMotionErrors}
+                      pendingReopenMotionId={pendingReopenMotionId}
                     />
                   );
                 })}

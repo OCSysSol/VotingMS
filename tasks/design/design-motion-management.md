@@ -251,3 +251,6 @@ export function getCounterClass(length: number, max: number, warn: number): stri
 4. **Backend 422 API Error Extraction**:
    - Enhance `formatApiErrorMessage` in `frontend/src/utils/validation.ts` to parse Pydantic `loc` arrays (`["body", "motions", 0, "title"]`) into human-readable messages like `"Motion 1: Title - String should have at most 500 characters"`.
 
+## Reopen individually closed motions
+
+Expose an admin reopen action for a motion with a close timestamp when its meeting is open. Add an authenticated `POST /api/admin/motions/{motion_id}/reopen` endpoint. Lock the motion row, validate its parent meeting is effectively open, clear `voting_closed_at` and `closed_by_meeting`, and return updated detail. Do not delete or replace existing votes. A meeting-level reopen clears only motion timestamps tagged `closed_by_meeting`; individually closed motions remain locked. No additional migration beyond the `closed_by_meeting` flag described in `design-meeting-management.md`.

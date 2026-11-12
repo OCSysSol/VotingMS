@@ -168,3 +168,13 @@ On Lambda cold start, `requeue_pending_on_startup()` reschedules any pending ema
 ## Schema Migration Required
 
 Yes — `tenant_smtp_config` table (with data migration seeding from env vars if present).
+
+## Manual report sending
+
+Remove the close-meeting router's automatic `trigger_with_retry` scheduling. Closing still closes voting, creates absent records, and persists results, but does not initiate email. Provide an explicit “Send Results Report” / “Resend Results Report” action for closed meetings. Reuse the existing delivery state and retry worker; the send endpoint should create an `EmailDelivery` row if none exists or reset the existing row before scheduling. Keep report status and errors visible in the meeting detail UI. There is no new schema requirement if one delivery row per meeting remains the intended model.
+
+## OTP SMTP diagnostics and failure response
+
+Instrument the request-OTP delivery path with structured start/success/failure events, channel, elapsed duration, and request/meeting correlation. Log a sanitized provider category and short sanitized provider detail. Never log the OTP code, credentials, or message body; do not log the full email address.
+
+**Privacy decision:** Keep the API response indistinguishable for known and unknown email addresses, including when SMTP delivery fails. Do not expose a delivery-failure field or SMTP error in the voter UI, and keep the existing success-shaped response so request-OTP cannot be used to enumerate accounts. Log delivery failures for operators in Vercel with request ID, meeting ID, channel, elapsed time, provider category, and sanitized detail. Any user-facing retry/support guidance must be generic and independent of the delivery outcome.
