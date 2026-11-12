@@ -1,11 +1,11 @@
 import { test, expect } from "../fixtures";
 
 test.describe("Admin Buildings", () => {
-  test("navigates to buildings page via sidebar", async ({ page }) => {
+  test("navigates to OC Plans page via sidebar", async ({ page }) => {
     await page.goto("/admin/buildings");
     await expect(page.getByText("Admin Portal").first()).toBeVisible();
-    await expect(page.getByRole("link", { name: "Buildings" }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Buildings", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "OC Plans" }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OC Plans", exact: true })).toBeVisible();
   });
 
   test("displays building table with data", async ({ page }) => {
@@ -20,7 +20,7 @@ test.describe("Admin Buildings", () => {
     await page.goto("/admin/buildings");
     const csvContent = "building_name,manager_email\nTest Building E2E,manager@test.com";
     const buffer = Buffer.from(csvContent, "utf-8");
-    const fileInput = page.getByLabel("Buildings file");
+    const fileInput = page.getByLabel("OC Plans file");
     await fileInput.setInputFiles({
       name: "buildings.csv",
       mimeType: "text/csv",
@@ -45,21 +45,21 @@ test.describe("Admin Buildings", () => {
   test("create building via modal dialog", async ({ page }) => {
     const buildingName = `E2E Modal Building ${Date.now()}`;
     await page.goto("/admin/buildings");
-    await expect(page.getByRole("heading", { name: "Buildings", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OC Plans", exact: true })).toBeVisible();
 
     // Open modal
-    await page.getByRole("button", { name: "+ New Building" }).click();
-    await expect(page.getByRole("dialog", { name: "New Building" })).toBeVisible();
+    await page.getByRole("button", { name: "+ New OC Plan" }).click();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).toBeVisible();
 
     // Fill in the form
     await page.getByLabel("Building Name").fill(buildingName);
     await page.getByLabel("Manager Email").fill("e2e-modal@test.com");
 
     // Submit
-    await page.getByRole("button", { name: "Create Building" }).click();
+    await page.getByRole("button", { name: "Create OC Plan" }).click();
 
     // Modal closes after success
-    await expect(page.getByRole("dialog", { name: "New Building" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).not.toBeVisible();
 
     // New building appears in the table
     await expect(page.getByRole("button", { name: buildingName })).toBeVisible();

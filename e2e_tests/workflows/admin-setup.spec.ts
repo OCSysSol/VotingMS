@@ -146,8 +146,14 @@ test.describe("WF1: Admin building setup lifecycle", () => {
 
     await page.getByRole("button", { name: /save/i }).click();
 
-    // Page reflects updated email
-    await expect(page.getByText("wf1-manager-new@test.com")).toBeVisible({ timeout: 10000 });
+    // Modal closes after a successful save
+    await expect(page.getByRole("dialog", { name: "Edit Building" })).not.toBeVisible({ timeout: 10000 });
+
+    // The OC Plan header no longer shows the manager email (US-OC-UI-01), so
+    // reopen the edit modal and confirm the persisted value.
+    await page.getByRole("button", { name: /edit building/i }).click();
+    await expect(page.getByLabel(/manager email/i)).toHaveValue("wf1-manager-new@test.com", { timeout: 10000 });
+    await page.getByRole("button", { name: /cancel/i }).click();
   });
 
   // WF1.5: Upload proxy nominations CSV
