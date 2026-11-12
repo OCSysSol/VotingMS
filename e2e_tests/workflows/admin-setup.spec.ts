@@ -133,6 +133,17 @@ test.describe("WF1: Admin building setup lifecycle", () => {
   test("WF1.4: edit building manager email to wf1-manager-new@test.com", async ({ page }) => {
     test.setTimeout(60000);
 
+    // Ensure starting state is MANAGER_EMAIL so the test is idempotent across retries/re-runs
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await makeAdminApi(baseURL);
+    try {
+      await api.patch(`/api/admin/buildings/${buildingId}`, {
+        data: { manager_email: MANAGER_EMAIL },
+      });
+    } finally {
+      await api.dispose();
+    }
+
     await page.goto(`/admin/buildings/${buildingId}`);
     await expect(page.getByText(BUILDING_NAME)).toBeVisible({ timeout: 15000 });
 
