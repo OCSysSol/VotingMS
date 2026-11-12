@@ -1789,3 +1789,9 @@ oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, i
 
 ## 3. Schema Migration Required
 **Yes.** New Alembic revision to add \`oc_plan_number\`, add index, and drop \`uq_buildings_name\`.
+
+## OC Plan admin UX additions
+
+The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On the detail page retain the selected OC Plan as the page context and display the associated building name as a subtitle. Add a client-side text filter over the already-loaded owner rows (lot number, person names/emails, proxy name/email) unless the list becomes too large; if server-side pagination is used, make the filter a query parameter and apply it before pagination.
+
+Reuse the edit-owner form component for add mode so visual structure cannot drift; add mode supplies empty/default values and uses create submission. When navigating to meeting creation from a selected OC Plan, pass its stable building UUID in the route/query state and initialize the selector from it.

@@ -68,7 +68,7 @@ describe("AdminRoutes", () => {
   it("renders buildings page on /admin/buildings when authenticated", async () => {
     renderRoutes("/admin/buildings");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
   });
 

@@ -78,6 +78,12 @@ function renderEditForm(lotOwner: LotOwner, onSuccess = vi.fn(), onCancel = vi.f
 // Add mode
 // ---------------------------------------------------------------------------
 describe("LotOwnerForm - Add mode", () => {
+  it("uses the same centered dialog sizing as the edit modal", () => {
+    renderAddForm();
+    const dialogContent = screen.getByRole("dialog").querySelector(".dialog");
+    expect(dialogContent).toHaveStyle({ maxWidth: "520px", maxHeight: "90vh", overflowY: "auto" });
+  });
+
   it("renders add form fields", () => {
     renderAddForm();
     expect(screen.getByLabelText("Lot Number")).toBeInTheDocument();

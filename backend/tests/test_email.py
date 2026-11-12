@@ -1294,7 +1294,7 @@ class TestRequeuePendingOnStartup:
 
 
 # ---------------------------------------------------------------------------
-# Integration: close GeneralMeeting → email triggered
+# Integration: report delivery is explicitly requested
 # ---------------------------------------------------------------------------
 
 
@@ -1302,10 +1302,10 @@ class TestCloseAgmEmailIntegration:
     async def _make_client(self, app):
         return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
-    async def test_close_agm_creates_email_delivery_and_triggers(
+    async def test_close_agm_does_not_create_delivery_or_trigger_email(
         self, client: AsyncClient, db_session: AsyncSession, mocker
     ):
-        """POST /api/admin/general-meetings/{id}/close creates EmailDelivery and schedules trigger_with_retry via BackgroundTasks."""
+        """Closing a meeting does not queue or send its report automatically."""
         building = Building(name=f"Bld {uuid.uuid4()}", manager_email="mgr@example.com")
         db_session.add(building)
         await db_session.flush()
@@ -1326,7 +1326,7 @@ class TestCloseAgmEmailIntegration:
         db_session.add(motion)
         await db_session.commit()
 
-        # Patch trigger_with_retry so BackgroundTasks runs it without hitting SMTP
+        # Patch trigger_with_retry to ensure closing does not schedule a send.
         trigger_mock = mocker.patch(
             "app.services.email_service.EmailService.trigger_with_retry",
             new_callable=AsyncMock,
@@ -1335,16 +1335,14 @@ class TestCloseAgmEmailIntegration:
         resp = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert resp.status_code == 200
 
-        # EmailDelivery should have been created
+        # No delivery record is created until the admin explicitly requests a send.
         result = await db_session.execute(
             select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
         )
         delivery = result.scalar_one_or_none()
-        assert delivery is not None
-        assert delivery.status == EmailDeliveryStatus.pending
+        assert delivery is None
 
-        # trigger_with_retry should have been scheduled via BackgroundTasks
-        trigger_mock.assert_called_once_with(agm.id, "http://test")
+        trigger_mock.assert_not_awaited()
 
     async def test_resend_report_triggers_email(
         self, client: AsyncClient, db_session: AsyncSession, mocker

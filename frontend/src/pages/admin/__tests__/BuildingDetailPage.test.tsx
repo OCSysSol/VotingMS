@@ -54,8 +54,31 @@ describe("BuildingDetailPage", () => {
   it("shows building name when building is found", async () => {
     renderPage();
     await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
       expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
     });
+  });
+
+  it("passes the owner filter to both paginated lot-owner requests", async () => {
+    let listSearch = "";
+    let countSearch = "";
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners", ({ request }) => {
+        listSearch = new URL(request.url).searchParams.get("search") ?? "";
+        return HttpResponse.json([]);
+      }),
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners/count", ({ request }) => {
+        countSearch = new URL(request.url).searchParams.get("search") ?? "";
+        return HttpResponse.json({ count: 0 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByRole("searchbox", { name: "Search owners" }), "Alice Smith");
+    await waitFor(() => {
+      expect(listSearch).toBe("Alice Smith");
+      expect(countSearch).toBe("Alice Smith");
+    }, { timeout: 3000 });
   });
 
   it("shows Add Lot Owner button", async () => {

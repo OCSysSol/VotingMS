@@ -54,15 +54,16 @@ export default function GeneralMeetingTable({
       <table className="admin-table">
         <thead>
           <tr>
+            <th>OC Plan</th>
             {onSort ? (
               <SortableColumnHeader
-                label="Building"
+                label="Building Name"
                 column="building_name"
                 currentSort={currentSort}
                 onSort={onSort}
               />
             ) : (
-              <th>Building</th>
+              <th>Building Name</th>
             )}
             {onSort ? (
               <SortableColumnHeader
@@ -120,11 +121,11 @@ export default function GeneralMeetingTable({
         <tbody>
           {isLoading && !meetings.length ? (
             <tr>
-              <td colSpan={7} className="state-message">Loading General Meetings...</td>
+              <td colSpan={8} className="state-message">Loading General Meetings...</td>
             </tr>
           ) : meetings.length === 0 ? (
             <tr>
-              <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
+              <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 14px" }}>
                 No General Meetings found.
               </td>
             </tr>
@@ -138,6 +139,7 @@ export default function GeneralMeetingTable({
                 }}
                 onClick={() => navigate(`/admin/general-meetings/${meeting.id}`)}
               >
+                <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{meeting.oc_plan_number || "—"}</td>
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>{meeting.building_name}</td>
                 <td style={{ fontWeight: 600 }}>{meeting.title}</td>
                 <td>

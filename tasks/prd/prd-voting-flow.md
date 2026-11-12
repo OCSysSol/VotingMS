@@ -760,3 +760,11 @@ This document covers the complete voter journey: email OTP authentication, persi
 - No public-facing display of financial position to other voters
 - No automatic promotion from 'in_arrear' to 'normal' based on payment data
 - No proxy approval workflow — nominations take effect immediately
+
+### US-OTP-DELIVERY-01: Preserve account privacy when OTP delivery fails
+
+**Status:** Revised — privacy decision is to keep delivery outcomes indistinguishable to voters.
+
+- [x] Keep `POST /api/auth/request-otp` success-shaped and indistinguishable for known and unknown addresses, including when email delivery fails, to prevent account enumeration.
+- [x] Do not show a delivery-specific error or provider details in the voter UI. Any retry/support guidance is generic and does not depend on delivery outcome.
+- [x] Log delivery attempt start/result, channel, elapsed time, request and meeting IDs, and sanitized provider diagnostics for operator troubleshooting. Never log OTP codes, SMTP credentials, or message bodies.

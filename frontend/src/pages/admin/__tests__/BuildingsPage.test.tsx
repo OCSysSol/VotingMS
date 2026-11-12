@@ -35,8 +35,8 @@ describe("BuildingsPage", () => {
   it("shows loading state inline in table while page header remains visible", () => {
     renderPage();
     // Page structure renders immediately
-    expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     // Loading message is inside the table body
     expect(screen.getByText("Loading buildings...")).toBeInTheDocument();
   });
@@ -68,7 +68,7 @@ describe("BuildingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
     });
-    expect(screen.getByText("Import Buildings")).toBeInTheDocument();
+    expect(screen.getByText("Import OC Plans")).toBeInTheDocument();
   });
 
   it("navigates to building detail on name click", async () => {
@@ -85,10 +85,10 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Buildings file")).toBeInTheDocument();
+      expect(screen.getByLabelText("OC Plans file")).toBeInTheDocument();
     });
     const file = new File(["building_name,manager_email\nTest,t@t.com"], "buildings.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(screen.getByText(/Import complete: 2 created, 1 updated/)).toBeInTheDocument();
     });
@@ -103,10 +103,10 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByLabelText("Buildings file")).toBeInTheDocument();
+      expect(screen.getByLabelText("OC Plans file")).toBeInTheDocument();
     });
     const file = new File(["bad"], "bad.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(screen.getByText(/Error:/)).toBeInTheDocument();
     });
@@ -117,7 +117,7 @@ describe("BuildingsPage", () => {
   it("+ New Building button is always visible (not hidden after clicking)", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
   });
 
@@ -125,10 +125,10 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
     expect(screen.getByLabelText("Building Name")).toBeInTheDocument();
     expect(screen.getByLabelText("Manager Email")).toBeInTheDocument();
   });
@@ -137,10 +137,10 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    expect(screen.getByRole("button", { name: "Create Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByRole("button", { name: "Create OC Plan" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
@@ -148,29 +148,29 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
   });
 
   it("clicking backdrop closes modal", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
     // The backdrop div is the fixed overlay. In jsdom, pointer events on fixed-position
     // elements work when we target the element directly. The backdrop is the first fixed div.
-    const dialog = screen.getByRole("dialog", { name: "New Building" });
+    const dialog = screen.getByRole("dialog", { name: "New OC Plan" });
     // The backdrop is the previous sibling of the dialog panel
     const backdrop = dialog.previousElementSibling as HTMLElement;
     await user.click(backdrop);
-    expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
   });
 
   // --- Input validation ---
@@ -179,10 +179,10 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     expect(screen.getByText("Building name is required.")).toBeInTheDocument();
   });
 
@@ -190,11 +190,11 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Test Tower");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     expect(screen.getByText("Manager email is required.")).toBeInTheDocument();
   });
 
@@ -202,12 +202,12 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Test Tower");
     await user.type(screen.getByLabelText("Manager Email"), "notanemail");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     expect(screen.getByText("Please enter a valid email address.")).toBeInTheDocument();
   });
 
@@ -225,14 +225,14 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "New Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
     });
   });
 
@@ -254,15 +254,15 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "OC Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.type(screen.getByLabelText("OC Plan Number"), "OC98765");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
     });
     expect((capturedBody as any)?.oc_plan_number).toBe("OC98765");
   });
@@ -278,34 +278,34 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Existing Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     await waitFor(() => {
       expect(screen.getByText(/409/)).toBeInTheDocument();
     });
     // Modal stays open on error
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
   });
 
   it("form fields are cleared when modal is closed and reopened", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     // Open modal and type something
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Typed Name");
     await user.type(screen.getByLabelText("Manager Email"), "typed@example.com");
     // Close
     await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
     // Reopen — fields should be empty
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByLabelText("Building Name")).toHaveValue("");
     expect(screen.getByLabelText("Manager Email")).toHaveValue("");
   });
@@ -447,7 +447,7 @@ describe("BuildingsPage", () => {
   it("renders page 1 by default (no page param in URL)", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     // No error — page defaults to 1
     expect(screen.queryByText("Failed to load buildings.")).not.toBeInTheDocument();
@@ -492,7 +492,7 @@ describe("BuildingsPage", () => {
   it("defaults to page 1 when page URL param is not a valid number", async () => {
     renderPage("?page=abc");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     // No error — invalid page defaults to 1
     expect(screen.queryByText("Failed to load buildings.")).not.toBeInTheDocument();
@@ -530,22 +530,22 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog", { name: "New Building" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
   });
 
   it("Tab key wraps focus from last to first element in New Building modal", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
-    const createBtn = screen.getByRole("button", { name: "Create Building" });
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    const createBtn = screen.getByRole("button", { name: "Create OC Plan" });
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     // Tab past last focusable (Cancel) should wrap to first
     cancelBtn.focus();
@@ -562,9 +562,9 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     const nameInput = screen.getByLabelText("Building Name");
     nameInput.focus();
@@ -576,9 +576,9 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     // Focus the Manager Email input (middle element) and Shift+Tab — should move to Building Name
     const managerEmail = screen.getByLabelText("Manager Email");
     const nameInput = screen.getByLabelText("Building Name");
@@ -592,9 +592,9 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByText(/Required field/)).toBeInTheDocument();
   });
 
@@ -604,9 +604,9 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByLabelText("Building Name")).toHaveAttribute("aria-required", "true");
   });
 
@@ -614,9 +614,9 @@ describe("BuildingsPage", () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByLabelText("Manager Email")).toHaveAttribute("aria-required", "true");
   });
 
@@ -780,21 +780,21 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
   it("renders a 'Search buildings' label and text input", async () => {
     renderPage();
     // Input is rendered immediately as part of the page header
-    expect(screen.getByLabelText("Search buildings")).toBeInTheDocument();
+    expect(screen.getByLabelText("Search OC Plans")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Filter by name…")).toBeInTheDocument();
   });
 
   it("typing in the name filter updates the input value immediately", async () => {
     const user = userEvent.setup();
     renderPage();
-    const input = screen.getByLabelText("Search buildings");
+    const input = screen.getByLabelText("Search OC Plans");
     await user.type(input, "Tower");
     expect(input).toHaveValue("Tower");
   });
 
   it("name_filter URL param pre-populates the filter input on load", () => {
     renderPage("?name_filter=Alpha");
-    expect(screen.getByLabelText("Search buildings")).toHaveValue("Alpha");
+    expect(screen.getByLabelText("Search OC Plans")).toHaveValue("Alpha");
   });
 
   it("listBuildings is called with name param when name_filter is in URL", async () => {
@@ -821,7 +821,7 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     renderPage();
-    const input = screen.getByLabelText("Search buildings");
+    const input = screen.getByLabelText("Search OC Plans");
     await user.type(input, "To");
     expect(input).toHaveValue("To");
     vi.runAllTimers();
@@ -836,13 +836,13 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     renderPage("?name_filter=Tower");
     await waitFor(() => {
-      expect(screen.getByLabelText("Search buildings")).toHaveValue("Tower");
+      expect(screen.getByLabelText("Search OC Plans")).toHaveValue("Tower");
     });
-    await user.clear(screen.getByLabelText("Search buildings"));
-    expect(screen.getByLabelText("Search buildings")).toHaveValue("");
+    await user.clear(screen.getByLabelText("Search OC Plans"));
+    expect(screen.getByLabelText("Search OC Plans")).toHaveValue("");
     vi.runAllTimers();
     await waitFor(() => {
-      expect(screen.getByLabelText("Search buildings")).toHaveValue("");
+      expect(screen.getByLabelText("Search OC Plans")).toHaveValue("");
     });
     vi.useRealTimers();
   }, 10000);
@@ -851,7 +851,7 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime.bind(vi) });
     renderPage();
-    const input = screen.getByLabelText("Search buildings");
+    const input = screen.getByLabelText("Search OC Plans");
     await user.type(input, "A");
     vi.advanceTimersByTime(100);
     await user.type(input, "l");
@@ -877,18 +877,18 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     );
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     await waitFor(() => {
       expect(screen.getByText(/Building limit reached/)).toBeInTheDocument();
     });
     // The parsed detail message is shown (not just "HTTP 422: ...")
     expect(screen.getByText(/Contact support to upgrade/)).toBeInTheDocument();
     // Modal stays open on error
-    expect(screen.getByRole("dialog", { name: "New Building" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
   });
 
   it("falls through to raw error message when Building limit reached body has no JSON object", async () => {
@@ -908,11 +908,11 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     );
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     // The raw error message is shown (contains "Building limit reached")
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
@@ -930,11 +930,11 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     );
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByRole("button", { name: "+ New Building" })).toBeInTheDocument());
-    await user.click(screen.getByRole("button", { name: "+ New Building" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     // The raw error is shown since parsed.detail is falsy
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();

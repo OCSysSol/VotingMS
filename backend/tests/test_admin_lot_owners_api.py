@@ -48,6 +48,35 @@ class TestListLotOwners:
         assert isinstance(data, list)
         assert len(data) == 2
 
+    async def test_search_matches_lot_owner_name_email_and_proxy(self, client: AsyncClient, db_session: AsyncSession):
+        building = Building(name="Owner Search Building", manager_email="owner-search@test.com")
+        db_session.add(building)
+        await db_session.flush()
+        lot = LotOwner(
+            building_id=building.id,
+            lot_number="SEARCH-17",
+            unit_entitlement=42,
+        )
+        db_session.add(lot)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lot, "search-owner@test.com", "Harper", "Owner")
+        proxy = await get_or_create_person(db_session, "search-proxy@test.com", "Riley", "Proxy")
+        db_session.add(LotProxy(lot_id=lot.id, person_id=proxy.id))
+        await db_session.commit()
+
+        for term in ("SEARCH-17", "harper", "search-owner@test.com", "riley", "search-proxy@test.com"):
+            response = await client.get(
+                f"/api/admin/buildings/{building.id}/lot-owners?search={term.replace('@', '%40')}"
+            )
+            assert response.status_code == 200
+            assert [row["lot_number"] for row in response.json()] == ["SEARCH-17"]
+
+        count_response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners/count?search=riley"
+        )
+        assert count_response.status_code == 200
+        assert count_response.json()["count"] == 1
+
     async def test_lot_owner_fields_present(
         self, client: AsyncClient, building_with_owners: Building
     ):

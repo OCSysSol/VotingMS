@@ -36,8 +36,14 @@ from app.models import (
 from app.models.lot import Lot
 from app.models.lot_person import lot_persons
 from app.models.person import Person
-from app.routers.auth import _generate_otp_code, _OTP_ALPHABET
+from app.routers.auth import _generate_otp_code, _OTP_ALPHABET, _sanitized_otp_provider_error
 from tests.conftest import get_or_create_person
+
+
+def test_sanitized_otp_provider_error_decodes_bytes():
+    error = Exception()
+    error.message = b"Temporary mail provider response"
+    assert _sanitized_otp_provider_error(error) == "Temporary mail provider response"
 
 
 # ---------------------------------------------------------------------------
@@ -381,16 +387,36 @@ class TestRequestOtp:
         voter_email = building_and_meeting["voter_email"]
         agm = building_and_meeting["agm"]
 
+        log_mock = MagicMock()
         with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock) as mock_send, \
-             patch("app.routers.auth.settings") as mock_settings:
+             patch("app.routers.auth.settings") as mock_settings, \
+             patch("app.routers.auth.logger", log_mock):
             mock_settings.testing_mode = False
-            mock_send.side_effect = Exception("SMTP connection refused")
+            mock_send.side_effect = Exception(
+                "SMTP auth failed for voter@example.com password=secret "
+                "smtp://worker:pw@mail.internal ABCD2345"
+            )
             response = await client.post(
                 "/api/auth/request-otp",
                 json={"email": voter_email, "general_meeting_id": str(agm.id)},
             )
         assert response.status_code == 200
         assert response.json()["sent"] is True
+        failed_event = next(
+            call for call in log_mock.error.call_args_list
+            if call.args and call.args[0] == "otp_delivery_attempt_failed"
+        )
+        assert failed_event.kwargs["channel"] == "email"
+        assert failed_event.kwargs["provider_category"] == "Exception"
+        assert failed_event.kwargs["provider_detail"] == (
+            "SMTP auth failed for [email] password=[redacted] "
+            "smtp://[credentials]@mail.internal [code]"
+        )
+        assert "error" not in failed_event.kwargs
+        assert any(
+            call.args and call.args[0] == "otp_delivery_attempt_started"
+            for call in log_mock.info.call_args_list
+        )
 
     async def test_request_otp_smtp_failure_otp_row_still_exists(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict

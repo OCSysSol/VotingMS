@@ -785,6 +785,20 @@ This document covers all building management, lot owner management, CSV/Excel im
 
 ---
 
+
+### US-OC-UI-01: Make OC Plans the primary admin entity
+
+**Status:** Proposed (the OC Plan data model, dual columns, and building/OC search already exist)
+
+As an admin, I want the admin navigation and pages to use OC Plans terminology while retaining building names as context.
+
+- [ ] Rename the Buildings navigation item and list heading to “OC Plans”.
+- [ ] On the selected OC Plan page, show “OC Plans” as the title and the building name as a subtitle; show the OC plan number where available.
+- [ ] Add a case-insensitive owner filter on the OC Plan detail page matching lot number, owner name/email, and proxy name/email; clearing it restores the full list.
+- [ ] Make Add Lot Owner use the same layout, field order, labels, and styling as Edit Lot Owner while preserving add defaults.
+- [ ] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it.
+- [ ] Preserve existing Building IDs and relationships; no data model rename is required.
+
 ## Functional Requirements
 
 - FR-1: A building record contains: technical ID (UUID PK), name (string, non-unique), optional OC plan number (`oc_plan_number`, nullable VARCHAR, indexed), manager email address, and associated lot owner records. Buildings can be created individually via a form or bulk-created/updated via CSV or Excel upload. Multiple OC plans may share the same building name (the database unique constraint `uq_buildings_name` is removed).

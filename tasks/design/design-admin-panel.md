@@ -333,3 +333,11 @@ Yes — additive:
 - `ballot_submissions.submitted_by_admin` (BOOLEAN NOT NULL DEFAULT FALSE)
 
 No additional migration is required for US-DL-01. The `submitted_at` field is already on `ballot_submissions` and is only newly exposed in the API response.
+
+## Partial in-person vote entry for app-voted lots
+
+Backend `enter_votes_for_meeting` already obtains submitted motion IDs by lot and skips those IDs, while accepting new votes for unanswered motions. The UI mismatch is in `AdminVoteEntryPanel`: it infers “app submitted” from any voter-list entry and disables selection for the whole lot. Change selection to permit those lots; hydrate app-submitted motion choices from `voter_lists` as immutable prior entries, and disable only the corresponding motion cells. Admin-entered prior entries remain immutable as today. Submit only explicit choices for unanswered motions. Maintain the unique ballot/submission constraints and never replace voter/proxy identity. No schema migration is expected.
+
+## OC Plan meeting-list columns and navigation prefill
+
+Meeting list items need the joined `oc_plan_number`, and list/count filtering needs a shared search value across building name and OC plan (plus title if retained). From OC Plan detail, route to meeting creation with `building_id` and preselect that building in the form; no schema change.

@@ -57,6 +57,28 @@ describe("GeneralMeetingListPage", () => {
     expect(screen.getByText("Loading General Meetings...")).toBeInTheDocument();
   });
 
+  it("sends the shared meeting, OC Plan, and building search to list and count", async () => {
+    let listSearch = "";
+    let countSearch = "";
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
+        listSearch = new URL(request.url).searchParams.get("name") ?? "";
+        return HttpResponse.json([]);
+      }),
+      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
+        countSearch = new URL(request.url).searchParams.get("name") ?? "";
+        return HttpResponse.json({ count: 0 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await user.type(screen.getByRole("searchbox", { name: "Search" }), "OC 456");
+    await waitFor(() => {
+      expect(listSearch).toBe("OC 456");
+      expect(countSearch).toBe("OC 456");
+    }, { timeout: 3000 });
+  });
+
   it("loading overlay has pointer-events none while loading and auto after load", async () => {
     renderPage();
     // During loading the overlay div should block pointer events

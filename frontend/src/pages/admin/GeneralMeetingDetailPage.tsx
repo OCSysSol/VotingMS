@@ -11,12 +11,15 @@ import {
   deleteMotion,
   resendReport,
   closeMotion,
+  reopenMotion,
+  reopenGeneralMeeting,
   updateGeneralMeeting,
 } from "../../api/admin";
 import type { GeneralMeetingDetail, AddMotionRequest, UpdateMotionRequest, MotionDetail } from "../../api/admin";
 import type { MotionType } from "../../types";
 import StatusBadge from "../../components/admin/StatusBadge";
 import CloseGeneralMeetingButton from "../../components/admin/CloseGeneralMeetingButton";
+import ReopenGeneralMeetingDialog from "../../components/admin/ReopenGeneralMeetingDialog";
 import StartGeneralMeetingButton from "../../components/admin/StartGeneralMeetingButton";
 import EmailStatusBanner from "../../components/admin/EmailStatusBanner";
 import AGMReportView from "../../components/admin/AGMReportView";
@@ -231,6 +234,8 @@ export default function GeneralMeetingDetailPage() {
   const [visibilityErrors, setVisibilityErrors] = useState<Record<string, string>>({});
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
+  const [showReopenMeetingDialog, setShowReopenMeetingDialog] = useState(false);
+  const [reopenMeetingError, setReopenMeetingError] = useState<string | null>(null);
   const [deleteMeetingError, setDeleteMeetingError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
 
@@ -337,6 +342,18 @@ export default function GeneralMeetingDetailPage() {
     onError: (err: Error) => {
       setResendError(err.message || "Failed to resend summary email");
       setResendSuccess(false);
+    },
+  });
+
+  const reopenMeetingMutation = useMutation({
+    mutationFn: (votingClosesAt: string) => reopenGeneralMeeting(meetingId!, votingClosesAt),
+    onSuccess: async () => {
+      setShowReopenMeetingDialog(false);
+      setReopenMeetingError(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (error: Error) => {
+      setReopenMeetingError(formatApiErrorMessage(error) || "Failed to reopen meeting");
     },
   });
 
@@ -477,6 +494,7 @@ export default function GeneralMeetingDetailPage() {
   const [closeMotionErrors, setCloseMotionErrors] = useState<Record<string, string>>({});
   const [pendingCloseMotionId, setPendingCloseMotionId] = useState<string | null>(null);
   const [pendingCloseMotionConfirmId, setPendingCloseMotionConfirmId] = useState<string | null>(null);
+  const [pendingReopenMotionConfirmId, setPendingReopenMotionConfirmId] = useState<string | null>(null);
 
   const closeMotionMutation = useMutation({
     mutationFn: (motionId: string) => {
@@ -495,6 +513,28 @@ export default function GeneralMeetingDetailPage() {
     onError: (error: Error, motionId) => {
       setPendingCloseMotionId(null);
       setCloseMotionErrors((prev) => ({ ...prev, [motionId]: error.message || "Failed to close motion" }));
+    },
+  });
+
+  const [reopenMotionErrors, setReopenMotionErrors] = useState<Record<string, string>>({});
+  const [pendingReopenMotionId, setPendingReopenMotionId] = useState<string | null>(null);
+  const reopenMotionMutation = useMutation({
+    mutationFn: (motionId: string) => {
+      setPendingReopenMotionId(motionId);
+      return reopenMotion(motionId);
+    },
+    onSuccess: async (_data, motionId) => {
+      setPendingReopenMotionId(null);
+      setReopenMotionErrors((previous) => {
+        const next = { ...previous };
+        delete next[motionId];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (error: Error, motionId) => {
+      setPendingReopenMotionId(null);
+      setReopenMotionErrors((previous) => ({ ...previous, [motionId]: error.message || "Failed to reopen motion" }));
     },
   });
 
@@ -732,6 +772,18 @@ export default function GeneralMeetingDetailPage() {
             onSuccess={handleCloseSuccess}
           />
         )}
+        {meeting.status === "closed" && meeting.closed_at && (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={() => {
+              setReopenMeetingError(null);
+              setShowReopenMeetingDialog(true);
+            }}
+          >
+            Reopen Meeting
+          </button>
+        )}
         {(meeting.status === "closed" || meeting.status === "pending") && (
           <button
             type="button"
@@ -860,7 +912,7 @@ export default function GeneralMeetingDetailPage() {
         />
       )}
 
-      {meeting.status === "closed" && meeting.email_delivery && !showEmailBanner && (
+      {meeting.status === "closed" && !showEmailBanner && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
           <button
             type="button"
@@ -868,7 +920,7 @@ export default function GeneralMeetingDetailPage() {
             onClick={() => { setResendSuccess(false); setResendError(null); resendMutation.mutate(); }}
             disabled={resendMutation.isPending}
           >
-            {resendMutation.isPending ? "Sending..." : "Resend Summary Email"}
+            {resendMutation.isPending ? "Sending..." : meeting.email_delivery ? "Resend Summary Email" : "Send Summary Email"}
           </button>
           {resendSuccess && (
             <span style={{ color: "var(--green)", fontSize: "0.875rem", fontWeight: 600 }}>
@@ -972,6 +1024,16 @@ export default function GeneralMeetingDetailPage() {
           }}
           closeMotionErrors={closeMotionErrors}
           pendingCloseMotionId={pendingCloseMotionId}
+          onReopenMotion={(motionId) => {
+            setReopenMotionErrors((previous) => {
+              const next = { ...previous };
+              delete next[motionId];
+              return next;
+            });
+            setPendingReopenMotionConfirmId(motionId);
+          }}
+          reopenMotionErrors={reopenMotionErrors}
+          pendingReopenMotionId={pendingReopenMotionId}
         />
       )}
 
@@ -1040,6 +1102,49 @@ export default function GeneralMeetingDetailPage() {
         </div>
       )}
 
+      {pendingReopenMotionConfirmId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reopen Motion Voting"
+          data-testid="reopen-motion-confirm-dialog"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(event) => { if (event.target === event.currentTarget) setPendingReopenMotionConfirmId(null); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 8, padding: 32, minWidth: 360, maxWidth: 480, width: "100%", boxShadow: "0 4px 24px rgba(0,0,0,0.15)" }}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Reopen voting for this motion?</h2>
+            <p style={{ marginBottom: 24, color: "var(--text-secondary)" }}>
+              Voters who have not submitted a vote for this motion can vote again. Existing submitted votes will remain unchanged.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn--secondary" onClick={() => setPendingReopenMotionConfirmId(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                data-testid="reopen-motion-confirm-btn"
+                onClick={() => {
+                  const id = pendingReopenMotionConfirmId;
+                  setPendingReopenMotionConfirmId(null);
+                  reopenMotionMutation.mutate(id);
+                }}
+              >
+                Reopen Voting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Motion Modal */}
       {pendingDeleteMotionId && (
         <DeleteMotionConfirmModal
@@ -1059,6 +1164,22 @@ export default function GeneralMeetingDetailPage() {
           error={deleteMeetingError}
           onConfirm={handleDeleteMeetingConfirm}
           onCancel={() => { setShowDeleteMeetingModal(false); setDeleteMeetingError(null); }}
+        />
+      )}
+
+      {showReopenMeetingDialog && meeting && (
+        <ReopenGeneralMeetingDialog
+          initialVotingClosesAt={toDatetimeLocalValue(new Date(Math.max(
+            Date.now() + 60 * 60 * 1000,
+            new Date(meeting.meeting_at).getTime() + 60 * 60 * 1000,
+          )).toISOString())}
+          isPending={reopenMeetingMutation.isPending}
+          error={reopenMeetingError}
+          onConfirm={(votingClosesAt) => reopenMeetingMutation.mutate(votingClosesAt)}
+          onCancel={() => {
+            setShowReopenMeetingDialog(false);
+            setReopenMeetingError(null);
+          }}
         />
       )}
 

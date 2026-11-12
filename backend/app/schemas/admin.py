@@ -495,6 +495,7 @@ class GeneralMeetingListItem(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID
     building_name: str
+    oc_plan_number: str | None = None
     title: str
     status: str
     meeting_at: datetime
@@ -592,6 +593,7 @@ class MotionDetail(BaseModel):
     option_limit: int | None = None
     options: list[MotionOptionOut] = []
     voting_closed_at: datetime | None = None
+    closed_by_meeting: bool = False
     tally: MotionTally
     voter_lists: MotionVoterLists
 
@@ -633,6 +635,17 @@ class GeneralMeetingCloseOut(BaseModel):
     id: uuid.UUID
     status: str
     closed_at: datetime
+    voting_closes_at: datetime
+
+
+class GeneralMeetingReopenRequest(BaseModel):
+    voting_closes_at: datetime
+
+
+class GeneralMeetingReopenOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    closed_at: datetime | None
     voting_closes_at: datetime
 
 

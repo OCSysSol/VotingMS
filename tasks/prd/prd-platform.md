@@ -373,3 +373,11 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 - No role hierarchy for admin users (flat --- any admin can invite or remove others)
 - No self-removal (the current admin's Remove button is hidden, not merely disabled)
 - No per-building OTP channel configuration (one global toggle per tenant)
+
+### US-OTP-SMTP-OBS-01: Improve request-OTP SMTP diagnostics
+
+**Status:** Proposed (failure logging exists; broaden structured lifecycle coverage)
+
+- [x] Add structured events for OTP request receipt, selected channel, delivery attempt start, success/failure, and elapsed time.
+- [x] Correlate events by request/meeting ID without logging OTP codes, SMTP passwords, full email addresses, or message bodies.
+- [x] Log failures with a sanitized provider category and detail. Per US-OTP-DELIVERY-01, keep the API and voter UI indistinguishable for known and unknown addresses.
