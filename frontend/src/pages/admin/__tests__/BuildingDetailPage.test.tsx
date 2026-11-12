@@ -59,6 +59,18 @@ describe("BuildingDetailPage", () => {
     });
   });
 
+  it("shows the building name as the subtitle beneath the OC Plans title", async () => {
+    renderPage();
+    const title = await screen.findByRole("heading", { name: "OC Plans" });
+    const buildingName = await screen.findByText("Alpha Tower");
+    const pageHeader = title.closest(".admin-page-header");
+
+    expect(pageHeader).not.toBeNull();
+    expect(pageHeader?.contains(buildingName)).toBe(true);
+    expect(buildingName.tagName).toBe("P");
+    expect(buildingName).toHaveStyle({ fontSize: "0.875rem" });
+  });
+
   it("passes the owner filter to both paginated lot-owner requests", async () => {
     let listSearch = "";
     let countSearch = "";
