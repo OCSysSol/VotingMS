@@ -248,7 +248,7 @@ describe("GeneralMeetingTable", () => {
   it("Building column is a plain th (no sort button) when no onSort prop provided", () => {
     renderTable({ meetings });
     expect(screen.queryByRole("button", { name: /Building/ })).not.toBeInTheDocument();
-    expect(screen.getByText("Building")).toBeInTheDocument();
+    expect(screen.getByText("Building Name")).toBeInTheDocument();
   });
 
   // --- Pagination ---

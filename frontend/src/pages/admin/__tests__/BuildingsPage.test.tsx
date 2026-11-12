@@ -450,7 +450,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     // No error — page defaults to 1
-    expect(screen.queryByText("Failed to load buildings.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed to load OC Plans.")).not.toBeInTheDocument();
   });
 
   it("navigates to page 2 via pagination and updates URL param", async () => {
@@ -495,7 +495,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     // No error — invalid page defaults to 1
-    expect(screen.queryByText("Failed to load buildings.")).not.toBeInTheDocument();
+    expect(screen.queryByText("Failed to load OC Plans.")).not.toBeInTheDocument();
   });
 
   it("reads page=2 from URL and loads page 2", async () => {
@@ -630,7 +630,7 @@ describe("BuildingsPage", () => {
     );
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Failed to load buildings.")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load OC Plans.")).toBeInTheDocument();
     });
   });
 
@@ -727,7 +727,7 @@ describe("BuildingsPage", () => {
     );
     renderPage("?sort_by=INVALID");
     await waitFor(() => {
-      expect(screen.getByText("Failed to load buildings.")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load OC Plans.")).toBeInTheDocument();
     });
   });
 
@@ -777,11 +777,11 @@ describe("BuildingsPage", () => {
 // --- Fix 4: name filter input ---
 
 describe("BuildingsPage — name filter (Fix 4)", () => {
-  it("renders a 'Search buildings' label and text input", async () => {
+  it("renders a 'Search OC Plans' label and text input", async () => {
     renderPage();
     // Input is rendered immediately as part of the page header
     expect(screen.getByLabelText("Search OC Plans")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Filter by name…")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Filter by OC Plan or building name…")).toBeInTheDocument();
   });
 
   it("typing in the name filter updates the input value immediately", async () => {

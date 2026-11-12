@@ -61,7 +61,7 @@ describe("AdminRoutes", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Admin Portal").length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByRole("link", { name: "Buildings" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "OC Plans" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "General Meetings" }).length).toBeGreaterThan(0);
   });
 

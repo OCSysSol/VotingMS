@@ -192,7 +192,7 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("shows Building label when building is not found", async () => {
+  it("shows OC Plans title when building is not found", async () => {
     server.use(
       http.get("http://localhost/api/admin/buildings/:buildingId", () => {
         return HttpResponse.json({ detail: "Building not found" }, { status: 404 });
@@ -200,7 +200,7 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByText("Building")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
   });
 
@@ -219,7 +219,7 @@ describe("BuildingDetailPage", () => {
       expect(screen.getByRole("button", { name: "Create General Meeting" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
-    expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/new");
+    expect(mockNavigate).toHaveBeenCalledWith("/admin/general-meetings/new?building=b1");
   });
 
   it("shows Archive Building button for active buildings", async () => {
@@ -424,7 +424,7 @@ describe("BuildingDetailPage", () => {
   it("does not show Edit Building button when building is not found", async () => {
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByText("Building")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Edit Building" })).not.toBeInTheDocument();
   });
@@ -527,7 +527,7 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("renders building name and oc_plan_number in header when set", async () => {
+  it("renders OC Plans title with building name and OC Plan number subtitles", async () => {
     server.use(
       http.get("http://localhost/api/admin/buildings/:buildingId", () => {
         return HttpResponse.json({
@@ -542,7 +542,9 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-oc");
     await waitFor(() => {
-      expect(screen.getByText("Highland Residences — OC-777")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByText("Highland Residences")).toBeInTheDocument();
+      expect(screen.getByText("OC Plan OC-777")).toBeInTheDocument();
     });
   });
 

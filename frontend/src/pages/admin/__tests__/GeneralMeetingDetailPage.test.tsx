@@ -3019,7 +3019,7 @@ describe("Close Motion", () => {
     });
   });
 
-  it("shows Closed badge for motion with voting_closed_at set", async () => {
+  it("shows reopen action for a closed motion while its meeting remains open", async () => {
     const meetingWithClosedMotion = {
       ...ADMIN_MEETING_DETAIL,
       id: "agm-closed-motion",
@@ -3038,7 +3038,7 @@ describe("Close Motion", () => {
     );
     renderPage("agm-closed-motion");
     await waitFor(() => {
-      expect(screen.getByTestId("motion-voting-closed-badge-m-closed-voting")).toBeInTheDocument();
+      expect(screen.getByTestId("reopen-motion-btn-m-closed-voting")).toBeInTheDocument();
     });
   });
 });

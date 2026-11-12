@@ -1427,7 +1427,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
   });
 
   // Non-admin voter-submitted lot badge (AVE-RV-02 boundary: no badge when submitted_by_admin is false)
-  it("No 'Previously entered by admin' badge when lot has only non-admin voter_list entries", async () => {
+  it("keeps app-submitted lots selectable without marking them as prior admin entries", async () => {
     // Build a meeting where lot 1A appears in yes but with submitted_by_admin: false
     const meetingWithVoterSubmitted: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
@@ -1457,12 +1457,12 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
         </MemoryRouter>
       </QueryClientProvider>
     );
-    // 1A is app-submitted — it must be visible but disabled with "Already submitted" badge
+    // Prior app votes are preserved per motion, while admins can select the lot to enter other motions.
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Select lot 1A")).toBeDisabled();
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
+    expect(screen.getByText("Already voted online")).toBeInTheDocument();
     // 2B has no prior entry and should be enabled
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
     // No 'Previously entered by admin' badge — that's only for admin-submitted lots

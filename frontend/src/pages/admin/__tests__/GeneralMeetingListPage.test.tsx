@@ -109,6 +109,30 @@ describe("GeneralMeetingListPage", () => {
     });
   });
 
+  it("removes the meeting search from list and count when the filter is cleared", async () => {
+    let listHasSearch = true;
+    let countHasSearch = true;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
+        listHasSearch = new URL(request.url).searchParams.has("name");
+        return HttpResponse.json([]);
+      }),
+      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
+        countHasSearch = new URL(request.url).searchParams.has("name");
+        return HttpResponse.json({ count: 0 });
+      })
+    );
+    const user = userEvent.setup();
+    renderPage("?name=OC%20456");
+    const search = screen.getByRole("searchbox", { name: "Search" });
+    await waitFor(() => expect(search).toHaveValue("OC 456"));
+    await user.clear(search);
+    await waitFor(() => {
+      expect(listHasSearch).toBe(false);
+      expect(countHasSearch).toBe(false);
+    }, { timeout: 3000 });
+  });
+
   it("navigates to create page when button clicked", async () => {
     const user = userEvent.setup();
     renderPage();
