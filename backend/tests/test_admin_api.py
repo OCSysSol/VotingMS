@@ -3078,7 +3078,7 @@ class TestResendReport:
         response = await client.post(f"/api/admin/general-meetings/{uuid.uuid4()}/resend-report")
         assert response.status_code == 404
 
-    async def test_resend_no_delivery_record_returns_404(
+    async def test_resend_creates_delivery_record_when_missing(
         self, client: AsyncClient, db_session: AsyncSession
     ):
         b = Building(name="No Delivery Building", manager_email="nd@test.com")
@@ -3096,7 +3096,14 @@ class TestResendReport:
         await db_session.commit()
 
         response = await client.post(f"/api/admin/general-meetings/{agm.id}/resend-report")
-        assert response.status_code == 404
+        assert response.status_code == 200
+        assert response.json()["queued"] is True
+        delivery_result = await db_session.execute(
+            select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
+        )
+        delivery = delivery_result.scalar_one()
+        assert delivery.status == EmailDeliveryStatus.pending
+        assert delivery.total_attempts == 0
 
 
 # ---------------------------------------------------------------------------

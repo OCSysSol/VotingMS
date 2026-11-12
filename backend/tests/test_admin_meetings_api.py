@@ -4,15 +4,18 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
+from fastapi import HTTPException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.services import admin_service
 from app.models import (
     GeneralMeeting,
     GeneralMeetingLotWeight,
@@ -3591,11 +3594,10 @@ class TestCloseAGMAbsentRecords:
         # Only the original voted submission — no absent duplicate
         assert len(list(subs_result.scalars().all())) == 1
 
-    async def test_close_agm_with_no_lot_weights_no_absent_records(
+    async def test_close_does_not_auto_create_report_delivery_without_lot_weights(
         self, client: AsyncClient, db_session: AsyncSession
     ):
-        """Closing a GeneralMeeting with no GeneralMeetingLotWeight snapshot creates no absent records
-        but still triggers an email delivery record (RR3-32)."""
+        """Closing a meeting does not automatically create an email report delivery."""
         b = Building(name="NoWeights Building", manager_email="nw@test.com")
         db_session.add(b)
         await db_session.flush()
@@ -3617,13 +3619,12 @@ class TestCloseAGMAbsentRecords:
         )
         assert list(subs_result.scalars().all()) == []
 
-        # Email delivery record must be created even when there are no lot weights (RR3-32)
+        # Report delivery is triggered explicitly by an admin after the meeting closes.
         delivery_result = await db_session.execute(
             select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
         )
         delivery = delivery_result.scalar_one_or_none()
-        assert delivery is not None
-        assert delivery.status in (EmailDeliveryStatus.pending, EmailDeliveryStatus.failed)
+        assert delivery is None
 
     async def test_close_agm_total_submitted_excludes_absent_lots(
         self, client: AsyncClient, db_session: AsyncSession
@@ -7603,6 +7604,35 @@ class TestMultiChoiceOutcome:
 
 @pytest.mark.asyncio
 class TestReopenGeneralMeeting:
+    async def test_reopen_nonexistent_meeting_returns_404(self, client: AsyncClient):
+        response = await client.post(
+            f"/api/admin/general-meetings/{uuid.uuid4()}/reopen",
+            json={"voting_closes_at": (datetime.now(UTC) + timedelta(days=1)).isoformat()},
+        )
+        assert response.status_code == 404
+
+    async def test_reopen_rejects_meeting_that_is_still_open(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        building = Building(name="Reopen Open Meeting", manager_email="open-reopen@test.com")
+        db_session.add(building)
+        await db_session.flush()
+        meeting = GeneralMeeting(
+            building_id=building.id,
+            title="Still Open",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(meeting)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/admin/general-meetings/{meeting.id}/reopen",
+            json={"voting_closes_at": (datetime.now(UTC) + timedelta(days=1)).isoformat()},
+        )
+        assert response.status_code == 409
+
     async def test_reopen_removes_close_absences_and_only_reopens_meeting_closed_motions(
         self, client: AsyncClient, db_session: AsyncSession
     ):
@@ -7717,6 +7747,80 @@ class TestReopenGeneralMeeting:
         )
         assert response.status_code == 422
 
+    async def test_reopen_rejects_close_time_before_future_meeting_start(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        building = Building(name="Reopen Before Start", manager_email="before-start@test.com")
+        db_session.add(building)
+        await db_session.flush()
+        meeting = GeneralMeeting(
+            building_id=building.id,
+            title="Meeting Starts Later",
+            status=GeneralMeetingStatus.closed,
+            meeting_at=datetime.now(UTC) + timedelta(days=2),
+            voting_closes_at=closing_dt(),
+            closed_at=datetime.now(UTC),
+        )
+        db_session.add(meeting)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/admin/general-meetings/{meeting.id}/reopen",
+            json={"voting_closes_at": (datetime.now(UTC) + timedelta(days=1)).isoformat()},
+        )
+        assert response.status_code == 422
+
+    async def test_reopen_accepts_naive_voting_close_time(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        building = Building(name="Reopen Naive Close", manager_email="naive-close@test.com")
+        db_session.add(building)
+        await db_session.flush()
+        meeting = GeneralMeeting(
+            building_id=building.id,
+            title="Naive Close Time",
+            status=GeneralMeetingStatus.closed,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+            closed_at=datetime.now(UTC),
+        )
+        db_session.add(meeting)
+        await db_session.commit()
+        requested_close = (datetime.now(UTC) + timedelta(days=1)).replace(tzinfo=None)
+
+        response = await client.post(
+            f"/api/admin/general-meetings/{meeting.id}/reopen",
+            json={"voting_closes_at": requested_close.isoformat()},
+        )
+        assert response.status_code == 200, response.text
+        await db_session.refresh(meeting)
+        assert meeting.voting_closes_at == requested_close.replace(tzinfo=UTC)
+
+    async def test_reopen_normalizes_naive_meeting_start_time(self):
+        meeting = SimpleNamespace(
+            status=GeneralMeetingStatus.closed,
+            meeting_at=datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=1),
+            closed_at=datetime.now(UTC),
+            voting_closes_at=closing_dt(),
+        )
+        db = AsyncMock()
+        db.execute.side_effect = [
+            SimpleNamespace(scalar_one_or_none=lambda: meeting),
+            None,
+            None,
+            SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [])),
+        ]
+        new_close = datetime.now(UTC) + timedelta(days=1)
+
+        result = await admin_service.reopen_general_meeting(
+            uuid.uuid4(), SimpleNamespace(voting_closes_at=new_close), db
+        )
+
+        assert result is meeting
+        assert meeting.status == GeneralMeetingStatus.open
+        assert meeting.voting_closes_at == new_close
+        db.commit.assert_awaited_once()
+
 
 # POST /api/admin/motions/{id}/close — Per-Motion Voting Window (US-PMW-01/02)
 # ---------------------------------------------------------------------------
@@ -7793,6 +7897,34 @@ class TestCloseMotion:
         assert response.json()["voting_closed_at"] is None
         await db_session.refresh(motion)
         assert motion.voting_closed_at is None
+
+    async def test_reopen_nonexistent_motion_returns_404(self, client: AsyncClient):
+        response = await client.post(f"/api/admin/motions/{uuid.uuid4()}/reopen")
+        assert response.status_code == 404
+
+    async def test_reopen_motion_with_missing_meeting_returns_404(self):
+        motion = SimpleNamespace(id=uuid.uuid4(), general_meeting_id=uuid.uuid4())
+        db = AsyncMock()
+        db.execute.side_effect = [
+            SimpleNamespace(scalar_one_or_none=lambda: motion),
+            SimpleNamespace(scalar_one_or_none=lambda: None),
+        ]
+
+        with pytest.raises(HTTPException) as exc_info:
+            await admin_service.reopen_motion(motion.id, db)
+
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "General Meeting not found"
+
+    async def test_reopen_motion_that_is_already_open_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        _meeting, motion = await self._create_open_meeting_with_motion(
+            db_session, "AlreadyOpenForReopen"
+        )
+        response = await client.post(f"/api/admin/motions/{motion.id}/reopen")
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Motion voting is already open"
 
     async def test_reopen_motion_is_rejected_when_meeting_is_closed(
         self, client: AsyncClient, db_session: AsyncSession
