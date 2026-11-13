@@ -45,7 +45,7 @@ export function LotSelectionSection({
       <h2 className="lot-selection__title">Your Lots</h2>
       <p className="lot-selection__subtitle">
         {allSubmitted
-          ? "All lots have been submitted."
+          ? "All lots have submitted ballots. Select lots to review previous votes."
           : `You are voting for ${votingCount} lot${votingCount !== 1 ? "s" : ""}.`}
       </p>
 
@@ -93,7 +93,6 @@ export function LotSelectionSection({
           <li
             key={lot.lot_owner_id}
             className={`lot-selection__item${isLotSubmitted(lot) ? " lot-selection__item--submitted" : ""}`}
-            aria-disabled={isLotSubmitted(lot) ? "true" : undefined}
           >
             <label
               htmlFor={`lot-checkbox-${lot.lot_owner_id}`}
@@ -104,7 +103,6 @@ export function LotSelectionSection({
                 id={`lot-checkbox-${lot.lot_owner_id}`}
                 className="lot-selection__checkbox"
                 checked={selectedIds.has(lot.lot_owner_id)}
-                disabled={isLotSubmitted(lot)}
                 onChange={() => onToggle(lot.lot_owner_id)}
               />
               <span className="lot-selection__lot-number">Lot {lot.lot_number}</span>

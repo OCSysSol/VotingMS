@@ -610,6 +610,22 @@ button, input, select, textarea {
   padding: 0 24px 2px;
 }
 
+.motion-card__prior-summary {
+  margin: 10px 0 2px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--amber);
+  background: var(--amber-bg);
+  color: var(--text-primary);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.motion-card__prior-summary--locked {
+  border-left-color: var(--text-muted);
+  background: var(--neutral-100, #f1f5f9);
+  color: var(--text-secondary);
+}
+
 .motion-card__top-row {
   display: flex;
   align-items: center;
@@ -2295,7 +2311,9 @@ button, input, select, textarea {
 }
 
 .lot-selection__item--submitted {
-  opacity: 0.5;
+  background: var(--linen);
+  border-radius: var(--r-sm);
+  padding-inline: 8px;
 }
 
 .lot-selection__lot-number {

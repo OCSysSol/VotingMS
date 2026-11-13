@@ -20,6 +20,7 @@ import { useServerTime } from "../../hooks/useServerTime";
 import { useVotingState } from "../../hooks/useVotingState";
 import { useMotionSubmission } from "../../hooks/useMotionSubmission";
 import { formatLocalDateTime } from "../../utils/dateTime";
+import { projectMotionVotes } from "../../utils/voterVoteProjection";
 
 export function VotingPage() {
   const { meetingId } = useParams<{ meetingId: string }>();
@@ -118,15 +119,55 @@ export function VotingPage() {
     [allLots, selectedIds]
   );
 
-  const readOnlyReferenceLots = useMemo(
-    () => (selectedLots.length > 0 ? selectedLots : allLots),
-    [selectedLots, allLots]
+  const isMultiLot = allLots.length > 1;
+  const effectiveLots = useMemo(
+    () => (isMultiLot ? selectedLots : allLots),
+    [isMultiLot, selectedLots, allLots]
   );
+  const selectionKey = useMemo(
+    () =>
+      effectiveLots
+        .map(
+          (lot) =>
+            `${lot.lot_owner_id}:${JSON.stringify(
+              lot.submitted_votes ?? lot.voted_motion_ids ?? []
+            )}`
+        )
+        .join("|"),
+    [effectiveLots]
+  );
+
+  const getVoteProjection = useCallback(
+    (m: { id: string }) => {
+      const motion = motions?.find((candidate) => candidate.id === m.id);
+      return motion
+        ? projectMotionVotes(motion, effectiveLots)
+        : null;
+    },
+    [motions, effectiveLots]
+  );
+
   const isMotionReadOnly = useCallback(
-    (m: { id: string }) =>
-      readOnlyReferenceLots.length > 0 &&
-      readOnlyReferenceLots.every((lot) => (lot.voted_motion_ids ?? []).includes(m.id)),
-    [readOnlyReferenceLots]
+    (m: { id: string }) => getVoteProjection(m)?.isComplete ?? false,
+    [getVoteProjection]
+  );
+
+  const getPriorVote = useCallback(
+    (motion: { id: string }) => {
+      const projection = getVoteProjection(motion);
+      if (
+        !projection?.isComplete ||
+        projection.isMixed ||
+        !projection.choice
+      ) {
+        return null;
+      }
+      return {
+        choice: projection.choice,
+        optionChoices: projection.optionChoices ?? {},
+      };
+    },
+    [getVoteProjection]
   );
 
   const isLotSubmitted = useCallback(
@@ -148,8 +189,6 @@ export function VotingPage() {
       for (const lot of allLots) {
         if (!isLotSubmitted(lot)) {
           next.add(lot.lot_owner_id);
-        } else {
-          next.delete(lot.lot_owner_id);
         }
       }
       return next;
@@ -221,8 +260,6 @@ export function VotingPage() {
     ? motions.filter((m) => !isMotionReadOnly(m) && !isMotionIndividuallyClosed(m))
     : [];
 
-  const isMultiLot = allLots.length > 1;
-
   // useVotingState: manages choices, multiChoiceSelections, highlight, answeredCount
   const {
     choices,
@@ -238,6 +275,8 @@ export function VotingPage() {
     meetingId,
     motions,
     isMotionReadOnly,
+    getPriorVote,
+    selectionKey,
     unvotedMotions,
   });
 
@@ -261,8 +300,7 @@ export function VotingPage() {
   // Derived values for lot panel
   const allSubmitted = allLots.length > 0 && allLots.every((l) => isLotSubmitted(l));
   const anySubmitted = allLots.some((l) => (l.voted_motion_ids?.length ?? 0) > 0);
-  const pendingLots = allLots.filter((l) => !isLotSubmitted(l));
-  const votingCount = isMultiLot ? selectedIds.size : pendingLots.length;
+  const votingCount = isMultiLot ? selectedIds.size : effectiveLots.length;
 
   const selectedInArrearCount = selectedLots.filter((l) => l.financial_position === "in_arrear").length;
   const selectedNormalCount = selectedLots.filter((l) => l.financial_position !== "in_arrear").length;
@@ -287,8 +325,7 @@ export function VotingPage() {
   };
 
   const handleSelectAll = () => {
-    const pendingIds = allLots.filter((l) => !isLotSubmitted(l)).map((l) => l.lot_owner_id);
-    setSelectedIds(new Set(pendingIds));
+    setSelectedIds(new Set(allLots.map((l) => l.lot_owner_id)));
     setShowNoSelectionError(false);
   };
 
@@ -297,13 +334,13 @@ export function VotingPage() {
   };
 
   const handleSelectProxy = () => {
-    const proxyIds = allLots.filter((l) => l.is_proxy && !isLotSubmitted(l)).map((l) => l.lot_owner_id);
+    const proxyIds = allLots.filter((l) => l.is_proxy).map((l) => l.lot_owner_id);
     setSelectedIds(new Set(proxyIds));
     setShowNoSelectionError(false);
   };
 
   const handleSelectOwned = () => {
-    const ownedIds = allLots.filter((l) => !l.is_proxy && !isLotSubmitted(l)).map((l) => l.lot_owner_id);
+    const ownedIds = allLots.filter((l) => !l.is_proxy).map((l) => l.lot_owner_id);
     setSelectedIds(new Set(ownedIds));
     setShowNoSelectionError(false);
   };
@@ -336,15 +373,16 @@ export function VotingPage() {
     }
   }, [meetingId, queryClient, navigate]);
 
-  const hasMixedVoteStatus = (): boolean => {
-    if (selectedLots.length <= 1) return false;
-    const firstIds = new Set(selectedLots[0].voted_motion_ids ?? []);
-    return selectedLots.slice(1).some((lot) => {
-      const ids = new Set(lot.voted_motion_ids ?? []);
-      if (ids.size !== firstIds.size) return true;
-      return [...ids].some((id) => !firstIds.has(id));
-    });
-  };
+  const partialCoverageMotions = (motions ?? []).filter((motion) => {
+    if (!isMultiLot || effectiveLots.length <= 1) return false;
+    if (isMotionIndividuallyClosed(motion)) return false;
+    const projection = getVoteProjection(motion);
+    return (
+      !!projection &&
+      projection.answeredCount > 0 &&
+      !projection.isComplete
+    );
+  });
 
   const handleSubmitClick = () => {
     if (isMultiLot && selectedIds.size === 0) {
@@ -357,7 +395,7 @@ export function VotingPage() {
         JSON.stringify([...selectedIds])
       );
     }
-    if (hasMixedVoteStatus()) {
+    if (partialCoverageMotions.length > 0) {
       setShowMixedWarning(true);
       return;
     }
@@ -573,6 +611,7 @@ export function VotingPage() {
                               : !choices[motion.id])
                           }
                           readOnly={isMotionReadOnly(motion)}
+                          priorVoteSummary={getVoteProjection(motion)?.summary ?? undefined}
                           votingClosed={motionClosed}
                           multiChoiceOptionChoices={multiChoiceSelections[motion.id] ?? {}}
                           onMultiChoiceChange={handleMultiChoiceChange}
@@ -601,13 +640,7 @@ export function VotingPage() {
 
       {showMixedWarning && (
         <MixedSelectionWarningDialog
-          differingLots={selectedLots.filter((lot) => {
-            const ids = new Set(lot.voted_motion_ids ?? []);
-            return ids.size > 0 || selectedLots.some((other) => {
-              const otherIds = new Set(other.voted_motion_ids ?? []);
-              return ids.size !== otherIds.size || [...ids].some((id) => !otherIds.has(id));
-            });
-          })}
+          partialMotions={partialCoverageMotions}
           onContinue={handleMixedWarningContinue}
           onGoBack={handleMixedWarningGoBack}
         />

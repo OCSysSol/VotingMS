@@ -44,6 +44,12 @@ export interface AuthVerifyRequest {
   code: string;
 }
 
+export interface SubmittedVoteInfo {
+  motion_id: string;
+  choice: VoteChoice;
+  option_choices: Record<string, string>;
+}
+
 export interface LotInfo {
   lot_owner_id: string;
   lot_number: string;
@@ -51,6 +57,7 @@ export interface LotInfo {
   already_submitted: boolean;
   is_proxy: boolean;
   voted_motion_ids: string[];  // motion IDs with submitted votes for this lot
+  submitted_votes?: SubmittedVoteInfo[];
 }
 
 export interface AuthVerifyResponse {

@@ -71,7 +71,16 @@ describe("useMotionSubmission — happy path", () => {
     const setIsClosed = vi.fn();
     const setShowDialog = vi.fn();
 
-    const lot = makeLot();
+    const lot = makeLot({
+      voted_motion_ids: ["old-motion"],
+      submitted_votes: [
+        {
+          motion_id: "old-motion",
+          choice: "no",
+          option_choices: {},
+        },
+      ],
+    });
     const motion = makeMotion();
 
     const { result } = renderHook(
@@ -100,6 +109,17 @@ describe("useMotionSubmission — happy path", () => {
     });
     expect(setAllLots).toHaveBeenCalled();
     expect(setSelectedIds).toHaveBeenCalled();
+    const updateLots = setAllLots.mock.calls[0][0] as (lots: LotInfo[]) => LotInfo[];
+    expect(updateLots([lot])[0].submitted_votes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ motion_id: "old-motion", choice: "no" }),
+        expect.objectContaining({ motion_id: "m1", choice: "yes" }),
+      ]),
+    );
+    const updateSelected = setSelectedIds.mock.calls[0][0] as (
+      ids: Set<string>,
+    ) => Set<string>;
+    expect(updateSelected(new Set(["lo-1"]))).toEqual(new Set());
   });
 
   it("handleCancel calls setShowDialog(false)", () => {
