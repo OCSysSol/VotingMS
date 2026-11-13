@@ -27,6 +27,7 @@ interface AdminVoteEntryPanelProps {
 
 type VoteChoice = "yes" | "no" | "abstained";
 type OptionChoice = "for" | "against" | "abstained";
+type PriorVoteSource = "user" | "admin";
 
 interface LotVotes {
   /** motion_id -> choice for binary motions */
@@ -274,8 +275,7 @@ interface LotBinaryVoteCellProps {
   motionTitle: string;
   currentChoice: VoteChoice | undefined;
   onSetChoice: (lotId: string, motionId: string, choice: VoteChoice) => void;
-  isPriorEntry: boolean;
-  priorEntryLabel?: string;
+  priorSource: PriorVoteSource | null;
 }
 
 const LotBinaryVoteCell = memo(function LotBinaryVoteCell({
@@ -285,22 +285,19 @@ const LotBinaryVoteCell = memo(function LotBinaryVoteCell({
   motionTitle,
   currentChoice,
   onSetChoice,
-  isPriorEntry,
-  priorEntryLabel = "Prev. entry",
+  priorSource,
 }: LotBinaryVoteCellProps) {
+  const isPriorEntry = priorSource !== null;
   return (
-    <td key={lotId} style={{ textAlign: "center" }}>
-      {isPriorEntry && (
-        <div
-          style={{
-            fontSize: "0.65rem",
-            color: "var(--text-muted)",
-            fontStyle: "italic",
-            marginBottom: 4,
-          }}
-        >
-          {priorEntryLabel}
-        </div>
+    <td
+      key={lotId}
+      className={priorSource ? `admin-vote-entry__prior-cell admin-vote-entry__prior-cell--${priorSource}` : undefined}
+      style={{ textAlign: "center" }}
+    >
+      {priorSource && (
+        <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
+          {priorSource === "user" ? "User voted" : "Admin voted"}
+        </span>
       )}
       <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
         {(["yes", "no", "abstained"] as VoteChoice[]).map((choice) => (
@@ -318,7 +315,7 @@ const LotBinaryVoteCell = memo(function LotBinaryVoteCell({
               borderRadius: "var(--r-sm)",
               border: "1px solid",
               cursor: isPriorEntry ? "not-allowed" : "pointer",
-              opacity: isPriorEntry ? 0.4 : 1,
+              opacity: isPriorEntry && currentChoice !== choice ? 0.5 : 1,
               background:
                 currentChoice === choice
                   ? choice === "yes"
@@ -368,92 +365,39 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
     enabled: !!buildingId,
   });
 
-  // Determine which lots are app-submitted (non-admin submission)
-  // We derive this from the voter lists in the meeting detail
-  const appSubmittedLotNumbers = new Set<string>();
-  for (const motion of meeting.motions) {
-    if (motion.is_multi_choice) {
-      for (const category of ["options_for", "options_against", "options_abstained"] as const) {
-        const optionVoters = motion.voter_lists[category] ?? {};
-        for (const voters of Object.values(optionVoters)) {
-          for (const voter of voters) {
-            if (voter.lot_number && !voter.submitted_by_admin) {
-              appSubmittedLotNumbers.add(voter.lot_number);
-            }
-          }
-        }
-      }
-    } else {
-      for (const cat of ["yes", "no", "abstained", "not_eligible"] as const) {
-        for (const v of motion.voter_lists[cat]) {
-          if (v.lot_number && !v.submitted_by_admin) {
-            appSubmittedLotNumbers.add(v.lot_number);
-          }
-        }
-      }
-    }
-  }
-
-  // Preserve each lot's app-submitted motions while still letting admins enter
-  // votes for any other visible motion on that lot.
-  const appVotedMotionIdsByLotId = useMemo(() => {
+  // Build one source-aware registry for all prior motions. BallotSubmission-level
+  // submitted_by_admin is not sufficient because a lot can mix online and admin votes.
+  const {
+    appSubmittedLotNumbers,
+    adminSubmittedLotNumbers,
+    priorVotesByLotId,
+    priorVoteSourceByLotId,
+  } = useMemo(() => {
     const lotNumberToId = new Map(allLotOwners.map((lo) => [lo.lot_number, lo.id]));
-    const result: Record<string, Set<string>> = {};
-    const addVoter = (motionId: string, voter: { lot_number?: string | null; submitted_by_admin?: boolean }) => {
-      if (!voter.lot_number || voter.submitted_by_admin) return;
+    const votesByLotId: Record<string, LotVotes> = {};
+    const sourceByLotId: Record<string, Record<string, PriorVoteSource>> = {};
+    const appLots = new Set<string>();
+    const adminLots = new Set<string>();
+
+    const recordPrior = (
+      motionId: string,
+      voter: { lot_number?: string | null; submitted_by_admin?: boolean }
+    ): { lotId: string; source: PriorVoteSource } | null => {
+      if (!voter.lot_number) return null;
       const lotId = lotNumberToId.get(voter.lot_number);
-      if (!lotId) return;
-      result[lotId] ??= new Set<string>();
-      result[lotId].add(motionId);
+      if (!lotId) return null;
+      const source: PriorVoteSource = voter.submitted_by_admin ? "admin" : "user";
+      sourceByLotId[lotId] ??= {};
+      sourceByLotId[lotId][motionId] ??= source;
+      if (source === "admin") adminLots.add(voter.lot_number);
+      else appLots.add(voter.lot_number);
+      return { lotId, source };
     };
 
     for (const motion of meeting.motions) {
       if (!motion.is_visible) continue;
-      if (motion.is_multi_choice) {
-        for (const category of ["options_for", "options_against", "options_abstained"] as const) {
-          const optionVoters = motion.voter_lists[category] ?? {};
-          for (const voters of Object.values(optionVoters)) {
-            voters.forEach((voter) => addVoter(motion.id, voter));
-          }
-        }
-      } else {
-        for (const category of ["yes", "no", "abstained", "not_eligible"] as const) {
-          motion.voter_lists[category].forEach((voter) => addVoter(motion.id, voter));
-        }
-      }
-    }
-    return result;
-  }, [allLotOwners, meeting.motions]);
-
-  // Fix 5: Determine which lots are admin-submitted
-  const adminSubmittedLotNumbers = useMemo(() => {
-    const result = new Set<string>();
-    for (const motion of meeting.motions) {
-      for (const cat of ["yes", "no", "abstained", "not_eligible"] as const) {
-        for (const v of motion.voter_lists[cat]) {
-          if (v.lot_number && v.submitted_by_admin) {
-            result.add(v.lot_number);
-          }
-        }
-      }
-    }
-    return result;
-  }, [meeting.motions]);
-
-  // Fix 5: Build a map from lot_owner_id -> prior LotVotes for admin-submitted lots
-  const priorVotesByLotId = useMemo(() => {
-    const lotNumberToId = new Map<string, string>();
-    for (const lo of allLotOwners) {
-      lotNumberToId.set(lo.lot_number, lo.id);
-    }
-
-    const result: Record<string, LotVotes> = {};
-
-    for (const motion of meeting.motions) {
-      if (!motion.is_visible) continue;
 
       if (motion.is_multi_choice) {
-        // Multi-choice: build per-option prior choices
         const optionCategories: Array<{ key: "options_for" | "options_against" | "options_abstained"; choice: OptionChoice }> = [
           { key: "options_for", choice: "for" },
           { key: "options_against", choice: "against" },
@@ -463,21 +407,15 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
           const optionMap = motion.voter_lists[key] ?? {};
           for (const [optionId, voters] of Object.entries(optionMap)) {
             for (const v of voters) {
-              if (v.lot_number && v.submitted_by_admin) {
-                const lotId = lotNumberToId.get(v.lot_number);
-                if (lotId) {
-                  if (!result[lotId]) result[lotId] = initialLotVotes();
-                  if (!result[lotId].multiChoiceChoices[motion.id]) {
-                    result[lotId].multiChoiceChoices[motion.id] = {};
-                  }
-                  result[lotId].multiChoiceChoices[motion.id][optionId] = choice;
-                }
-              }
+              const prior = recordPrior(motion.id, v);
+              if (!prior) continue;
+              votesByLotId[prior.lotId] ??= initialLotVotes();
+              votesByLotId[prior.lotId].multiChoiceChoices[motion.id] ??= {};
+              votesByLotId[prior.lotId].multiChoiceChoices[motion.id][optionId] = choice;
             }
           }
         }
       } else {
-        // Binary motion: check yes/no/abstained/not_eligible categories
         const binaryCategories: Array<{ cat: "yes" | "no" | "abstained" | "not_eligible"; choice: VoteChoice }> = [
           { cat: "yes", choice: "yes" },
           { cat: "no", choice: "no" },
@@ -485,19 +423,27 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
         ];
         for (const { cat, choice } of binaryCategories) {
           for (const v of motion.voter_lists[cat]) {
-            if (v.lot_number && v.submitted_by_admin) {
-              const lotId = lotNumberToId.get(v.lot_number);
-              if (lotId) {
-                if (!result[lotId]) result[lotId] = initialLotVotes();
-                result[lotId].choices[motion.id] = choice;
-              }
-            }
+            const prior = recordPrior(motion.id, v);
+            if (!prior) continue;
+            votesByLotId[prior.lotId] ??= initialLotVotes();
+            votesByLotId[prior.lotId].choices[motion.id] = choice;
+          }
+        }
+        for (const v of motion.voter_lists.not_eligible) {
+          const prior = recordPrior(motion.id, v);
+          if (prior) {
+            votesByLotId[prior.lotId] ??= initialLotVotes();
           }
         }
       }
     }
 
-    return result;
+    return {
+      appSubmittedLotNumbers: appLots,
+      adminSubmittedLotNumbers: adminLots,
+      priorVotesByLotId: votesByLotId,
+      priorVoteSourceByLotId: sourceByLotId,
+    };
   }, [meeting.motions, allLotOwners]);
 
   // Visible motions for vote entry grid
@@ -703,6 +649,15 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
               >
                 {allLotOwners.map((lo) => {
                   const isAppSubmitted = appSubmittedLotNumbers.has(lo.lot_number);
+                  const isAdminSubmitted = adminSubmittedLotNumbers.has(lo.lot_number);
+                  const sourceSummary =
+                    isAppSubmitted && isAdminSubmitted
+                      ? "mixed"
+                      : isAppSubmitted
+                      ? "user"
+                      : isAdminSubmitted
+                      ? "admin"
+                      : null;
                   return (
                     <li
                       key={lo.id}
@@ -735,24 +690,13 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                           In arrear
                         </span>
                       )}
-                      {/* Badge for app-submitted lots */}
-                      {isAppSubmitted && (
-                        <span className="lot-selection__badge lot-selection__badge--submitted">
-                          Already voted online
-                        </span>
-                      )}
-                      {/* Fix 5: badge for admin-submitted lots */}
-                      {!isAppSubmitted && adminSubmittedLotNumbers.has(lo.lot_number) && (
-                        <span
-                          style={{
-                            fontSize: "0.7rem",
-                            background: "var(--amber-bg)",
-                            color: "var(--amber)",
-                            borderRadius: "var(--r-sm)",
-                            padding: "1px 6px",
-                          }}
-                        >
-                          Previously entered by admin
+                      {sourceSummary && (
+                        <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
+                          {sourceSummary === "mixed"
+                            ? "Mixed user/admin votes"
+                            : sourceSummary === "user"
+                            ? "User votes recorded"
+                            : "Admin votes recorded"}
                         </span>
                       )}
                     </li>
@@ -920,6 +864,14 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                       visibleMotions
                     );
                     const isAdminSubmitted = adminSubmittedLotNumbers.has(lo.lot_number);
+                    const hasUserVotes = appSubmittedLotNumbers.has(lo.lot_number);
+                    const sourceSummary = hasUserVotes && isAdminSubmitted
+                      ? "mixed"
+                      : hasUserVotes
+                      ? "user"
+                      : isAdminSubmitted
+                      ? "admin"
+                      : null;
                     return (
                       <th key={lo.id} scope="col" style={{ minWidth: 140, textAlign: "center" }}>
                         <div>Lot {lo.lot_number}</div>
@@ -954,7 +906,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                           </span>
                         )}
                         {/* Fix 8: pre-flight warning for already-submitted lots */}
-                        {appSubmittedLotNumbers.has(lo.lot_number) && (
+                        {hasUserVotes && (
                           <span
                             style={{
                               display: "inline-block",
@@ -969,20 +921,13 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                             Already submitted
                           </span>
                         )}
-                        {/* Fix 5: badge for admin-submitted lots in column header */}
-                        {isAdminSubmitted && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              fontSize: "0.65rem",
-                              background: "var(--amber-bg)",
-                              color: "var(--amber)",
-                              borderRadius: "var(--r-sm)",
-                              padding: "1px 6px",
-                              marginTop: 2,
-                            }}
-                          >
-                            Previously entered by admin
+                        {sourceSummary && (
+                          <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
+                            {sourceSummary === "mixed"
+                              ? "Mixed user/admin votes"
+                              : sourceSummary === "user"
+                              ? "User votes recorded"
+                              : "Admin votes recorded"}
                           </span>
                         )}
                       </th>
@@ -1006,7 +951,6 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                     {selectedLotsArr.map((lo) => {
                       const isInArrear = lo.financial_position === "in_arrear";
                       const votes_data = lotVotes[lo.id] ?? initialLotVotes();
-                      const isAdminSubmitted = adminSubmittedLotNumbers.has(lo.lot_number);
 
                       // In-arrear lots: disabled for general/multi_choice, enabled for special
                       const isDisabled =
@@ -1035,34 +979,19 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                         const forCount = Object.values(motionChoices).filter((c) => c === "for").length;
                         // Fix 1: mirror voter-side limitReached guard — block "For" when limit reached
                         const limitReached = motion.option_limit != null && forCount >= motion.option_limit;
-                        // Disable all option buttons when this lot has a prior admin-submitted vote for this specific motion.
-                        // Use priorVotesByLotId directly (not isAdminSubmitted) because MC votes are not in
-                        // voter_lists.yes/no/abstained — they are in options_for/against/abstained.
-                        const isMCPriorEntry =
-                          priorVotesByLotId[lo.id]?.multiChoiceChoices[motion.id] !== undefined;
-                        const isAppPriorEntry = appVotedMotionIdsByLotId[lo.id]?.has(motion.id) ?? false;
+                        const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
+                        const isMCPriorEntry = priorSource !== null;
 
                         return (
-                          <td key={lo.id} style={{ verticalAlign: "top", padding: "8px" }}>
-                            {isAppPriorEntry && (
-                              <div
-                                style={{ fontSize: "0.65rem", color: "var(--text-muted)", fontStyle: "italic", marginBottom: 4 }}
-                              >
-                                Already voted online
-                              </div>
-                            )}
-                            {/* Fix 5: "Prev. entry" label for admin-submitted lots */}
-                            {isAdminSubmitted && (
-                              <div
-                                style={{
-                                  fontSize: "0.65rem",
-                                  color: "var(--text-muted)",
-                                  fontStyle: "italic",
-                                  marginBottom: 4,
-                                }}
-                              >
-                                Prev. entry
-                              </div>
+                          <td
+                            key={lo.id}
+                            className={priorSource ? `admin-vote-entry__prior-cell admin-vote-entry__prior-cell--${priorSource}` : undefined}
+                            style={{ verticalAlign: "top", padding: "8px" }}
+                          >
+                            {priorSource && (
+                              <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
+                                {priorSource === "user" ? "User voted" : "Admin voted"}
+                              </span>
                             )}
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                               {motion.options.map((opt) => {
@@ -1086,8 +1015,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                                         const isActive = currentChoice === choice;
                                         // Fix 1: disable "For" when limit reached and not already selected For
                                         const isForDisabled = choice === "for" && limitReached && currentChoice !== "for";
-                                        // Disable all buttons when this motion has a prior admin entry for this lot
-                                        const isButtonDisabled = isMCPriorEntry || isAppPriorEntry || isForDisabled;
+                                        const isButtonDisabled = isMCPriorEntry || isForDisabled;
                                         const ariaLabel = isForDisabled
                                           ? `For option ${truncatedOptText} lot ${lo.lot_number} (limit reached)`
                                           : `${choice === "for" ? "For" : choice === "against" ? "Against" : "Abstain"} option ${truncatedOptText} lot ${lo.lot_number}`;
@@ -1108,7 +1036,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                                               borderRadius: "var(--r-sm)",
                                               border: "1px solid",
                                               cursor: isButtonDisabled ? "not-allowed" : "pointer",
-                                              opacity: isButtonDisabled ? 0.4 : 1,
+                                              opacity: isMCPriorEntry && !isActive ? 0.5 : isForDisabled ? 0.4 : 1,
                                               background: isActive
                                                 ? choice === "for"
                                                   ? "var(--green)"
@@ -1152,14 +1080,8 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                       }
 
                       // Binary motion — use memoized LotBinaryVoteCell (RR4-11)
-                      // isPriorEntry is per-motion: only disable if this specific motion
-                      // has a prior admin-submitted vote for this lot.
                       const currentChoice = votes_data.choices[motion.id];
-                      const isBinaryAdminPriorEntry =
-                        priorVotesByLotId[lo.id]?.choices[motion.id] !== undefined;
-                      const isBinaryAppPriorEntry =
-                        appVotedMotionIdsByLotId[lo.id]?.has(motion.id) ?? false;
-                      const isBinaryPriorEntry = isBinaryAdminPriorEntry || isBinaryAppPriorEntry;
+                      const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
                       return (
                         <LotBinaryVoteCell
                           key={lo.id}
@@ -1169,8 +1091,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                           motionTitle={motion.title}
                           currentChoice={currentChoice}
                           onSetChoice={setChoice}
-                          isPriorEntry={isBinaryPriorEntry}
-                          priorEntryLabel={isBinaryAdminPriorEntry ? "Prev. entry" : "Already voted online"}
+                          priorSource={priorSource}
                         />
                       );
                     })}

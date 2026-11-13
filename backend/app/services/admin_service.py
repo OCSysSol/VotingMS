@@ -2555,6 +2555,10 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
     # multiple voters (co-owners, proxy re-entry) each motion shows the email of the person
     # who actually submitted that specific Vote row, not the last BallotSubmission author.
     vote_voter_email_map: dict[tuple[uuid.UUID, uuid.UUID], str] = {}
+    # Per-motion provenance: admin-created Vote rows persist the voter_email sentinel
+    # "admin"; voter/proxy rows persist the actor email. This must not be inferred from
+    # BallotSubmission because a lot can contain both user and admin-entered motions.
+    vote_submitted_by_admin_map: dict[tuple[uuid.UUID, uuid.UUID], bool] = {}
 
     def _lots(lot_owner_ids: set[uuid.UUID], category: str, motion_id: uuid.UUID | None = None) -> list[dict]:
         result_list: list[dict] = []
@@ -2580,7 +2584,12 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                         voter_email = lot_owner_to_email.get(lid, "")
                     proxy_email_val = lot_owner_to_proxy_email.get(lid)
                     ballot_hash_val = lot_owner_to_ballot_hash.get(lid)
-                    submitted_by_admin_val = lot_owner_to_submitted_by_admin.get(lid, False)
+                    if motion_id is not None:
+                        submitted_by_admin_val = vote_submitted_by_admin_map.get(
+                            (lid, motion_id), False
+                        )
+                    else:  # pragma: no cover
+                        submitted_by_admin_val = lot_owner_to_submitted_by_admin.get(lid, False)
                     submitted_by_admin_username_val = lot_owner_to_submitted_by_admin_username.get(lid)
                     submitted_at_val = lot_owner_to_submitted_at.get(lid)
                 voter_name = lot_owner_email_to_name.get((lid, voter_email))
@@ -2615,6 +2624,9 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
         # any Vote row's own voter_email is captured for the voter_list display.
         if vp.voter_email:
             vote_voter_email_map[(vp.lot_owner_id, vp.motion_id)] = vp.voter_email
+            vote_submitted_by_admin_map[(vp.lot_owner_id, vp.motion_id)] = (
+                vp.voter_email.strip().lower() == "admin"
+            )
 
     motion_details = []
     for motion in motions:

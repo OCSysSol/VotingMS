@@ -2343,6 +2343,53 @@ button, input, select, textarea {
   color: var(--text-primary);
 }
 
+/* === ADMIN VOTE ENTRY PRIOR VOTES === */
+.prior-vote-badge {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  margin-bottom: 4px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.prior-vote-badge--user {
+  background: var(--green-bg);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.prior-vote-badge--admin {
+  background: var(--amber-bg);
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.prior-vote-badge--mixed {
+  background: var(--navy);
+  border-color: var(--gold);
+  color: var(--gold-light);
+}
+
+.admin-vote-entry__prior-cell {
+  box-shadow: inset 4px 0 0 currentColor;
+}
+
+.admin-vote-entry__prior-cell--user {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.admin-vote-entry__prior-cell--admin {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
 /* === IN-ARREAR WARNING BANNER (VotingPage) === */
 .arrear-notice {
   background: var(--amber-bg, #FFF8E6);

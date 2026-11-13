@@ -928,6 +928,17 @@ class TestAdminVoteEntry:
         assert vote_by_motion[m1.id].choice == VoteChoice.yes  # voter's choice unchanged
         assert vote_by_motion[m2.id].choice == VoteChoice.no   # admin's new vote
 
+        # Provenance is per motion even though the lot-level BallotSubmission still
+        # belongs to the original voter.
+        detail_resp = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert detail_resp.status_code == 200
+        detail = detail_resp.json()
+        detail_motion_by_id = {m["id"]: m for m in detail["motions"]}
+        m1_voter = detail_motion_by_id[str(m1.id)]["voter_lists"]["yes"][0]
+        m2_voter = detail_motion_by_id[str(m2.id)]["voter_lists"]["no"][0]
+        assert m1_voter["submitted_by_admin"] is False
+        assert m2_voter["submitted_by_admin"] is True
+
     async def test_admin_skips_lot_with_all_motions_voted_when_partially_submitted_lots_present(
         self, client: AsyncClient, db_session: AsyncSession
     ):

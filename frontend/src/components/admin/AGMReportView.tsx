@@ -197,7 +197,6 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
                         <th>Lot #</th>
                         <th>Email</th>
                         <th style={{ textAlign: "right" }}>UOE</th>
-                        <th>Submitted By</th>
                         <th>Choice</th>
                       </tr>
                     </thead>
@@ -219,9 +218,6 @@ function MultiChoiceOptionRows({ optTally, motion, totalEntitlement, isWinner }:
                           </td>
                           <td style={{ fontFamily: "'Overpass Mono', monospace", fontSize: "0.875rem", textAlign: "right" }}>
                             {voter.entitlement}
-                          </td>
-                          <td style={{ fontSize: "0.875rem" }}>
-                            {voter.submitted_by_admin ? "Admin" : "Voter"}
                           </td>
                           <td>
                             <span style={{
@@ -276,7 +272,6 @@ function BinaryVoterList({ motion }: { motion: MotionDetail }) {
               <th>Lot #</th>
               <th>Email</th>
               <th style={{ textAlign: "right" }}>UOE</th>
-              <th>Submitted By</th>
               <th>Choice</th>
             </tr>
           </thead>
@@ -298,9 +293,6 @@ function BinaryVoterList({ motion }: { motion: MotionDetail }) {
                 </td>
                 <td style={{ fontFamily: "'Overpass Mono', monospace", fontSize: "0.875rem", textAlign: "right" }}>
                   {voter.entitlement}
-                </td>
-                <td style={{ fontSize: "0.875rem" }}>
-                  {voter.submitted_by_admin ? "Admin" : "Voter"}
                 </td>
                 <td>
                   <span style={{
