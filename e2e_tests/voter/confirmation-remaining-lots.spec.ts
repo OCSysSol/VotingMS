@@ -156,7 +156,7 @@ test.describe("CRL.1: Confirmation page Vote for remaining lots", () => {
     const lotAItem = page.getByRole("listitem").filter({ hasText: `Lot ${CRL_LOT_A}` }).first();
     await expect(lotAItem.getByText("Already submitted")).toBeVisible({ timeout: 15000 });
     const lotACheckbox = lotAItem.getByRole("checkbox");
-    await expect(lotACheckbox).toBeDisabled();
+    await expect(lotACheckbox).toBeEnabled();
 
     // Lot B must still be selectable (not submitted)
     const lotBItem = page.getByRole("listitem").filter({ hasText: `Lot ${CRL_LOT_B}` }).first();

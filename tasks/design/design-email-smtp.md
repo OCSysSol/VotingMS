@@ -178,3 +178,63 @@ Remove the close-meeting router's automatic `trigger_with_retry` scheduling. Clo
 Instrument the request-OTP delivery path with structured start/success/failure events, channel, elapsed duration, and request/meeting correlation. Log a sanitized provider category and short sanitized provider detail. Never log the OTP code, credentials, or message body; do not log the full email address.
 
 **Privacy decision:** Keep the API response indistinguishable for known and unknown email addresses, including when SMTP delivery fails. Do not expose a delivery-failure field or SMTP error in the voter UI, and keep the existing success-shaped response so request-OTP cannot be used to enumerate accounts. Log delivery failures for operators in Vercel with request ID, meeting ID, channel, elapsed time, provider category, and sanitized detail. Any user-facing retry/support guidance must be generic and independent of the delivery outcome.
+
+## SMS testing UI and TESTING_MODE parity
+
+### Scope of the “SMS OTP” toggle
+
+The SMS tab currently labels `sms_enabled` as “Enable SMS OTP”. This provider-level switch is separate from the tenant `otp_sms_enabled` voter-channel switch. The requested TESTING_MODE behavior applies to `sms_enabled`, mirroring the existing `email_delivery_enabled` outbound-delivery switch. Do not change the voter-channel `otp_sms_enabled` semantics.
+
+### Frontend test SMS flow
+
+Replace the inline “Send test SMS” panel with the same interaction used by Mail Server:
+
+1. The SMS form action row contains `Save` and a secondary `Send test SMS` button.
+2. The button opens a modal using `.dialog-overlay`, `.dialog`, `.dialog__title`, `.dialog__body`, and `.dialog__actions`.
+3. The modal contains one `.field` labelled `Recipient phone number` with a `tel` input and placeholder `+61412345678`.
+4. Modal actions are `Cancel` and `Send`; Send is disabled when the number is empty or sending.
+5. Escape, overlay click, and Cancel close the modal and clear transient input.
+6. Sending closes the modal, shows `Test SMS sent to …` or the error in the SMS form using the existing success/error state, and clears the phone input.
+7. The `Send test SMS` trigger follows Mail Server enablement rules: disabled when provider-level SMS is off, required configuration is incomplete, or a send is in flight.
+
+Provider-completeness helper:
+
+| Provider | Required effective fields |
+|---|---|
+| SMTP2GO | API key set, sender number |
+| Twilio | Account SID, auth token set, from number |
+| ClickSend | Username, API key set, from number |
+| Webhook | Webhook URL |
+
+Existing stored-secret presence flags are sufficient for this check; the frontend never needs the secret value.
+
+### TESTING_MODE behavior
+
+Add `sync_sms_enabled_from_testing_mode(db)` to `smtp_config_service.py` directly beside the email equivalent:
+
+- `TESTING_MODE=true` → persist `sms_enabled=false`.
+- `TESTING_MODE=false` → persist `sms_enabled=true`.
+- Run once during the existing sequential application lifespan startup, after the email sync and before delivery requeue work.
+- Continue retrying startup DB work under the existing transient connection policy.
+- This is a startup reset, matching Email delivery exactly; an admin may still toggle the value during the running process.
+
+### Tests
+
+Backend:
+
+- Sync disables provider SMS under TESTING_MODE true.
+- Sync enables it under TESTING_MODE false.
+- Matching stored values do not raise or create duplicate rows.
+- Lifespan invokes both email and SMS synchronization.
+
+Frontend:
+
+- SMS form renders Save and Send test SMS together.
+- Button opens a modal labelled with Recipient phone number and Send/Cancel controls.
+- Escape, overlay, and Cancel close the modal.
+- Success and failure messages render in the SMS form.
+- Sending disables the action and clears the phone on completion.
+- Off/incomplete provider state disables the trigger; configured state enables it.
+- No inline test-SMS panel remains.
+
+No database migration is required.

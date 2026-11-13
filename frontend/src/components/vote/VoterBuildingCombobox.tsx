@@ -20,7 +20,7 @@ export function VoterBuildingCombobox({
 
   function formatBuildingLabel(b: BuildingOut): string {
     if (b.oc_plan_number && b.oc_plan_number.trim()) {
-      return `${b.name} — ${b.oc_plan_number.trim()}`;
+      return `${b.oc_plan_number.trim()} - ${b.name}`;
     }
     return b.name;
   }
@@ -159,7 +159,7 @@ export function VoterBuildingCombobox({
         onChange={handleInputChange}
         onFocus={openDropdown}
         onKeyDown={handleKeyDown}
-        placeholder="Type to search buildings…"
+        placeholder="Search by building or OC Plan…"
       />
       {error && (
         <span id={errorId} className="field__error" role="alert">

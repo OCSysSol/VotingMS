@@ -247,29 +247,6 @@ export default function BuildingsPage() {
       <div className="admin-page-header">
         <h1>OC Plans</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          {/* Fix 4: name filter input */}
-          <div className="field" style={{ maxWidth: 320, marginBottom: 0 }}>
-            <label className="field__label" htmlFor="buildings-name-filter">Search OC Plans</label>
-            <input
-              id="buildings-name-filter"
-              className="field__input"
-              type="text"
-              value={nameFilterInput}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              placeholder="Filter by OC Plan or building name…"
-            />
-          </div>
-          <label className="toggle-switch">
-            <input
-              id="show-archived-toggle"
-              className="toggle-switch__input"
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => handleShowArchivedChange(e.target.checked)}
-            />
-            <span className="toggle-switch__track" />
-            Show archived
-          </label>
           <button ref={newBuildingBtnRef} className="btn btn--primary" onClick={openModal}>
             + New OC Plan
           </button>
@@ -371,6 +348,32 @@ export default function BuildingsPage() {
       )}
 
       <div className="admin-card">
+        <div className="admin-card__header">
+          <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "flex-start", gap: 16, flexWrap: "wrap" }}>
+            <div className="field" style={{ maxWidth: 320, flex: "1 1 280px", marginBottom: 0 }}>
+              <label className="field__label" htmlFor="buildings-name-filter">Search OC Plans</label>
+              <input
+                id="buildings-name-filter"
+                className="field__input"
+                type="text"
+                value={nameFilterInput}
+                onChange={(e) => handleNameFilterChange(e.target.value)}
+                placeholder="Filter by OC Plan or building name…"
+              />
+            </div>
+            <label className="toggle-switch">
+              <input
+                id="show-archived-toggle"
+                className="toggle-switch__input"
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => handleShowArchivedChange(e.target.checked)}
+              />
+              <span className="toggle-switch__track" />
+              Show archived
+            </label>
+          </div>
+        </div>
         <Pagination
           page={safePage}
           totalPages={totalPages}

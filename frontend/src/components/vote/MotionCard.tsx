@@ -29,6 +29,7 @@ interface MotionCardProps {
   highlight: boolean;
   readOnly?: boolean;
   votingClosed?: boolean;
+  priorVoteSummary?: string;
   // Multi-choice state (only used for multi_choice motion type)
   multiChoiceOptionChoices?: OptionChoiceMap;
   onMultiChoiceChange?: (motionId: string, choices: OptionChoiceMap) => void;
@@ -43,6 +44,7 @@ export function MotionCard({
   highlight,
   readOnly = false,
   votingClosed = false,
+  priorVoteSummary,
   multiChoiceOptionChoices = {},
   onMultiChoiceChange,
 }: MotionCardProps) {
@@ -97,6 +99,14 @@ export function MotionCard({
       <h3 className="motion-card__title">{motion.title}</h3>
       {motion.description && (
         <p className="motion-card__description">{motion.description}</p>
+      )}
+      {priorVoteSummary && (
+        <p
+          className={`motion-card__prior-summary${readOnly ? " motion-card__prior-summary--locked" : ""}`}
+          data-testid={`motion-prior-summary-${motion.id}`}
+        >
+          {priorVoteSummary}
+        </p>
       )}
       {/* Fix 10: styled "Motion Closed" badge inside the card */}
       {votingClosed && (

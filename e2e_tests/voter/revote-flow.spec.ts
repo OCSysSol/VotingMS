@@ -572,8 +572,8 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
     await page.getByRole("button", { name: "Submit ballot" }).click();
 
     // Mixed selection warning must appear (Lot A has voted on motion 1, Lot B has not)
-    await expect(page.getByRole("heading", { name: "Mixed voting history" })).toBeVisible({ timeout: 10000 });
-    await expect(page.getByText(/previously submitted votes will not be changed/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Some votes are already recorded" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/recorded votes will not be changed/)).toBeVisible();
 
     // Click Continue
     await page.getByRole("button", { name: "Continue" }).click();
@@ -701,13 +701,13 @@ test.describe("WF10: Mixed selection warning dialog (BUG-RV-05)", () => {
 
     // Trigger mixed warning
     await page.getByRole("button", { name: "Submit ballot" }).click();
-    await expect(page.getByRole("heading", { name: "Mixed voting history" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("heading", { name: "Some votes are already recorded" })).toBeVisible({ timeout: 10000 });
 
     // ── Step 4: click Go back — warning dismissed, still on voting page ────
     await page.getByRole("button", { name: "Go back to lot selection" }).click();
 
     // Warning should be dismissed; still on voting page
-    await expect(page.getByRole("heading", { name: "Mixed voting history" })).not.toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("heading", { name: "Some votes are already recorded" })).not.toBeVisible({ timeout: 5000 });
     await expect(page).toHaveURL(/vote\/.*\/voting/);
     // Submit ballot button still visible
     await expect(page.getByRole("button", { name: "Submit ballot" })).toBeVisible({ timeout: 5000 });

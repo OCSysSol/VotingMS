@@ -449,7 +449,7 @@ No — `voting_closes_at` already exists on the `general_meetings` table. No new
 
 ## OC Plan lookup and meeting list UX
 
-Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the status/archive filters and pagination. The meetings toolbar has one search field, right-aligned to match OC Plans and the owner list. Remove the redundant building-search combobox and its `building` URL filter. There was no dedicated backend endpoint for that combobox: it reused the shared `/api/admin/buildings` endpoint, which remains required by the Create General Meeting selector and other building administration pages.
+Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the status/archive filters and pagination. The meetings toolbar has one search field, left-aligned to match OC Plans and the owner list. Remove the redundant building-search combobox and its `building` URL filter. There was no dedicated backend endpoint for that combobox: it reused the shared `/api/admin/buildings` endpoint, which remains required by the Create General Meeting selector and other building administration pages.
 
 ## Create General Meeting — OC Plan selector terminology
 
@@ -485,3 +485,44 @@ The existing admin archive/unarchive lifecycle remains the source of truth. Clos
 Reopen only a stored `closed` meeting through an authenticated admin endpoint and require a new `voting_closes_at` strictly after now and `meeting_at`. In one transaction: set status to open, clear `closed_at`, set the new close time, delete only `BallotSubmission.is_absent=true` rows created by the close sweep, and reopen motions tagged as closed by the meeting. Preserve all submitted ballots and individually closed motions. Recompute multi-choice outcomes from retained submitted votes.
 
 Add `motions.closed_by_meeting BOOLEAN NOT NULL DEFAULT false`; meeting close marks this true only when it sets a previously-null `voting_closed_at`. Reopen clears the close timestamp only for those marked rows, then clears the marker. Backfill existing closed meetings by matching motion `voting_closed_at` to parent `closed_at`, where possible. This is the only required schema migration. UI should use an explicit confirmation and collect a new close time. Existing archive/unarchive list controls are already implemented and remain unaffected.
+
+## Meeting detail OC Plan subtitle and left-aligned search
+
+### Detail API
+
+The meeting detail response currently joins `Building` only for `building_name`. Extend the same query and response contract:
+
+- Add nullable `oc_plan_number` to backend `GeneralMeetingDetail`.
+- Select `Building.oc_plan_number.label("oc_plan_number")` alongside `Building.name` in `get_general_meeting_detail`.
+- Unpack the extra row value and return `oc_plan_number` from the service.
+- Add `oc_plan_number?: string | null` to the frontend `GeneralMeetingDetail` TypeScript interface.
+
+This is additive and backward compatible. No migration is needed because `buildings.oc_plan_number` already exists.
+
+### Detail page subtitle
+
+Render a dedicated subtitle under the meeting title, in addition to the title/status row:
+
+```tsx
+<p className="meeting-detail-subtitle">
+  {meeting.building_name}
+  {meeting.oc_plan_number?.trim() && (
+    <> · <Link to={`/admin/buildings/${meeting.building_id}`}>{meeting.oc_plan_number.trim()}</Link></>
+  )}
+</p>
+```
+
+Use React Router `Link`, not an imperative navigate call, so the OC Plan is a real hyperlink. Link to the detail route identified by `meeting.building_id`; the API already returns that stable FK. If `oc_plan_number` is absent, show only the building name and no dangling separator. Remove or avoid duplicating the old “Building” metadata item if the new subtitle becomes its single source of truth.
+
+Accessibility and tests:
+
+- The link name includes the OC Plan number and indicates where it navigates.
+- Clicking/activating it routes to `/admin/buildings/{building_id}`.
+- Tests cover both with and without an OC Plan.
+- The title remains the meeting title, and the subtitle contains both building name and OC Plan.
+
+### Search alignment
+
+Change the meeting filter row so Search is the first control at the left edge and Status follows it. Remove `marginLeft: "auto"`. Keep one search input supporting meeting title, OC Plan, and building, with the existing server-side filter and URL persistence.
+
+Add tests that the search field is present in the left-aligned filter row, status remains functional, and no secondary toolbar search is reintroduced. This supersedes the earlier right-aligned design text.

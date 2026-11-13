@@ -597,7 +597,7 @@ test("33M.7: voter alecools re-logs in, all lots unlock, submits for all lots", 
 
   // Submit — MixedSelectionWarningDialog appears first (half the lots already voted on M1/M2)
   await page.getByRole("button", { name: "Submit ballot" }).click();
-  const mixedDialog = page.getByRole("dialog", { name: "Mixed voting history" });
+  const mixedDialog = page.getByRole("dialog", { name: "Some votes are already recorded" });
   await expect(mixedDialog).toBeVisible({ timeout: 10000 });
   await mixedDialog.getByRole("button", { name: "Continue" }).click();
   await expect(mixedDialog).not.toBeVisible({ timeout: 5000 });

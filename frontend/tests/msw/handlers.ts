@@ -254,6 +254,7 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   id: "agm1",
   building_id: "b1",
   building_name: "Alpha Tower",
+  oc_plan_number: "PS345123A",
   title: "2024 AGM",
   status: "open",
   meeting_at: "2024-06-01T10:00:00Z",

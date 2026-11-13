@@ -338,6 +338,82 @@ No additional migration is required for US-DL-01. The `submitted_at` field is al
 
 Backend `enter_votes_for_meeting` already obtains submitted motion IDs by lot and skips those IDs, while accepting new votes for unanswered motions. The UI mismatch is in `AdminVoteEntryPanel`: it infers “app submitted” from any voter-list entry and disables selection for the whole lot. Change selection to permit those lots; hydrate app-submitted motion choices from `voter_lists` as immutable prior entries, and disable only the corresponding motion cells. Admin-entered prior entries remain immutable as today. Submit only explicit choices for unanswered motions. Maintain the unique ballot/submission constraints and never replace voter/proxy identity. No schema migration is expected.
 
+### Per-motion vote provenance and prior selections
+
+#### Root cause
+
+`AdminVoteEntryPanel` currently keeps two different prior-entry models:
+
+- `appVotedMotionIdsByLotId` records only the IDs of motions with user votes. It does not retain the selected `yes`/`no`/`abstained` or per-option choices.
+- `priorVotesByLotId` retains actual choices only for records marked `submitted_by_admin`; step 1 seeds the grid only from that map.
+
+Consequently, a user-voted motion is disabled as a prior entry but its selected button has no hydrated value. A mixed lot can also lose the choices entered later by an admin.
+
+The API currently exposes `VoterEntry.submitted_by_admin`, but `_lots()` derives it from the single lot-level `BallotSubmission`. A lot that first voted online and later had an admin enter additional motions has one app-submitted ballot row, so every motion is incorrectly presented as online/user voting.
+
+#### Provenance contract
+
+Provenance is per `(lot_owner_id, motion_id)`, never per lot.
+
+- Existing `Vote` rows do not need a schema migration to recover the current source convention. `enter_votes_for_meeting` persists every admin-created `Vote.voter_email` as the literal sentinel `"admin"`; voter and proxy self-service rows persist the actual actor email.
+- The meeting-detail vote projection must select `Vote.voter_email` and build `(lot_owner_id, motion_id) -> submitted_by_admin`.
+- For voted categories, `_lots()` must use that per-motion map. `BallotSubmission.submitted_by_admin` remains submission metadata for absent/whole-ballot cases and must not drive individual motion labels.
+- Treat `"admin"` case-insensitively after trimming. User/proxy records, including proxy submissions, remain `User voted` for this two-source presentation.
+
+#### Backend changes
+
+In `backend/app/services/admin_service.py`:
+
+1. Add `Vote.voter_email` to the lightweight `vote_projections` query.
+2. Build `vote_submitted_by_admin_map: dict[tuple[uuid.UUID, uuid.UUID], bool]` from the projection.
+3. In `_lots()`, when `motion_id` is provided, populate `submitted_by_admin` from that map. Keep the current absent handling.
+4. Ensure binary categories and every multi-choice option category pass the motion ID so the same per-motion source is returned consistently.
+
+`backend/app/schemas/admin.py` and `frontend/src/api/admin.ts` already expose `submitted_by_admin`; no response-shape additions are required.
+
+#### Frontend changes
+
+In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx`:
+
+1. Replace the split “motion IDs” and “admin choices” structures with one prior-vote registry keyed by lot and motion. It contains the exact binary choice or per-option choices plus `source: "user" | "admin"`.
+2. Build the registry from all populated `voter_lists` categories, not only records with `submitted_by_admin === true`.
+3. When proceeding from lot selection to the grid, hydrate `lotVotes` for every prior motion. User and admin choices must both produce `aria-pressed="true"` on the matching controls.
+4. Disable only the motion cells that have an exact prior record. Continue allowing admin entry for unanswered motions.
+5. Render explicit source text above each prior motion:
+   - `User voted` for app/proxy submissions
+   - `Admin voted` for admin entry
+6. Replace the generic `Already voted online` and `Prev. entry` labels. Add source-specific badge/cell classes so mixed lots are scannable: a user-source tint and admin-source tint, plus a distinct divider/border for each source. Text labels remain present so colour is not the only differentiator.
+7. Replace lot-level warning badges with source-aware summaries: `User votes recorded`, `Admin votes recorded`, or `Mixed user/admin votes`.
+8. Preserve the actual selected vote buttons and the normal submitted/answered header summary. A mixed lot must not be collapsed into either a single source or a generic submitted state.
+
+Prefer reusable CSS classes in `frontend/src/styles/index.css` for badge/tint styling instead of adding new inline colour declarations.
+
+#### Test cases
+
+Backend integration:
+
+- User-voted M1/M2 followed by admin entry for M3/M4/M5 in one lot returns `submitted_by_admin=false` for M1/M2 and `true` for M3-M5.
+- User-only and admin-only lots retain their expected per-motion source.
+- Multi-choice motions return correct per-motion source on every option category.
+- Absent rows retain `submitted_by_admin=false`.
+
+Frontend component:
+
+- A mixed lot hydrates the exact prior choice for every motion and marks the matching buttons active.
+- M1/M2 show `User voted`; M3/M4/M5 show `Admin voted` in the same lot column.
+- The user and admin source classes differ, while selected choices remain readable.
+- User-only, admin-only, and mixed column summaries render correctly.
+- Unanswered motions remain editable and submitting sends only their choices.
+- Multi-choice prior choices hydrate per option with the correct source.
+
+E2E:
+
+- User votes on motions 1-2 online; admin opens in-person entry and records motions 3-5; reopening the grid shows all five prior selections and the correct mixed provenance.
+
+#### Schema migration
+
+None. Existing per-`Vote.voter_email` data is sufficient to expose accurate per-motion provenance while preserving current subscription semantics. A future explicit `vote_source` column could replace the admin sentinel without changing this UI contract.
+
 ## OC Plan meeting-list columns and navigation prefill
 
 Meeting list items need the joined `oc_plan_number`, and list/count filtering needs a shared search value across building name and OC plan (plus title if retained). From OC Plan detail, route to meeting creation with `building_id` and preselect that building in the form; no schema change.

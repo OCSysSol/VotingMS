@@ -14,7 +14,7 @@
  *
  * Gap 3 — AdminRevoteWarningDialog:
  *   After admin-entering votes for a lot, opening the Enter Votes panel again
- *   shows the "Previously entered by admin" amber badge for that lot. Selecting
+ *   shows the "Admin votes recorded" badge for that lot. Selecting
  *   it and submitting triggers the warning dialog. "Go back" dismisses it.
  *   "Continue anyway" proceeds to the confirm step, which submits and shows the
  *   skipped_count banner (backend skips already-admin-submitted lots).
@@ -306,6 +306,8 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
       const m1YesBtn = voteGrid.getByRole("button", { name: `yes for lot ${LOT_A} motion ${MOTION1_TITLE}` });
       const m2NoBtn = voteGrid.getByRole("button", { name: `no for lot ${LOT_A} motion ${MOTION2_TITLE}` });
       await expect(m1YesBtn).toBeDisabled();
+      await expect(m1YesBtn).toHaveAttribute("aria-pressed", "true");
+      await expect(voteGrid.getByText("User voted")).toBeVisible();
       await expect(m2NoBtn).toBeEnabled();
 
       // Admin selects Against ("no") for Lot A on M2 and submits
@@ -576,10 +578,10 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await expect(adminLotCheckbox).toBeVisible({ timeout: 5000 });
     await expect(adminLotCheckbox).toBeEnabled();
 
-    // The amber "Previously entered by admin" badge is shown next to LOT_ADMIN
+    // The source-aware admin summary is shown next to LOT_ADMIN
     // Scope to the dialog to avoid picking up badges elsewhere on the page
     const dialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
-    await expect(dialog.getByText("Previously entered by admin")).toBeVisible({ timeout: 5000 });
+    await expect(dialog.getByText("Admin votes recorded")).toBeVisible({ timeout: 5000 });
   });
 
   test("Gap 3.2: submitting with admin-submitted lot shows warning dialog; 'Go back' dismisses it", async ({ page }) => {
@@ -601,9 +603,10 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
     await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" })).toBeVisible({ timeout: 10000 });
 
-    // Step 2 grid shows the "Previously entered by admin" badge in the column header
+    // Step 2 grid shows the source-aware admin summary and per-motion label
     const voteGridDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
-    await expect(voteGridDialog.getByText("Previously entered by admin")).toBeVisible({ timeout: 5000 });
+    await expect(voteGridDialog.getByText("Admin votes recorded")).toBeVisible({ timeout: 5000 });
+    await expect(voteGridDialog.getByText("Admin voted")).toBeVisible({ timeout: 5000 });
 
     // Click "Submit votes" — this triggers the AdminRevoteWarningDialog (not the ConfirmDialog)
     // because the selected lot was previously entered by admin

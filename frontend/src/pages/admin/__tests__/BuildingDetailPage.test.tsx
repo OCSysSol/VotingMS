@@ -105,12 +105,12 @@ describe("BuildingDetailPage", () => {
     }, { timeout: 3000 });
   });
 
-  it("right-aligns the owner search in the list toolbar", async () => {
+  it("left-aligns the owner search in the list toolbar", async () => {
     renderPage();
     const search = screen.getByRole("searchbox", { name: "Search owners" });
     const toolbar = search.closest(".admin-card__header");
     expect(toolbar).not.toBeNull();
-    expect(toolbar).toHaveStyle({ justifyContent: "flex-end" });
+    expect(toolbar).toHaveStyle({ justifyContent: "flex-start" });
   });
 
   it("shows Add Lot Owner button", async () => {

@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
-import type { LotInfo } from "../../api/voter";
+import type { MotionOut } from "../../api/voter";
 
 interface MixedSelectionWarningDialogProps {
-  differingLots: LotInfo[];
+  partialMotions: MotionOut[];
   onContinue: () => void;
   onGoBack: () => void;
 }
@@ -11,7 +11,7 @@ const FOCUSABLE_SELECTORS =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function MixedSelectionWarningDialog({
-  differingLots,
+  partialMotions,
   onContinue,
   onGoBack,
 }: MixedSelectionWarningDialogProps) {
@@ -60,21 +60,18 @@ export function MixedSelectionWarningDialog({
       <div className="dialog">
         <div className="dialog__icon dialog__icon--warning">⚠</div>
         <h2 className="dialog__title" id="mixed-warning-dialog-title">
-          Mixed voting history
+          Some votes are already recorded
         </h2>
         <p className="dialog__body">
-          Some of your selected lots have already voted on earlier motions. Those
-          previously submitted votes will not be changed — only new motions will be
-          recorded for those lots.
+          Some selected lots have already voted on the motions below. Their recorded
+          votes will not be changed. Any choice you submit now applies only to the
+          selected lots that have not yet voted on that motion.
         </p>
-        <p className="dialog__body">
-          Lots voting for the first time will record answers for all motions shown.
-        </p>
-        {differingLots.length > 0 && (
+        {partialMotions.length > 0 && (
           <ul className="dialog__list">
-            {differingLots.map((lot) => (
-              <li className="dialog__list-item" key={lot.lot_owner_id}>
-                Lot {lot.lot_number}
+            {partialMotions.map((motion) => (
+              <li className="dialog__list-item" key={motion.id}>
+                Motion {motion.motion_number?.trim() || motion.display_order}: {motion.title}
               </li>
             ))}
           </ul>

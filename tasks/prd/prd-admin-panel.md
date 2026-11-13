@@ -674,3 +674,23 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [ ] Admins can select a lot even if its owner or proxy submitted votes on other motions.
 - [ ] Previously submitted motions are shown read-only and cannot be overwritten; admin can enter votes only for unanswered motions. The existing per-motion backend skip behavior remains authoritative.
 - [ ] Preserve voter/proxy audit identity and never replace the original ballot. Show a useful result when no unanswered motions remain.
+
+---
+
+### US-AVE-PROVENANCE-01: Show prior choices and per-motion vote source
+
+**Status:** Proposed
+
+**Description:** As an admin entering in-person votes, I need to see exactly what was already selected for every prior motion and whether each vote came from the user or from an admin. A lot may contain a mixture of both sources.
+
+**Acceptance Criteria:**
+
+- [ ] When an admin opens the vote-entry grid, every previously recorded motion shows the lot's actual selected choice (For, Against, or Abstain), including prior user/proxy votes and prior admin votes.
+- [ ] Multi-choice motions hydrate the exact prior For/Against/Abstain selection for each option.
+- [ ] Provenance is evaluated per motion, not once per lot. For example, one lot may show motions 1-2 as `User voted` and motions 3-5 as `Admin voted`.
+- [ ] Prior user-sourced motions display `User voted`; prior admin-sourced motions display `Admin voted`. Generic `Already voted online` and `Prev. entry` labels are removed.
+- [ ] User-sourced and admin-sourced prior cells have distinct text and visual treatment, so a mixed lot can be scanned without relying on colour alone.
+- [ ] The lot summary identifies the source mix: `User votes recorded`, `Admin votes recorded`, or `Mixed user/admin votes`.
+- [ ] The selected prior choice remains visibly active while its controls remain read-only.
+- [ ] Admin can still enter and submit choices only for motions that have no prior vote.
+- [ ] A lot that first voted online and was later partially completed by an admin retains accurate per-motion provenance.

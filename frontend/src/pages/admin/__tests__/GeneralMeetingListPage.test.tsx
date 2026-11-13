@@ -42,15 +42,17 @@ describe("GeneralMeetingListPage", () => {
     expect(screen.getByText("Loading General Meetings...")).toBeInTheDocument();
   });
 
-  it("renders one search field aligned to the right of the toolbar", async () => {
+  it("renders one search field first and left-aligned in the toolbar", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("2024 AGM")).toBeInTheDocument();
     });
     expect(screen.getAllByRole("searchbox")).toHaveLength(1);
     expect(screen.queryByRole("combobox", { name: "Building" })).not.toBeInTheDocument();
-    expect(screen.getByRole("searchbox", { name: "Search" }).parentElement)
-      .toHaveStyle({ marginLeft: "auto" });
+    const search = screen.getByRole("searchbox", { name: "Search" });
+    const filterRow = search.closest(".admin-card__header")?.firstElementChild;
+    expect(filterRow).toHaveStyle({ justifyContent: "flex-start" });
+    expect(filterRow?.firstElementChild).toContainElement(search);
   });
 
   it("sends the shared meeting, OC Plan, and building search to list and count", async () => {

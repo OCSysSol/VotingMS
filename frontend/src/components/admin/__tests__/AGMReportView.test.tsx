@@ -769,7 +769,7 @@ describe("AGMReportView", () => {
     expect(screen.getAllByText("Lot #").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Email").length).toBeGreaterThan(0);
     expect(screen.getAllByText("UOE").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Submitted By").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
     expect(screen.getAllByText("Choice").length).toBeGreaterThan(0);
   });
 
@@ -782,7 +782,6 @@ describe("AGMReportView", () => {
     expect(screen.getByText("voter1@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("L1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("100").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voter").length).toBeGreaterThan(0);
   });
 
   it("MC drill-down: For voters show For choice badge", async () => {
@@ -845,7 +844,7 @@ describe("AGMReportView", () => {
     expect(screen.getByText("(proxy)")).toBeInTheDocument();
   });
 
-  it("MC drill-down: admin-submitted ballot shows 'Admin' in Submitted By column", async () => {
+  it("MC drill-down: admin-submitted ballot keeps email without a Submitted By column", async () => {
     const user = userEvent.setup();
     const mcWithAdmin: MotionDetail = {
       ...mcMotionFixture,
@@ -870,7 +869,8 @@ describe("AGMReportView", () => {
     render(<AGMReportView motions={[mcWithAdmin]} />);
     const showBtn = screen.getAllByRole("button", { name: /Show voting details for Alice/ })[0];
     await user.click(showBtn);
-    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByText("admin@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
   });
 
   it("MC drill-down: option with no voters shows 'No voter records.'", async () => {
@@ -1238,11 +1238,11 @@ describe("AGMReportView", () => {
     expect(screen.getByText("Lot #")).toBeInTheDocument();
     expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("UOE")).toBeInTheDocument();
-    expect(screen.getByText("Submitted By")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
     expect(screen.getByText("Choice")).toBeInTheDocument();
   });
 
-  it("Fix 6: voter row contains lot number, email, entitlement, Voter label, and choice badge", async () => {
+  it("Fix 6: voter row contains lot number, email, entitlement, and choice badge", async () => {
     const user = userEvent.setup();
     render(<AGMReportView motions={[motions[0]]} />);
     await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
@@ -1250,7 +1250,6 @@ describe("AGMReportView", () => {
     expect(screen.getByText("voter1@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("L1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("100").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voter").length).toBeGreaterThan(0);
     // Check choice badge text (For)
     const forBadges = screen.getAllByText("For");
     expect(forBadges.length).toBeGreaterThan(0);
@@ -1274,7 +1273,7 @@ describe("AGMReportView", () => {
     expect(screen.getByText("(proxy)")).toBeInTheDocument();
   });
 
-  it("Fix 6: admin-submitted ballot shows 'Admin' in Submitted By column", async () => {
+  it("Fix 6: admin-submitted ballot keeps email without a Submitted By column", async () => {
     const user = userEvent.setup();
     const motionWithAdmin: typeof motions[0] = {
       ...motions[0],
@@ -1289,7 +1288,8 @@ describe("AGMReportView", () => {
     };
     render(<AGMReportView motions={[motionWithAdmin]} />);
     await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
-    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByText("admin@example.com")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
   });
 
   it("Fix 6: empty voter lists show 'No voter records.' message", async () => {

@@ -179,7 +179,9 @@ This document covers the complete voter journey: email OTP authentication, persi
 - [ ] `POST /api/auth/verify` request body: `{ email, general_meeting_id, code }` — no `lot_number` field
 - [ ] The endpoint looks up all `LotOwnerEmail` records matching the given `email`, then resolves associated `LotOwner` records and `lot_proxy` records for the given building
 - [ ] If no matching email + building combination is found, return 401
-- [ ] Response includes a list of lots the email is authorised to vote for: each entry contains `lot_owner_id`, `lot_number`, `financial_position`, `already_submitted`, `is_proxy`, and `voted_motion_ids`
+- [ ] Response includes a list of lots the email is authorised to vote for: each entry contains `lot_owner_id`, `lot_number`, `financial_position`, `already_submitted`, `is_proxy`, `voted_motion_ids`, and `submitted_votes`
+- [ ] `submitted_votes` contains only submitted votes for that lot, including the exact binary choice or multi-choice option map; draft votes are excluded
+- [ ] The same per-lot history is returned by session restore
 - [ ] Response also includes `agm_status`, `voter_email`, `session_token`, and `unvoted_visible_count`
 - [ ] `already_submitted` per lot: "has this lot cast a submitted vote on every currently-visible motion?" (set-subset check)
 - [ ] All email addresses are normalised to lowercase before storage and before OTP lookup
@@ -197,12 +199,14 @@ This document covers the complete voter journey: email OTP authentication, persi
 
 - [ ] After successful authentication, the frontend shows the lot selection UI
 - [ ] Each lot is shown with: lot number, financial position badge, proxy badge ("via Proxy" when applicable), and "Already submitted" badge when applicable
-- [ ] **Multi-lot voters (2+ lots):** Each lot row renders a checkbox; all pending (not-yet-submitted) lots are checked by default on mount; already-submitted lots render a disabled, unchecked checkbox; "Start Voting" is disabled when no checkboxes are selected
+- [ ] **Multi-lot voters (2+ lots):** Each lot row renders a checkbox; pending lots are checked by default on mount; already-submitted lots are unchecked by default but remain selectable and enabled
+- [ ] Already-submitted lots remain selectable at all times so the voter can review their recorded choices
+- [ ] Submission requires at least one selected lot
 - [ ] **Single-lot voters (exactly 1 lot):** No checkbox is rendered — existing UX is preserved unchanged
 - [ ] In the lot sidebar, four shortcut buttons appear above the lot list for multi-lot voters: **Select All**, **Deselect All**, **Select Proxy Lots** (only shown when the voter has at least one proxy lot), **Select Owned Lots** (only shown when the voter has at least one proxy lot)
-- [ ] Submitted lots are excluded from all shortcut button selections
+- [ ] Select All includes submitted and pending lots; proxy/owned shortcuts also include submitted lots
 - [ ] On mobile (≤640px) the lot sidebar is collapsible via a toggle button; default state is **collapsed**
-- [ ] If all lots have already been submitted, a "View Submission" button is shown and no "Start Voting" button is rendered
+- [ ] A "View Submission" button remains available whenever any lot has submitted votes
 - [ ] Typecheck/lint passes
 
 ---
@@ -535,14 +539,13 @@ This document covers the complete voter journey: email OTP authentication, persi
 
 **Status:** ✅ Implemented
 
-**Fix:** Frontend adds a `MixedSelectionWarningDialog` component that appears when the voter clicks "Submit ballot" and any two selected lots have different `voted_motion_ids` sets. A motion is locked only when ALL currently-selected lots have voted on it.
+**Fix:** Frontend adds a `MixedSelectionWarningDialog` component. This ticket is superseded by `US-MPV-01`, which triggers the warning only when a motion has votes from a subset of selected lots and can therefore receive a vote for the outstanding lots.
 
 **Acceptance Criteria:**
 
-- [ ] When the voter clicks "Submit ballot" and any two selected lots have different `voted_motion_ids` sets, a warning dialog is shown before the existing submit confirmation dialog
-- [ ] The warning fires even when both lots are "partial" but with different motion coverage
+- [ ] When the voter clicks "Submit ballot" and any motion has votes from a subset of selected lots, a warning dialog is shown before the existing submit confirmation dialog
 - [ ] A motion is locked (read-only) only when ALL currently-selected lots have voted on it
-- [ ] Fresh lots always see blank motion cards even if another selected lot's `submitted_choice` is non-null
+- [ ] Partially voted motions remain interactive and their new-choice controls are not seeded from another selected lot's vote
 - [ ] All tests pass at 100% coverage
 
 ---
@@ -551,13 +554,40 @@ This document covers the complete voter journey: email OTP authentication, persi
 
 **Status:** ✅ Implemented
 
-**Fix:** In `submitMutation.onSuccess`: update `allLots` state and `meeting_lots_info_<meetingId>` in sessionStorage to mark submitted lots as `already_submitted: true` and update `voted_motion_ids`.
+**Fix:** Historical ticket originally disabled submitted checkboxes. `US-MPV-01` supersedes that behaviour: submitted lots stay selectable. `submitMutation.onSuccess` updates `already_submitted`, `voted_motion_ids`, and `submitted_votes` before navigation.
 
 **Acceptance Criteria:**
 
-- [ ] After submitting for one or more lots, navigating back to the voting page shows submitted lots with "Already submitted" badge and disabled checkboxes
-- [ ] The Submit ballot button is absent when all lots have been submitted
+- [ ] After submitting for one or more lots, navigating back shows submitted lots with an "Already submitted" badge and enabled checkboxes
+- [ ] Selecting a submitted lot displays its recorded choices read-only
+- [ ] The Submit ballot button is absent when every motion in the current selection has a recorded vote and no outstanding selected lot can vote
 - [ ] All tests pass at 100% coverage
+
+---
+
+### US-MPV-01: Selection-aware prior votes and mixed multi-lot choices
+
+**Status:** Proposed
+
+**Description:** As a voter with one or more lots, I want to select lots and see exactly what each selected lot previously voted so I can understand my position and vote only where votes are still outstanding.
+
+**Acceptance Criteria:**
+
+- [ ] Voters can select and deselect every authorised lot at all times, including lots with submitted votes
+- [ ] Selecting one lot displays that lot's recorded choice for every answered motion; those choices are greyed out and cannot be changed
+- [ ] Selecting multiple lots shows a recorded choice when every selected lot chose the same option for that motion; the motion is greyed out and cannot be changed
+- [ ] Selecting multiple lots shows `Mixed votes among selected lots` when selected lots chose different options for a fully answered motion; the motion is greyed out and cannot be changed
+- [ ] Motions with votes from only a subset of selected lots remain interactive so outstanding lots can be voted
+- [ ] For a partially voted motion, existing choices are shown separately and are not used to preselect the new-vote controls
+- [ ] Submitting a partially voted motion applies the new choice only to selected lots without an existing vote for that motion; existing votes are preserved
+- [ ] Before that submission, a warning identifies the affected motions and states that recorded votes will not change
+- [ ] Selecting no lots in a multi-lot meeting shows no aggregate prior vote and blocks submission with the existing selection error
+- [ ] Changing lot selection immediately recomputes prior choices and mixed states without leaking a choice from an unselected lot
+- [ ] Binary and multi-choice votes follow the same rules; multi-choice equality compares the complete option-choice map
+- [ ] Recorded `not_eligible` choices participate in same/mixed aggregation and are displayed as recorded choices
+- [ ] The existing `View Submission` action remains available whenever submitted votes exist
+- [ ] Backend, component, integration, and E2E tests cover single-lot review, all-same multi-lot review, all-different mixed review, partially voted multi-lot action, the submission warning, and selection changes
+- [ ] No database migration is required
 
 ---
 

@@ -69,6 +69,29 @@ export function useMotionSubmission({
       const submittedIds = variables.lotsToSubmit;
       const submittedSet = new Set(submittedIds);
       const currentMotionIds = motions ? motions.map((m) => m.id) : [];
+      const newSubmittedVotes = [
+        ...variables.votes.map((vote) => ({
+          motion_id: vote.motion_id,
+          choice: vote.choice,
+          option_choices: {},
+        })),
+        ...variables.multiChoiceVotes.map((vote) => ({
+          motion_id: vote.motion_id,
+          choice: "selected" as const,
+          option_choices: Object.fromEntries(
+            vote.option_choices.map((choice) => [choice.option_id, choice.choice]),
+          ),
+        })),
+      ];
+      const buildSubmittedVotes = (lot: LotInfo) => {
+        const byMotion = new Map(
+          (lot.submitted_votes ?? []).map((vote) => [vote.motion_id, vote]),
+        );
+        for (const vote of newSubmittedVotes) {
+          byMotion.set(vote.motion_id, vote);
+        }
+        return [...byMotion.values()];
+      };
 
       if (meetingId) {
         try {
@@ -83,6 +106,7 @@ export function useMotionSubmission({
                   voted_motion_ids: Array.from(
                     new Set([...(lot.voted_motion_ids ?? []), ...currentMotionIds])
                   ),
+                  submitted_votes: buildSubmittedVotes(lot),
                 }
               : lot
           );
@@ -101,6 +125,7 @@ export function useMotionSubmission({
                 voted_motion_ids: Array.from(
                   new Set([...(lot.voted_motion_ids ?? []), ...currentMotionIds])
                 ),
+                submitted_votes: buildSubmittedVotes(lot),
               }
             : lot
         )

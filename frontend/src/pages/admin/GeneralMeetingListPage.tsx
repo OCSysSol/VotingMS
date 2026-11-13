@@ -225,8 +225,19 @@ export default function GeneralMeetingListPage() {
       )}
       <div className="admin-card">
         <div className="admin-card__header">
-          <div style={{ display: "flex", width: "100%", gap: 16, alignItems: "flex-end" }}>
-            <div style={{ maxWidth: 180 }}>
+          <div style={{ display: "flex", width: "100%", gap: 16, alignItems: "flex-end", justifyContent: "flex-start" }}>
+            <div style={{ maxWidth: 320, flex: "1 1 280px" }}>
+              <label className="field__label" htmlFor="meeting-search">Search</label>
+              <input
+                id="meeting-search"
+                className="field__input"
+                type="search"
+                value={meetingSearchInput}
+                onChange={(e) => handleMeetingSearchChange(e.target.value)}
+                placeholder="Meeting, OC Plan, or building"
+              />
+            </div>
+            <div style={{ maxWidth: 180, flex: "0 1 180px" }}>
               <label className="field__label" htmlFor="status-filter">Status</label>
               <select
                 id="status-filter"
@@ -239,17 +250,6 @@ export default function GeneralMeetingListPage() {
                 <option value="pending">Pending</option>
                 <option value="closed">Closed</option>
               </select>
-            </div>
-            <div style={{ maxWidth: 320, marginLeft: "auto" }}>
-              <label className="field__label" htmlFor="meeting-search">Search</label>
-              <input
-                id="meeting-search"
-                className="field__input"
-                type="search"
-                value={meetingSearchInput}
-                onChange={(e) => handleMeetingSearchChange(e.target.value)}
-                placeholder="Meeting, OC Plan, or building"
-              />
             </div>
           </div>
         </div>

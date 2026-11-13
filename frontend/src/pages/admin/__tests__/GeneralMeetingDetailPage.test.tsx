@@ -50,7 +50,19 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("2024 AGM")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Alpha Tower/)).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Tower").length).toBeGreaterThan(0);
+  });
+
+  it("links the OC Plan in the meeting subtitle", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    const ocPlanLink = screen.getByRole("link", { name: "Open OC Plan PS345123A" });
+    const subtitle = screen.getByText("PS345123A").closest(".meeting-detail__subtitle");
+    expect(subtitle).not.toBeNull();
+    expect(within(subtitle as HTMLElement).getByText("Alpha Tower")).toBeInTheDocument();
+    expect(ocPlanLink).toHaveAttribute("href", "/admin/buildings/b1");
   });
 
   it("renders status badge", async () => {

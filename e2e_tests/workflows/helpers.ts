@@ -80,17 +80,54 @@ export interface MotionDetail {
   };
 }
 
+/**
+ * Generate a stable OC Plan number from a building name.
+ *
+ * Base plans use PS + six digits + one uppercase letter. Passing a positive
+ * sequence appends the sequence so one building can have multiple OC Plans.
+ */
+export function generateOcPlanNumber(buildingName: string, sequence = 0): string {
+  let hash = 2166136261;
+  for (const char of buildingName) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  const digits = String(hash % 900000 + 100000);
+  const letter = String.fromCharCode(65 + (hash % 26));
+  const suffix = sequence > 0 ? String(sequence) : "";
+  return `PS${digits}${letter}${suffix}`;
+}
+
+/**
+ * Format a building the same way as the voter building combobox.
+ *
+ * When no OC Plan is passed, derive the deterministic plan used by
+ * `seedBuilding`. Pass `null` to exercise the legacy name-only fallback.
+ */
+export function formatVoterBuildingLabel(
+  buildingName: string,
+  ocPlanNumber: string | null = generateOcPlanNumber(buildingName),
+): string {
+  const plan = ocPlanNumber?.trim();
+  return plan ? `${plan} - ${buildingName}` : buildingName;
+}
+
 // ── Building helpers ──────────────────────────────────────────────────────────
 
 /**
- * Create or find a building by name. Returns the building ID.
+ * Create or find a building by name and populate its OC Plan when absent.
+ * Returns the building ID. Pass a distinct OC Plan number when the same
+ * building name needs multiple OC Plans.
  */
 export async function seedBuilding(
   api: APIRequestContext,
   name: string,
-  managerEmail: string
+  managerEmail: string,
+  ocPlanNumber?: string,
 ): Promise<string> {
   return withRetry(async () => {
+    const explicitPlan = ocPlanNumber?.trim();
+    const targetPlan = explicitPlan || generateOcPlanNumber(name);
     const buildingsRes = await api.get(
       `/api/admin/buildings?name=${encodeURIComponent(name)}`
     );
@@ -101,17 +138,53 @@ export async function seedBuilding(
         `GET /api/admin/buildings returned ${buildingsRes.status()} — server error, retrying. Body: ${await buildingsRes.text()}`
       );
     }
-    const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+    const buildings = (await buildingsRes.json()) as {
+      id: string;
+      name: string;
+      oc_plan_number: string | null;
+    }[];
     // name filter is a substring match — use exact-name guard as safety net
-    let building = buildings.find((b) => b.name === name) ?? null;
+    let building = buildings.find((b) => b.oc_plan_number === targetPlan) ?? null;
+    if (!building && !explicitPlan) {
+      building = buildings.find((b) => b.name === name) ?? null;
+    }
+    if (!building) {
+      const sameNameWithoutPlan = buildings.find(
+        (b) => b.name === name && !b.oc_plan_number?.trim(),
+      );
+      if (sameNameWithoutPlan) {
+        const patchRes = await api.patch(`/api/admin/buildings/${sameNameWithoutPlan.id}`, {
+          data: { oc_plan_number: targetPlan },
+        });
+        if (!patchRes.ok()) {
+          throw new Error(
+            `Failed to set OC Plan on building "${name}" (${patchRes.status()}): ${await patchRes.text()}`,
+          );
+        }
+        building = { ...sameNameWithoutPlan, oc_plan_number: targetPlan };
+      }
+    }
     if (!building) {
       const res = await api.post("/api/admin/buildings", {
-        data: { name, manager_email: managerEmail },
+        data: { name, manager_email: managerEmail, oc_plan_number: targetPlan },
       });
       if (!res.ok()) {
         throw new Error(`Failed to create building "${name}" (${res.status()}): ${await res.text()}`);
       }
-      building = (await res.json()) as { id: string; name: string };
+      building = (await res.json()) as {
+        id: string;
+        name: string;
+        oc_plan_number: string | null;
+      };
+    } else if (!building.oc_plan_number?.trim()) {
+      const patchRes = await api.patch(`/api/admin/buildings/${building.id}`, {
+        data: { oc_plan_number: targetPlan },
+      });
+      if (!patchRes.ok()) {
+        throw new Error(
+          `Failed to populate OC Plan for building "${name}" (${patchRes.status()}): ${await patchRes.text()}`,
+        );
+      }
     }
     return building.id;
   });
@@ -602,7 +675,12 @@ export async function goToAuthPage(page: Page, buildingName: string): Promise<vo
   const combobox = page.getByLabel("Select your building");
   await expect(combobox).toBeVisible();
   await combobox.fill(buildingName);
-  await page.getByRole("option", { name: buildingName, exact: true }).click();
+  // Tolerate both the name-only fallback and the current formatted label.
+  // The escaped name and separator avoid matching another building substring.
+  const escapedName = buildingName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await page
+    .getByRole("option", { name: new RegExp(`^(?:.+ - )?${escapedName}$`) })
+    .click();
   await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible({
     timeout: 15000,
   });
@@ -666,7 +744,7 @@ export async function submitBallot(page: Page): Promise<void> {
   await expect(page.getByRole("dialog")).toBeVisible();
 
   // If the mixed-warning dialog appeared, dismiss it first before the submit dialog.
-  const mixedDialog = page.getByRole("dialog", { name: "Mixed voting history" });
+  const mixedDialog = page.getByRole("dialog", { name: "Some votes are already recorded" });
   if (await mixedDialog.isVisible()) {
     await mixedDialog.getByRole("button", { name: "Continue" }).click();
     await expect(mixedDialog).not.toBeVisible({ timeout: 5000 });

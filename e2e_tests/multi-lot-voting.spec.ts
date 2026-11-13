@@ -19,9 +19,15 @@
  */
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
-import { getTestOtp, makeAdminApi } from "./workflows/helpers";
+import {
+  formatVoterBuildingLabel,
+  generateOcPlanNumber,
+  getTestOtp,
+  makeAdminApi,
+} from "./workflows/helpers";
 
 const BUILDING_NAME = `E2E Multi-Lot Test Building-${RUN_SUFFIX}`;
+const BUILDING_OC_PLAN = generateOcPlanNumber(BUILDING_NAME);
 const LOT_NUMBER_1 = "ML-1";
 const LOT_NUMBER_2 = "ML-2";
 const LOT_EMAIL = "multi-voter@test.com";
@@ -41,13 +47,21 @@ test.describe("Multi-lot voter journey", () => {
     // ── Building ──────────────────────────────────────────────────────────
     const buildingsRes = await api.get(`/api/admin/buildings?name=${encodeURIComponent(BUILDING_NAME)}`);
     if (!buildingsRes.ok()) throw new Error(`GET /api/admin/buildings returned ${buildingsRes.status()}: ${await buildingsRes.text()}`);
-    const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+    const buildings = (await buildingsRes.json()) as { id: string; name: string; oc_plan_number: string | null }[];
     let building = buildings.find((b) => b.name === BUILDING_NAME);
     if (!building) {
       const res = await api.post("/api/admin/buildings", {
-        data: { name: BUILDING_NAME, manager_email: "ml-mgr@test.com" },
+        data: {
+          name: BUILDING_NAME,
+          manager_email: "ml-mgr@test.com",
+          oc_plan_number: BUILDING_OC_PLAN,
+        },
       });
-      building = (await res.json()) as { id: string; name: string };
+      building = (await res.json()) as { id: string; name: string; oc_plan_number: string | null };
+    } else if (!building.oc_plan_number?.trim()) {
+      await api.patch(`/api/admin/buildings/${building.id}`, {
+        data: { oc_plan_number: BUILDING_OC_PLAN },
+      });
     }
     const buildingId = building.id;
 
@@ -159,7 +173,10 @@ test.describe("Multi-lot voter journey", () => {
     const combobox = page.getByLabel("Select your building");
     await expect(combobox).toBeVisible();
     await combobox.fill(BUILDING_NAME);
-    await page.getByRole("option", { name: BUILDING_NAME, exact: true }).click();
+    await page.getByRole("option", {
+      name: formatVoterBuildingLabel(BUILDING_NAME, BUILDING_OC_PLAN),
+      exact: true,
+    }).click();
     await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible({
       timeout: 15000,
     });
@@ -236,8 +253,10 @@ test.describe("Multi-lot voter journey", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
     await expect(sidebar.locator(".lot-selection__item--submitted")).toHaveCount(2);
 
-    // The subtitle says "All lots have been submitted." (scoped to sidebar)
-    await expect(sidebar.getByText("All lots have been submitted.")).toBeVisible();
+    // Submitted lots remain available for review rather than making the selector unavailable.
+    await expect(
+      sidebar.getByText("All lots have submitted ballots. Select lots to review previous votes.")
+    ).toBeVisible();
 
     // "View Submission" button is shown (not "Start Voting")
     await expect(page.getByRole("button", { name: "View Submission" })).toBeVisible();

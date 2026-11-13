@@ -1234,7 +1234,11 @@ class TestGetGeneralMeetingDetail:
     async def _setup_agm_with_votes(
         self, db_session: AsyncSession
     ) -> tuple[GeneralMeeting, list[LotOwner], list[Motion]]:
-        b = Building(name="Detail Building", manager_email="detail@test.com")
+        b = Building(
+            name="Detail Building",
+            manager_email="detail@test.com",
+            oc_plan_number="PS345123A",
+        )
         db_session.add(b)
         await db_session.flush()
 
@@ -1316,6 +1320,7 @@ class TestGetGeneralMeetingDetail:
 
         assert data["id"] == str(agm.id)
         assert data["building_name"] == "Detail Building"
+        assert data["oc_plan_number"] == "PS345123A"
         assert "total_eligible_voters" in data
         assert "total_submitted" in data
         assert "total_entitlement" in data

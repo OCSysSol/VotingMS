@@ -192,17 +192,111 @@ describe("AdminVoteEntryPanel", () => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
-    expect(screen.getByText("Already voted online")).toBeInTheDocument();
+    expect(screen.getByText("User votes recorded")).toBeInTheDocument();
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 1" })).toBeDisabled();
+    const priorUserChoice = screen.getByRole("button", { name: "yes for lot 1A motion Motion 1" });
+    expect(priorUserChoice).toBeDisabled();
+    expect(priorUserChoice).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("User voted")).toBeInTheDocument();
+    expect(screen.getByText("User voted").closest("td")).toHaveClass(
+      "admin-vote-entry__prior-cell--user"
+    );
     expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).not.toBeDisabled();
     await user.click(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" }));
     expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("hydrates and distinguishes mixed user/admin prior choices per motion in one lot", async () => {
+    const user = userEvent.setup();
+    const baseMotion = ADMIN_MEETING_DETAIL.motions[0];
+    const emptyLists = {
+      yes: [],
+      no: [],
+      abstained: [],
+      absent: [],
+      not_eligible: [],
+      options: {},
+    };
+    const mixedMeeting: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...baseMotion,
+          id: "mixed-m1",
+          title: "User Motion 1",
+          display_order: 1,
+          voter_lists: {
+            ...emptyLists,
+            yes: [{ voter_email: "owner@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m2",
+          title: "User Motion 2",
+          display_order: 2,
+          voter_lists: {
+            ...emptyLists,
+            no: [{ voter_email: "owner@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m3",
+          title: "Admin Motion 3",
+          display_order: 3,
+          voter_lists: {
+            ...emptyLists,
+            yes: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m4",
+          title: "Admin Motion 4",
+          display_order: 4,
+          voter_lists: {
+            ...emptyLists,
+            no: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m5",
+          title: "Admin Motion 5",
+          display_order: 5,
+          voter_lists: {
+            ...emptyLists,
+            abstained: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
+          },
+        },
+      ],
+    };
+
+    renderPanel({ meeting: mixedMeeting });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Mixed user/admin votes")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("User voted")).toHaveLength(2);
+      expect(screen.getAllByText("Admin voted")).toHaveLength(3);
+    });
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion User Motion 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "no for lot 1A motion User Motion 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Admin Motion 3" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "no for lot 1A motion Admin Motion 4" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "abstained for lot 1A motion Admin Motion 5" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByText("User voted")[0].closest("td")).toHaveClass("admin-vote-entry__prior-cell--user");
+    expect(screen.getAllByText("Admin voted")[0].closest("td")).toHaveClass("admin-vote-entry__prior-cell--admin");
   });
 
   // Step 2: Vote entry grid
@@ -955,13 +1049,13 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
   }
 
   // --- AVE-RV-01: Step 1 shows amber badge for admin-submitted lot ---
-  it("AVE-RV-01: Step 1 renders 'Previously entered by admin' badge for admin-submitted lot", async () => {
+  it("AVE-RV-01: Step 1 renders 'Admin votes recorded' badge for admin-submitted lot", async () => {
     renderWithAdminVotes();
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
     // Lot 1A has submitted_by_admin=true — badge must appear
-    const badges = screen.getAllByText("Previously entered by admin");
+    const badges = screen.getAllByText("Admin votes recorded");
     expect(badges.length).toBeGreaterThan(0);
   });
 
@@ -976,8 +1070,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     // Only lot 1A should have the badge — lot 2B must not
     const lot1ARow = screen.getByLabelText("Select lot 1A").closest("li");
     const lot2BRow = screen.getByLabelText("Select lot 2B").closest("li");
-    expect(lot1ARow).toHaveTextContent("Previously entered by admin");
-    expect(lot2BRow).not.toHaveTextContent("Previously entered by admin");
+    expect(lot1ARow).toHaveTextContent("Admin votes recorded");
+    expect(lot2BRow).not.toHaveTextContent("Admin votes recorded");
   });
 
   // --- AVE-RV-03: Step 2 pre-fills prior vote for admin-submitted lot ---
@@ -997,8 +1091,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     expect(screen.getByRole("button", { name: /no for lot 1A/i })).toHaveAttribute("aria-pressed", "false");
   });
 
-  // --- AVE-RV-04: Step 2 shows 'Previously entered by admin' badge in column header ---
-  it("AVE-RV-04: Step 2 shows 'Previously entered by admin' badge in column header for admin-submitted lot", async () => {
+  // --- AVE-RV-04: Step 2 shows an admin-source summary in the column header ---
+  it("AVE-RV-04: Step 2 shows 'Admin votes recorded' in the column header", async () => {
     const user = userEvent.setup();
     renderWithAdminVotes();
     await waitFor(() => {
@@ -1007,12 +1101,12 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getAllByText("Previously entered by admin").length).toBeGreaterThan(0);
+      expect(screen.getByText("Admin votes recorded")).toBeInTheDocument();
     });
   });
 
-  // --- AVE-RV-05: Step 2 shows 'Prev. entry' label in vote cell for admin-submitted lot ---
-  it("AVE-RV-05: Step 2 shows 'Prev. entry' label above vote buttons for admin-submitted lot", async () => {
+  // --- AVE-RV-05: Step 2 shows per-motion source in vote cell ---
+  it("AVE-RV-05: Step 2 shows 'Admin voted' above the prefilled vote buttons", async () => {
     const user = userEvent.setup();
     renderWithAdminVotes();
     await waitFor(() => {
@@ -1021,7 +1115,10 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByText("Prev. entry")).toBeInTheDocument();
+      expect(screen.getByText("Admin voted")).toBeInTheDocument();
+      expect(screen.getByText("Admin voted").closest("td")).toHaveClass(
+        "admin-vote-entry__prior-cell--admin"
+      );
     });
   });
 
@@ -1462,15 +1559,14 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
     expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
-    expect(screen.getByText("Already voted online")).toBeInTheDocument();
+    expect(screen.getByText("User votes recorded")).toBeInTheDocument();
     // 2B has no prior entry and should be enabled
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
-    // No 'Previously entered by admin' badge — that's only for admin-submitted lots
-    expect(screen.queryByText("Previously entered by admin")).not.toBeInTheDocument();
+    expect(screen.queryByText("Admin votes recorded")).not.toBeInTheDocument();
   });
 
-  // Step 2 does NOT show 'Prev. entry' label for non-admin lots
-  it("Step 2 does not show 'Prev. entry' label for non-admin-submitted lots", async () => {
+  // Step 2 shows no source label when no motion has a prior vote.
+  it("Step 2 does not show a prior-vote label when no motion was previously voted", async () => {
     // Use ADMIN_MEETING_DETAIL which has no admin-submitted lots
     const user = userEvent.setup();
     renderPanel();
@@ -1482,7 +1578,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
     });
-    expect(screen.queryByText("Prev. entry")).not.toBeInTheDocument();
+    expect(screen.queryByText("Admin voted")).not.toBeInTheDocument();
+    expect(screen.queryByText("User voted")).not.toBeInTheDocument();
   });
 
   // Backdrop click on AdminRevoteWarningDialog dismisses it

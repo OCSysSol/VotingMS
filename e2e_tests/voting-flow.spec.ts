@@ -1,5 +1,6 @@
 import { test, expect, RUN_SUFFIX } from "./fixtures";
 import {
+  formatVoterBuildingLabel,
   getTestOtp,
   makeAdminApi,
   seedBuilding,
@@ -94,7 +95,10 @@ test.describe("Lot owner voting flow", () => {
 
     const combobox = page.getByLabel("Select your building");
     await combobox.fill(E2E_BUILDING_NAME);
-    await page.getByRole("option", { name: E2E_BUILDING_NAME, exact: true }).click();
+    await page.getByRole("option", {
+      name: formatVoterBuildingLabel(E2E_BUILDING_NAME),
+      exact: true,
+    }).click();
     await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible();
     await page.getByRole("button", { name: "Enter Voting" }).first().click();
 
@@ -136,7 +140,10 @@ test.describe("Lot owner voting flow", () => {
     // Select the E2E building — it has a closed AGM created in beforeAll
     const combobox = page.getByLabel("Select your building");
     await combobox.fill(E2E_BUILDING_NAME);
-    await page.getByRole("option", { name: E2E_BUILDING_NAME, exact: true }).click();
+    await page.getByRole("option", {
+      name: formatVoterBuildingLabel(E2E_BUILDING_NAME),
+      exact: true,
+    }).click();
 
     // Either "Enter Voting" (open) or "View My Submission" (closed) must be visible
     const hasAny = await page

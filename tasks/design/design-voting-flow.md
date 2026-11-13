@@ -1,10 +1,10 @@
 # Design: Voting Flow
 
-**Status:** Implemented
+**Status:** Implemented; selection-aware prior-vote review proposed
 
 ## Overview
 
-The voter flow is: authenticate (OTP) → lot selection → voting → confirmation. Proxy voters see "via Proxy" badges. Multi-lot voters have a sidebar for selecting which lot to vote for. Already-voted motions render read-only so voters can return after new motions are revealed without losing prior votes. The confirmation page shows all submitted votes. All flow components meet WCAG 2.1 AA accessibility requirements.
+The voter flow is: authenticate (OTP) → lot selection → voting → confirmation. Proxy voters see "via Proxy" badges. Multi-lot voters have a sidebar for selecting which lots to review or vote for; already-submitted lots remain selectable so their recorded choices can be reviewed. Recorded choices render read-only and cannot be changed from the voter UI. Motions with votes from only a subset of selected lots remain actionable for the outstanding lots, with an explicit preservation warning at submission. The confirmation page shows all submitted votes. All flow components meet WCAG 2.1 AA accessibility requirements.
 
 ---
 
@@ -34,6 +34,34 @@ Returns all visible motions (`is_visible = True`) PLUS any motions for which the
 - `submitted_option_choices: dict[str, str]` — populated for already-voted multi-choice motions (option_id → choice)
 
 Hidden motions with no vote are never sent to the voter (server-side filter prevents title leakage).
+
+### Authentication/session lot history contract
+
+`POST /api/auth/verify` and `POST /api/auth/session` retain the existing `LotInfo` fields and add `submitted_votes`, the authoritative per-lot record of submitted choices:
+
+```text
+LotInfo
+  lot_owner_id
+  lot_number
+  financial_position
+  already_submitted
+  is_proxy
+  voted_motion_ids          # retained for compatibility
+  submitted_votes: [        # submitted rows only; drafts excluded
+    {
+      motion_id
+      choice                 # binary choice, not_eligible, selected sentinel, or abstained
+      option_choices         # multi-choice only: option_id -> for | against | abstained
+    }
+  ]
+```
+
+- Build `submitted_votes` from one submitted-`Vote` query scoped to the authenticated voter's resolved lot IDs.
+- For multi-choice motions, group per-option `Vote` rows by `(lot_owner_id, motion_id)`. A motion-level abstain with no option rows has `choice = abstained` and an empty option map.
+- `voted_motion_ids` remains derived from `submitted_votes` for backward compatibility.
+- Do not expose another voter's rows. Ownership must be resolved exactly as for `voted_motion_ids`.
+- `MotionOut.already_voted`, `submitted_choice`, and `submitted_option_choices` remain for hidden-motion inclusion and response compatibility, but they must not drive the selected-lot projection: they are voter-wide aggregates and cannot represent conflicting per-lot choices.
+- No schema migration is required.
 
 ### `PUT /api/general-meeting/{id}/draft`
 
@@ -69,7 +97,11 @@ Returns submitted votes for all lots belonging to the authenticated voter. Only 
 - Holds `choices: Record<string, VoteChoice>` for general/special motions
 - Holds `multiChoiceSelections: Record<string, OptionChoice[]>` for multi-choice motions
 - Progress bar: `motions.filter(m => !m.already_voted).length` as denominator (only unvoted visible motions count)
-- Already-voted motions (`already_voted = true`) render read-only — choice is displayed but cannot be changed
+- The effective selection is `selectedLots` for a multi-lot voter and the sole `allLots` entry for a single-lot voter.
+- Prior choices are projected from `selectedLots[].submitted_votes`, never from voter-wide `MotionOut` fields.
+- Every selected lot can be checked or unchecked, including lots with submitted votes. Default selection remains pending lots only; Select All and proxy/owned shortcuts include submitted lots because review is now an explicit use case.
+- Fully answered motions render read-only and display the recorded selection. A multi-lot aggregate with conflicting choices displays `Mixed votes among selected lots` and remains read-only.
+- Motions with votes from only a subset of selected lots remain interactive for the outstanding lots. Existing choices are shown as review information, not seeded into the new-choice controls. A submission warning identifies those motions and explains that recorded votes will not change.
 - Motions with `voting_closed_at IS NOT NULL` show "Voting closed" label; controls disabled
 - Empty motions state: "No motions are available yet. Please check back shortly."
 - All-already-voted state: "No new motions" message + "View Submission" button
@@ -82,7 +114,8 @@ Single-lot proxy voter: compact inline strip above motions showing lot number + 
 
 - For/Against/Abstain buttons (general/special motions)
 - `MultiChoiceOptionList` (multi-choice motions)
-- `readOnly` prop when `already_voted = true`
+- `readOnly` prop when every selected lot has a submitted choice for the motion
+- Binary selected choices and multi-choice option maps are restored before render; conflicting multi-lot choices render a mixed-state badge instead of a synthetic single choice
 - Keyboard navigable; all interactive elements have visible focus states
 
 ### `ConfirmationPage.tsx` (`frontend/src/pages/vote/ConfirmationPage.tsx`)
@@ -105,13 +138,37 @@ Auth resolution is a union of direct owners (`LotOwnerEmail`) and proxy nominati
 
 When new motions are revealed after a voter has already submitted, `unvoted_visible_count > 0` routes them back to the voting page on re-auth. `submit_ballot` reuses the existing `BallotSubmission` row and only inserts `Vote` rows for motions not yet voted on. Already-voted motions render read-only in `MotionCard`.
 
+### Selection-aware prior-vote review
+
+The UI computes a projection for each motion from the effective selected lots:
+
+| Selected-lot state for a motion | Card behaviour | Display | Submission |
+|---|---|---|---|
+| No selected lot has voted | Interactive | Normal blank controls | Selected choice applies to all selected lots |
+| Every selected lot voted, all choices equal | Locked | Matching choice selected and greyed; `Previously voted` badge | Motion excluded from new votes |
+| Every selected lot voted, choices differ | Locked | `Mixed votes among selected lots`; no fabricated choice | Motion excluded from new votes |
+| Some selected lots voted, others not | Interactive | Existing choices summarized (e.g. `1 of 2 selected lots already voted: For`); new-choice controls remain unseeded | Choice applies only to selected lots without a vote; warning required |
+
+Rules:
+
+- Choice equality for binary motions compares `choice`. For multi-choice motions, compare the complete canonical `option_choices` map, independent of map key order.
+- Do not preselect an existing partial choice into the interactive controls. Doing so could accidentally copy an existing vote onto outstanding lots.
+- `not_eligible` is a recorded choice and participates in equality/mixed-state calculation. It does not make other selected eligible lots' outstanding motions disappear.
+- When selected lots change, recompute every card from the new selection and clear stale candidate choices that no longer correspond to that selection.
+- With no multi-lot selection, show no aggregate prior choice, keep cards interactive, and require a lot before submission as today.
+- When all motions are locked and every selected lot is already submitted, show review/`View Submission` state rather than a submit action.
+
+The `MixedSelectionWarningDialog` is triggered only when at least one motion has partial coverage among the selected lots. It must list the affected motions and explain that recorded choices are immutable and only outstanding selected lots receive the new choice. Coverage differences alone do not justify a warning when no motion can receive a new vote.
+
+After a successful submission, merge the submitted choices into each submitted lot's `submitted_votes` in React state and `meeting_lots_info_<meetingId>` sessionStorage, in addition to the existing `voted_motion_ids` update. A fresh restore response remains authoritative.
+
 ### In-arrear lot handling
 
 In-arrear lots have a snapshot (`financial_position_snapshot = 'in_arrear'`) on `GeneralMeetingLotWeight`. During `submit_ballot`, General motions for in-arrear lots are recorded as `not_eligible`. Special motions are still eligible. Multi-choice motions also record `not_eligible` for in-arrear lots.
 
 ### Back-navigation and re-voting guards
 
-- Back-button navigation to an already-submitted lot is handled by checking `LotInfo.already_submitted`; the page redirects to confirmation or shows the already-submitted state.
+- Back-button navigation keeps submitted lots selectable. Selection projects prior choices into the current UI instead of redirecting away solely because `LotInfo.already_submitted` is true.
 - `BallotSubmission` reuse (phased voting) means revisiting the voting page after partial submission is safe.
 - Stale already-submitted state when new motions are revealed: `unvoted_visible_count` from `auth/verify` is the authoritative signal.
 
@@ -135,7 +192,7 @@ In-arrear lots have a snapshot (`financial_position_snapshot = 'in_arrear'`) on 
 
 ## Edge Cases
 
-- Back button after ballot submitted: `LotInfo.already_submitted` prevents re-submission; confirmation page shown
+- Back button after ballot submitted: the lot remains selectable and its recorded choices render read-only; outstanding motions remain actionable
 - Multiple browser tabs: duplicate submit returns idempotent result (Vote unique constraints prevent duplicate rows)
 - Meeting closed mid-vote: 403 on submit; voter sees error; confirmation page accessible via auth
 - Per-motion close while voting: 422 on submit for closed motion; voter is notified with specific motion number

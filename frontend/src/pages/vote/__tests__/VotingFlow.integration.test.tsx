@@ -120,7 +120,7 @@ describe("Voting Flow Integration", () => {
     });
   });
 
-  it("multi-lot partial submit: lot A disabled after submit, lot B stays selectable", async () => {
+  it("multi-lot partial submit: both lots remain selectable after submit", async () => {
     // Seed two lots in sessionStorage
     sessionStorage.setItem(
       `meeting_lots_info_${AGM_ID}`,
@@ -149,10 +149,10 @@ describe("Voting Flow Integration", () => {
       expect(mockNavigate).toHaveBeenCalledWith(`/vote/${AGM_ID}/confirmation`);
     });
 
-    // Lot A (lo1) is now disabled with "Already submitted" badge — use label text to target specifically
+    // Lot A is marked submitted but remains selectable so its choices can be reviewed.
     const lo1Checkboxes = screen.getAllByLabelText("Lot 1");
     const lo2Checkboxes = screen.getAllByLabelText("Lot 2");
-    lo1Checkboxes.forEach((cb) => expect(cb).toBeDisabled());
+    lo1Checkboxes.forEach((cb) => expect(cb).not.toBeDisabled());
     lo2Checkboxes.forEach((cb) => expect(cb).not.toBeDisabled());
 
     // At least one "Already submitted" badge visible (one per panel for lo1)
@@ -224,7 +224,18 @@ describe("Voting Flow Integration", () => {
     sessionStorage.setItem(
       `meeting_lots_info_${AGM}`,
       JSON.stringify([
-        { lot_owner_id: "lo-e2e", lot_number: "E2E-1", financial_position: "normal", already_submitted: true, is_proxy: false, voted_motion_ids: [MOTION_ID_1, MOTION_ID_2] },
+        {
+          lot_owner_id: "lo-e2e",
+          lot_number: "E2E-1",
+          financial_position: "normal",
+          already_submitted: true,
+          is_proxy: false,
+          voted_motion_ids: [MOTION_ID_1, MOTION_ID_2],
+          submitted_votes: [
+            { motion_id: MOTION_ID_1, choice: "yes", option_choices: {} },
+            { motion_id: MOTION_ID_2, choice: "yes", option_choices: {} },
+          ],
+        },
       ])
     );
 

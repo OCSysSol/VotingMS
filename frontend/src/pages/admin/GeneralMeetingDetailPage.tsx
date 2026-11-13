@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getGeneralMeetingDetail,
@@ -755,9 +755,25 @@ export default function GeneralMeetingDetailPage() {
         ← Back
       </button>
       <div className="admin-page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0 }}>{meeting.title}</h1>
-          <StatusBadge status={meeting.status} />
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h1 style={{ margin: 0 }}>{meeting.title}</h1>
+            <StatusBadge status={meeting.status} />
+          </div>
+          <p className="meeting-detail__subtitle">
+            <span>{meeting.building_name}</span>
+            {meeting.oc_plan_number && meeting.building_id && (
+              <>
+                <span aria-hidden="true">·</span>
+                <Link
+                  to={`/admin/buildings/${meeting.building_id}`}
+                  aria-label={`Open OC Plan ${meeting.oc_plan_number}`}
+                >
+                  {meeting.oc_plan_number}
+                </Link>
+              </>
+            )}
+          </p>
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
           {meeting.status === "pending" && (
