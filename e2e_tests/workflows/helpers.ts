@@ -545,9 +545,9 @@ export async function makeAdminApi(
 // ── Voter UI helpers ──────────────────────────────────────────────────────────
 
 /**
- * Request an OTP for (email, meetingId) via the backend API with skip_email=true.
- * The OTP is generated and stored in the DB but no email is sent — use getTestOtp
- * to retrieve it afterwards.
+ * Request an OTP for (email, meetingId) via the backend API.
+ * Testing deployments use the DB-backed email-delivery switch to suppress SMTP;
+ * retrieve the generated code with getTestOtp afterwards.
  */
 export async function requestOtp(
   api: APIRequestContext,
@@ -558,7 +558,6 @@ export async function requestOtp(
     data: {
       email,
       general_meeting_id: meetingId,
-      skip_email: true,
     },
   });
   if (!res.ok()) {
@@ -570,7 +569,8 @@ export async function requestOtp(
 
 /**
  * Retrieve the most recent unused OTP for (email, meetingId) from the test-only
- * backend endpoint. Requires the backend to be running with TESTING_MODE=true.
+ * backend endpoint. Requires admin authentication, TESTING_MODE=true, and
+ * effective email delivery to be disabled.
  */
 export async function getTestOtp(
   api: APIRequestContext,
@@ -618,7 +618,8 @@ export async function goToAuthPage(page: Page, buildingName: string): Promise<vo
  * Step 2: retrieve OTP via `getOtp` callback, fill code field, click "Verify".
  *
  * The `getOtp` callback is typically `() => getTestOtp(api, email, meetingId)`.
- * The test-only endpoint is guarded by TESTING_MODE=true on the backend.
+ * The test-only endpoint requires admin authentication and is available when
+ * testing mode has disabled effective email delivery.
  *
  * Clears the agm_session cookie before attempting auth so that any prior
  * HttpOnly cookie session does not redirect away from the OTP form.
@@ -681,7 +682,7 @@ export async function submitBallot(page: Page): Promise<void> {
  * that serial tests are idempotent across retries.
  *
  * Flow:
- *   1. Request an OTP for (email, meetingId) with skip_email=true
+ *   1. Request an OTP for (email, meetingId)
  *   2. Retrieve the OTP from the test-only endpoint
  *   3. POST /api/auth/verify to get a session token
  *   4. POST /api/general-meeting/{meetingId}/submit with the session token
@@ -699,9 +700,9 @@ export async function submitBallotViaApi(
   lotOwnerIds: string[],
   votes: { motion_id: string; choice: string }[]
 ): Promise<void> {
-  // 1. Request OTP (no email sent)
+  // 1. Request OTP. TESTING_MODE forces SMTP delivery off on server startup.
   const otpReqRes = await api.post("/api/auth/request-otp", {
-    data: { email, general_meeting_id: meetingId, skip_email: true },
+    data: { email, general_meeting_id: meetingId },
   });
   if (!otpReqRes.ok()) {
     throw new Error(`submitBallotViaApi: OTP request failed (${otpReqRes.status()}): ${await otpReqRes.text()}`);

@@ -432,16 +432,15 @@ async def _check_migration_head() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: check migration head and requeue pending email deliveries.
+    # Startup: check migration head, apply TESTING_MODE's email-delivery policy,
+    # then requeue pending email deliveries.
     #
     # IMPORTANT — sequential execution is intentional and must not be changed
     # to asyncio.gather() or any concurrent form.
     #
-    # Both _check_migration_head() and requeue_pending_on_startup() acquire a
-    # DB connection from AsyncSessionLocal (QueuePool via PgBouncer — same
-    # engine as request handlers).  Sequential awaits ensure the first operation
-    # fully acquires, uses, and releases its connection before the second one
-    # begins, keeping startup predictable.
+    # Each startup DB operation acquires a connection from AsyncSessionLocal
+    # sequentially. This keeps startup predictable and guarantees the delivery
+    # policy is persisted before any pending report email can be requeued.
     #
     # Retry startup DB tasks on transient connection errors.
     # Under concurrent Lambda cold-starts (e.g. 3 parallel E2E shards), asyncpg's
@@ -450,6 +449,7 @@ async def lifespan(app: FastAPI):
     # Uses the same exception types as get_db() in database.py.
     from app.database import AsyncSessionLocal, _DB_RETRY_ATTEMPTS, _DB_RETRY_BASE_WAIT
     from app.services.email_service import EmailService
+    from app.services.smtp_config_service import sync_email_delivery_from_testing_mode
     from sqlalchemy.exc import DBAPIError, OperationalError
     from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
@@ -457,6 +457,7 @@ async def lifespan(app: FastAPI):
         try:
             await _check_migration_head()
             async with AsyncSessionLocal() as db:
+                await sync_email_delivery_from_testing_mode(db)
                 await EmailService().requeue_pending_on_startup(db)
             break
         except (OperationalError, DBAPIError, SQLAlchemyTimeoutError, asyncio.TimeoutError):

@@ -2753,6 +2753,13 @@ class TestMeetingStatusTransition:
 
 
 class TestResendReport:
+    @pytest.fixture(autouse=True)
+    def mock_background_email_delivery(self, mocker):
+        return mocker.patch(
+            "app.services.email_service.EmailService.trigger_with_retry",
+            new_callable=AsyncMock,
+        )
+
     async def _setup_closed_agm_with_delivery(
         self, db_session: AsyncSession, name: str, delivery_status: EmailDeliveryStatus
     ) -> tuple[GeneralMeeting, EmailDelivery]:

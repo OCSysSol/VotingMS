@@ -89,6 +89,7 @@ class SmtpConfigOut(BaseModel):
     smtp_username: str
     smtp_from_email: str
     password_is_set: bool
+    email_delivery_enabled: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -142,6 +143,16 @@ class SmtpStatusOut(BaseModel):
     """SMTP configuration status — used by the admin layout banner."""
 
     configured: bool
+
+
+class SmtpDeliveryUpdate(BaseModel):
+    """Toggle effective outbound email delivery without changing SMTP credentials."""
+
+    enabled: bool
+
+
+class SmtpDeliveryOut(BaseModel):
+    email_delivery_enabled: bool
 
 
 # ---------------------------------------------------------------------------

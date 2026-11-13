@@ -32,6 +32,7 @@ from app.models import (
     LotOwner,
     LotProxy,
     OTPRateLimit,
+    TenantSmtpConfig,
 )
 from app.models.lot import Lot
 from app.models.lot_person import lot_persons
@@ -57,6 +58,16 @@ def meeting_dt() -> datetime:
 
 def closing_dt() -> datetime:
     return datetime.now(UTC) + timedelta(days=2)
+
+
+async def set_email_delivery(db_session: AsyncSession, enabled: bool) -> TenantSmtpConfig:
+    config = await db_session.get(TenantSmtpConfig, 1)
+    if config is None:
+        config = TenantSmtpConfig(id=1, email_delivery_enabled=enabled)
+        db_session.add(config)
+    else:
+        config.email_delivery_enabled = enabled
+    return config
 
 
 # ---------------------------------------------------------------------------
@@ -536,33 +547,54 @@ class TestRequestOtp:
         assert len(otps) == 1
         assert otps[0].code != "OLDCODE1"
 
-    async def test_request_otp_skip_email_true_does_not_send_email(
+    async def test_request_otp_delivery_disabled_does_not_send_email(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
-        """When skip_email=True, OTP is created but send_otp_email is NOT called."""
+        """When effective delivery is disabled, OTP is created but SMTP is not called."""
         voter_email = building_and_meeting["voter_email"]
         agm = building_and_meeting["agm"]
+        await set_email_delivery(db_session, False)
+        await db_session.flush()
         with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock) as mock_send:
             response = await client.post(
                 "/api/auth/request-otp",
-                json={"email": voter_email, "general_meeting_id": str(agm.id), "skip_email": True},
+                json={"email": voter_email, "general_meeting_id": str(agm.id)},
             )
 
         assert response.status_code == 200
         assert response.json()["sent"] is True
         mock_send.assert_not_called()
 
-    async def test_request_otp_skip_email_true_otp_row_still_created(
+    async def test_request_otp_delivery_disabled_makes_no_smtp_call(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
-        """When skip_email=True, an AuthOtp row is still created in the DB."""
         voter_email = building_and_meeting["voter_email"]
         agm = building_and_meeting["agm"]
+        await set_email_delivery(db_session, False)
+        await db_session.flush()
+
+        with patch("aiosmtplib.send", new_callable=AsyncMock) as mock_smtp:
+            response = await client.post(
+                "/api/auth/request-otp",
+                json={"email": voter_email, "general_meeting_id": str(agm.id)},
+            )
+
+        assert response.status_code == 200
+        mock_smtp.assert_not_awaited()
+
+    async def test_request_otp_delivery_disabled_otp_row_still_created(
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
+    ):
+        """When delivery is disabled, an AuthOtp row is still created."""
+        voter_email = building_and_meeting["voter_email"]
+        agm = building_and_meeting["agm"]
+        await set_email_delivery(db_session, False)
+        await db_session.flush()
 
         with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock):
             await client.post(
                 "/api/auth/request-otp",
-                json={"email": voter_email, "general_meeting_id": str(agm.id), "skip_email": True},
+                json={"email": voter_email, "general_meeting_id": str(agm.id)},
             )
 
         result = await db_session.execute(
@@ -609,28 +641,30 @@ class TestRequestOtp:
         assert response.status_code == 200
         mock_send.assert_awaited_once()
 
-    async def test_request_otp_skip_email_true_smtp_failure_does_not_raise(
+    async def test_request_otp_delivery_disabled_smtp_failure_does_not_raise(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
-        """When skip_email=True, email send is bypassed entirely — SMTP errors are never raised."""
+        """When delivery is disabled, the SMTP path is bypassed entirely."""
         voter_email = building_and_meeting["voter_email"]
         agm = building_and_meeting["agm"]
+        await set_email_delivery(db_session, False)
+        await db_session.flush()
 
         with patch("app.routers.auth.send_otp_email", new_callable=AsyncMock) as mock_send:
             mock_send.side_effect = Exception("SMTP refused")
             response = await client.post(
                 "/api/auth/request-otp",
-                json={"email": voter_email, "general_meeting_id": str(agm.id), "skip_email": True},
+                json={"email": voter_email, "general_meeting_id": str(agm.id)},
             )
 
-        # skip_email=True bypasses the call entirely, so no 500
+        # Disabled delivery bypasses the call entirely, so no 500
         assert response.status_code == 200
         mock_send.assert_not_called()
 
-    async def test_request_otp_skip_email_true_ignored_in_non_testing_mode(
+    async def test_request_otp_unknown_skip_email_field_is_ignored(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
-        """skip_email=True is silently ignored when testing_mode is False — email is still sent (RR5-03)."""
+        """The removed skip_email field remains ignored; delivery policy controls SMTP."""
         voter_email = building_and_meeting["voter_email"]
         agm = building_and_meeting["agm"]
 
@@ -951,6 +985,16 @@ class TestRequestOtp:
 class TestLatestOtpEndpoint:
     # --- Happy path ---
 
+    async def test_requires_admin_authentication(self, app, client: AsyncClient):
+        from app.dependencies import require_admin
+
+        app.dependency_overrides.pop(require_admin, None)
+        response = await client.get(
+            "/api/test/latest-otp",
+            params={"email": "otp_voter@test.com", "meeting_id": str(uuid.uuid4())},
+        )
+        assert response.status_code == 401
+
     async def test_returns_code_when_testing_mode_enabled(
         self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
@@ -965,6 +1009,7 @@ class TestLatestOtpEndpoint:
             expires_at=datetime.now(UTC) + timedelta(minutes=5),
         )
         db_session.add(otp)
+        await set_email_delivery(db_session, False)
         await db_session.flush()
 
         with patch("app.routers.auth.settings") as mock_settings:
@@ -997,11 +1042,38 @@ class TestLatestOtpEndpoint:
 
         assert response.status_code == 404
 
+    async def test_returns_404_when_email_delivery_is_enabled(
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
+    ):
+        voter_email = building_and_meeting["voter_email"]
+        agm = building_and_meeting["agm"]
+        db_session.add(
+            AuthOtp(
+                email=voter_email,
+                meeting_id=agm.id,
+                code="ENABLED1",
+                expires_at=datetime.now(UTC) + timedelta(minutes=5),
+            )
+        )
+        await set_email_delivery(db_session, True)
+        await db_session.flush()
+
+        with patch("app.routers.auth.settings") as mock_settings:
+            mock_settings.testing_mode = True
+            response = await client.get(
+                "/api/test/latest-otp",
+                params={"email": voter_email, "meeting_id": str(agm.id)},
+            )
+
+        assert response.status_code == 404
+
     async def test_returns_404_when_no_otp_found(
-        self, client: AsyncClient, building_and_meeting: dict
+        self, client: AsyncClient, db_session: AsyncSession, building_and_meeting: dict
     ):
         """Returns 404 when no OTP row exists for (email, meeting_id)."""
         agm = building_and_meeting["agm"]
+        await set_email_delivery(db_session, False)
+        await db_session.flush()
 
         with patch("app.routers.auth.settings") as mock_settings:
             mock_settings.testing_mode = True
@@ -1028,6 +1100,7 @@ class TestLatestOtpEndpoint:
             used=True,
         )
         db_session.add(used_otp)
+        await set_email_delivery(db_session, False)
         await db_session.flush()
 
         with patch("app.routers.auth.settings") as mock_settings:
@@ -1067,6 +1140,7 @@ class TestLatestOtpEndpoint:
             created_at=now,
         )
         db_session.add(otp_new)
+        await set_email_delivery(db_session, False)
         await db_session.flush()
 
         with patch("app.routers.auth.settings") as mock_settings:

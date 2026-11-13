@@ -31,7 +31,10 @@ from app.services import smtp_config_service
 from app.services.smtp_config_service import (
     get_decrypted_password,
     get_smtp_config,
+    is_email_delivery_enabled,
     is_smtp_configured,
+    set_email_delivery_enabled,
+    sync_email_delivery_from_testing_mode,
     update_smtp_config,
 )
 from app.services.email_service import SmtpNotConfiguredError
@@ -59,6 +62,7 @@ async def _seed_smtp_config(
     smtp_username: str = "user@example.com",
     smtp_password_enc: str | None = None,
     smtp_from_email: str = "noreply@example.com",
+    email_delivery_enabled: bool = True,
 ) -> TenantSmtpConfig:
     await _clear_smtp_config(db)
     config = TenantSmtpConfig(
@@ -68,6 +72,7 @@ async def _seed_smtp_config(
         smtp_username=smtp_username,
         smtp_password_enc=smtp_password_enc,
         smtp_from_email=smtp_from_email,
+        email_delivery_enabled=email_delivery_enabled,
     )
     db.add(config)
     await db.flush()
@@ -302,6 +307,47 @@ class TestSmtpConfigService:
         result = await is_smtp_configured(db_session)
         assert result is False
 
+    async def test_email_delivery_can_be_disabled_without_clearing_credentials(
+        self, db_session: AsyncSession
+    ):
+        key = _make_test_key()
+        enc = encrypt_smtp_password("pass", key)
+        await _seed_smtp_config(db_session, smtp_password_enc=enc)
+
+        config = await set_email_delivery_enabled(False, db_session)
+
+        assert config.email_delivery_enabled is False
+        assert config.smtp_host == "smtp.example.com"
+        assert config.smtp_password_enc == enc
+        assert await is_email_delivery_enabled(db_session) is False
+
+    async def test_sync_delivery_disables_email_in_testing_mode(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session, email_delivery_enabled=True)
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = True
+            await sync_email_delivery_from_testing_mode(db_session)
+        assert await is_email_delivery_enabled(db_session) is False
+
+    async def test_sync_delivery_enables_email_outside_testing_mode(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session, email_delivery_enabled=False)
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = False
+            await sync_email_delivery_from_testing_mode(db_session)
+        assert await is_email_delivery_enabled(db_session) is True
+
+    async def test_sync_delivery_keeps_matching_value(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session, email_delivery_enabled=False)
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = True
+            await sync_email_delivery_from_testing_mode(db_session)
+        assert await is_email_delivery_enabled(db_session) is False
+
     # --- get_decrypted_password ---
 
     def test_get_decrypted_password_returns_plaintext(self):
@@ -443,6 +489,7 @@ class TestGetSmtpConfig:
         assert body["smtp_username"] == "user@example.com"
         assert body["smtp_from_email"] == "send@example.com"
         assert body["password_is_set"] is True
+        assert body["email_delivery_enabled"] is True
         assert "smtp_password" not in body
         assert "smtp_password_enc" not in body
 
@@ -558,6 +605,39 @@ class TestUpdateSmtpConfig:
 
 
 # ---------------------------------------------------------------------------
+# API endpoints — PATCH /api/admin/config/smtp/delivery
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestUpdateSmtpDelivery:
+    async def test_toggles_delivery_without_changing_credentials(
+        self, app, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session, email_delivery_enabled=True)
+
+        with patch("app.routers.admin.logger") as mock_logger:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.patch(
+                    "/api/admin/config/smtp/delivery",
+                    json={"enabled": False},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"email_delivery_enabled": False}
+        config = await get_smtp_config(db_session)
+        assert config.smtp_host == "smtp.example.com"
+        assert config.email_delivery_enabled is False
+        mock_logger.info.assert_called_once()
+        assert mock_logger.info.call_args.args[0] == "email_delivery_toggled"
+
+    async def test_invalid_patch_body_returns_422(self, app):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            resp = await client.patch("/api/admin/config/smtp/delivery", json={})
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
 # API endpoints — GET /api/admin/config/smtp/status
 # ---------------------------------------------------------------------------
 
@@ -636,6 +716,30 @@ class TestSmtpTest:
             resp = await client.post("/api/admin/config/smtp/test", json={"to_email": "test@example.com"})
         assert resp.status_code == 409
 
+    async def test_returns_409_and_skips_smtp_when_delivery_disabled(
+        self, app, db_session: AsyncSession
+    ):
+        key = _make_test_key()
+        enc = encrypt_smtp_password("pass", key)
+        await _seed_smtp_config(
+            db_session,
+            smtp_password_enc=enc,
+            email_delivery_enabled=False,
+        )
+        from app.rate_limiter import smtp_test_rate_limiter
+        smtp_test_rate_limiter.reset("smtp_test")
+
+        with patch("app.routers.admin.aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/admin/config/smtp/test",
+                    json={"to_email": "test@example.com"},
+                )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Email delivery is disabled"
+        mock_send.assert_not_awaited()
+
     async def test_rate_limit_after_5_calls(self, app, db_session: AsyncSession):
         """6th request within 60 seconds returns 429 (RR5-06)."""
         key = _make_test_key()
@@ -676,6 +780,21 @@ class TestSmtpTest:
 
 @pytest.mark.asyncio(loop_scope="session")
 class TestSmtpNotConfiguredError:
+    async def test_send_otp_email_raises_before_smtp_when_delivery_disabled(self):
+        from app.services.email_service import EmailDeliveryDisabledError, send_otp_email
+
+        mock_config = MagicMock()
+        mock_config.email_delivery_enabled = False
+        mock_db = AsyncMock()
+        with patch(
+            "app.services.email_service.get_smtp_config",
+            AsyncMock(return_value=mock_config),
+        ), patch("app.services.email_service.aiosmtplib.send", new_callable=AsyncMock) as mock_send:
+            with pytest.raises(EmailDeliveryDisabledError, match="disabled"):
+                await send_otp_email("user@example.com", "Test Meeting", "123456", db=mock_db)
+
+        mock_send.assert_not_awaited()
+
     async def test_send_otp_email_raises_when_no_config(self):
         """send_otp_email raises SmtpNotConfiguredError when SMTP not configured."""
         from app.services.email_service import send_otp_email

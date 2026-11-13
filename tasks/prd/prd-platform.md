@@ -204,7 +204,7 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 
 ### US-SMTP-07: Admin can suppress email delivery for testing without deleting SMTP settings
 
-**Status:** Proposed
+**Status:** ✅ Implemented — branch: `codex/otp-email-delivery-toggle`
 
 **Description:** As an admin, I want to enable or disable actual email delivery from the Mail Server settings so that human UAT can send real email when needed, while automated testing can run without making any SMTP calls.
 

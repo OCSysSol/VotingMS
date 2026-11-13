@@ -4,6 +4,7 @@ import { server } from "../../../tests/msw/server";
 import {
   getSmtpConfig,
   updateSmtpConfig,
+  updateSmtpDelivery,
   testSmtpConfig,
   getSmtpStatus,
 } from "../config";
@@ -18,6 +19,7 @@ describe("SMTP config API", () => {
       smtp_username: "user",
       smtp_from_email: "from@example.com",
       password_is_set: true,
+      email_delivery_enabled: true,
     };
     server.use(
       http.get(`${BASE}/api/admin/config/smtp`, () => HttpResponse.json(fixture))
@@ -25,6 +27,7 @@ describe("SMTP config API", () => {
     const result = await getSmtpConfig();
     expect(result.smtp_host).toBe("smtp.example.com");
     expect(result.password_is_set).toBe(true);
+    expect(result.email_delivery_enabled).toBe(true);
   });
 
   it("updateSmtpConfig PUTs data and returns updated config", async () => {
@@ -34,6 +37,7 @@ describe("SMTP config API", () => {
       smtp_username: "newuser",
       smtp_from_email: "new@example.com",
       password_is_set: true,
+      email_delivery_enabled: true,
     };
     server.use(
       http.put(`${BASE}/api/admin/config/smtp`, () => HttpResponse.json(updated))
@@ -47,6 +51,21 @@ describe("SMTP config API", () => {
     });
     expect(result.smtp_host).toBe("new.smtp.com");
     expect(result.smtp_port).toBe(465);
+  });
+
+  it("updateSmtpDelivery PATCHes the effective delivery switch", async () => {
+    let capturedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.patch(`${BASE}/api/admin/config/smtp/delivery`, async ({ request }) => {
+        capturedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ email_delivery_enabled: false });
+      })
+    );
+
+    const result = await updateSmtpDelivery(false);
+
+    expect(capturedBody).toEqual({ enabled: false });
+    expect(result.email_delivery_enabled).toBe(false);
   });
 
   it("testSmtpConfig POSTs and returns ok", async () => {
@@ -100,6 +119,7 @@ describe("SMTP config API", () => {
           smtp_username: "user",
           smtp_from_email: "from@example.com",
           password_is_set: false,
+          email_delivery_enabled: true,
         });
       })
     );

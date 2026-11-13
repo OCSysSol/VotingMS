@@ -35,6 +35,7 @@ async def get_smtp_config(db: AsyncSession) -> TenantSmtpConfig:
             smtp_username="",
             smtp_password_enc=None,
             smtp_from_email="",
+            email_delivery_enabled=True,
         )
         db.add(config)
         await db.flush()
@@ -119,6 +120,32 @@ async def is_smtp_configured(db: AsyncSession) -> bool:
         and config.smtp_from_email
         and config.smtp_password_enc is not None
     )
+
+
+async def is_email_delivery_enabled(db: AsyncSession) -> bool:
+    """Return the effective global outbound-email switch."""
+    config = await get_smtp_config(db)
+    return config.email_delivery_enabled
+
+
+async def set_email_delivery_enabled(
+    enabled: bool, db: AsyncSession
+) -> TenantSmtpConfig:
+    """Persist the global outbound-email switch without touching credentials."""
+    config = await get_smtp_config(db)
+    config.email_delivery_enabled = enabled
+    await db.commit()
+    await db.refresh(config)
+    return config
+
+
+async def sync_email_delivery_from_testing_mode(db: AsyncSession) -> None:
+    """Force the global email switch from TESTING_MODE on every app startup."""
+    config = await get_smtp_config(db)
+    desired = not settings.testing_mode
+    if config.email_delivery_enabled != desired:
+        config.email_delivery_enabled = desired
+        await db.commit()
 
 
 # ---------------------------------------------------------------------------

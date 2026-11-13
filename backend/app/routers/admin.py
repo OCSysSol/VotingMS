@@ -76,6 +76,8 @@ from app.schemas.config import (
     LogoUploadOut,
     SmtpConfigOut,
     SmtpConfigUpdate,
+    SmtpDeliveryOut,
+    SmtpDeliveryUpdate,
     SmtpStatusOut,
     SmsConfigOut,
     SmsConfigUpdate,
@@ -460,7 +462,7 @@ async def request_subscription_change(
     Returns 200 with {"message": "Request sent."} on success.
     Returns 503 if SMTP is not configured.
     """
-    from app.services.email_service import SmtpNotConfiguredError
+    from app.services.email_service import EmailDeliveryDisabledError, SmtpNotConfiguredError
 
     origin = derive_origin(request)
     subscription = await admin_service.get_subscription(db)
@@ -478,6 +480,8 @@ async def request_subscription_change(
             status_code=503,
             detail="Email not configured. Contact support@ocss.tech directly.",
         )
+    except EmailDeliveryDisabledError:
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
 
     logger.info(
         "subscription_change_requested",
@@ -1208,6 +1212,8 @@ async def resend_report(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ResendReportOut:
+    if not await smtp_config_service.is_email_delivery_enabled(db):
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
     result = await admin_service.resend_report(general_meeting_id, db)
     email_service = EmailService()
     base_url = str(request.base_url).rstrip("/")
@@ -1428,6 +1434,7 @@ async def get_smtp_config(db: AsyncSession = Depends(get_db)) -> SmtpConfigOut:
         smtp_username=config.smtp_username,
         smtp_from_email=config.smtp_from_email,
         password_is_set=config.smtp_password_enc is not None,
+        email_delivery_enabled=config.email_delivery_enabled,
     )
 
 
@@ -1444,7 +1451,24 @@ async def update_smtp_config(
         smtp_username=config.smtp_username,
         smtp_from_email=config.smtp_from_email,
         password_is_set=config.smtp_password_enc is not None,
+        email_delivery_enabled=config.email_delivery_enabled,
     )
+
+
+@router.patch("/config/smtp/delivery", response_model=SmtpDeliveryOut)
+async def update_smtp_delivery(
+    data: SmtpDeliveryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> SmtpDeliveryOut:
+    """Enable or disable all outbound email delivery without changing credentials."""
+    config = await smtp_config_service.set_email_delivery_enabled(data.enabled, db)
+    logger.info(
+        "email_delivery_toggled",
+        enabled=config.email_delivery_enabled,
+        performed_by=current_user.user_id,
+    )
+    return SmtpDeliveryOut(email_delivery_enabled=config.email_delivery_enabled)
 
 
 class SmtpTestRequest(BaseModel):
@@ -1457,13 +1481,15 @@ async def test_smtp_config(body: SmtpTestRequest, db: AsyncSession = Depends(get
 
     Rate limited to 5 requests per minute per server process.
     Returns {"ok": true} on success or raises 400 with the SMTP error message.
-    Returns 409 if SMTP is not configured.
+    Returns 409 if email delivery is disabled or SMTP is not configured.
     """
     from email.mime.text import MIMEText
 
     _check_smtp_test_rate_limit()
 
     config = await smtp_config_service.get_smtp_config(db)
+    if not config.email_delivery_enabled:
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
     if not config.smtp_host or not config.smtp_username or not config.smtp_from_email or config.smtp_password_enc is None:
         raise HTTPException(status_code=409, detail="SMTP is not configured")
 
