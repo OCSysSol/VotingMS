@@ -19,7 +19,12 @@
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
 import type { APIRequestContext } from "@playwright/test";
-import { generateOcPlanNumber, getTestOtp, makeAdminApi } from "./workflows/helpers";
+import {
+  formatVoterBuildingLabel,
+  generateOcPlanNumber,
+  getTestOtp,
+  makeAdminApi,
+} from "./workflows/helpers";
 
 // ── Scenario 2: mixed voter (own lot + proxy lot) ─────────────────────────────
 const MIXED_BUILDING_NAME = `E2E Mixed Proxy Test Building-${RUN_SUFFIX}`;
@@ -216,7 +221,10 @@ test.describe("Proxy voter journey", () => {
       const combobox = page.getByLabel("Select your building");
       await expect(combobox).toBeVisible();
       await combobox.fill(MIXED_BUILDING_NAME);
-      await page.getByRole("option", { name: MIXED_BUILDING_NAME, exact: true }).click();
+      await page.getByRole("option", {
+        name: formatVoterBuildingLabel(MIXED_BUILDING_NAME, MIXED_BUILDING_OC_PLAN),
+        exact: true,
+      }).click();
 
       await expect(
         page.getByRole("button", { name: "Enter Voting" }).first()

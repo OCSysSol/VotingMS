@@ -98,6 +98,20 @@ export function generateOcPlanNumber(buildingName: string, sequence = 0): string
   return `PS${digits}${letter}${suffix}`;
 }
 
+/**
+ * Format a building the same way as the voter building combobox.
+ *
+ * When no OC Plan is passed, derive the deterministic plan used by
+ * `seedBuilding`. Pass `null` to exercise the legacy name-only fallback.
+ */
+export function formatVoterBuildingLabel(
+  buildingName: string,
+  ocPlanNumber: string | null = generateOcPlanNumber(buildingName),
+): string {
+  const plan = ocPlanNumber?.trim();
+  return plan ? `${plan} - ${buildingName}` : buildingName;
+}
+
 // ── Building helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -661,7 +675,12 @@ export async function goToAuthPage(page: Page, buildingName: string): Promise<vo
   const combobox = page.getByLabel("Select your building");
   await expect(combobox).toBeVisible();
   await combobox.fill(buildingName);
-  await page.getByRole("option", { name: buildingName, exact: true }).click();
+  // Tolerate both the name-only fallback and the current formatted label.
+  // The escaped name and separator avoid matching another building substring.
+  const escapedName = buildingName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await page
+    .getByRole("option", { name: new RegExp(`^(?:.+ - )?${escapedName}$`) })
+    .click();
   await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible({
     timeout: 15000,
   });

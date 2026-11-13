@@ -19,7 +19,12 @@
  */
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
-import { generateOcPlanNumber, getTestOtp, makeAdminApi } from "./workflows/helpers";
+import {
+  formatVoterBuildingLabel,
+  generateOcPlanNumber,
+  getTestOtp,
+  makeAdminApi,
+} from "./workflows/helpers";
 
 const BUILDING_NAME = `E2E Multi-Lot Test Building-${RUN_SUFFIX}`;
 const BUILDING_OC_PLAN = generateOcPlanNumber(BUILDING_NAME);
@@ -168,7 +173,10 @@ test.describe("Multi-lot voter journey", () => {
     const combobox = page.getByLabel("Select your building");
     await expect(combobox).toBeVisible();
     await combobox.fill(BUILDING_NAME);
-    await page.getByRole("option", { name: BUILDING_NAME, exact: true }).click();
+    await page.getByRole("option", {
+      name: formatVoterBuildingLabel(BUILDING_NAME, BUILDING_OC_PLAN),
+      exact: true,
+    }).click();
     await expect(page.getByRole("button", { name: "Enter Voting" }).first()).toBeVisible({
       timeout: 15000,
     });

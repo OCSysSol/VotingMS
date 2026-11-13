@@ -20,6 +20,7 @@
 
 import { test, expect, RUN_SUFFIX } from "../fixtures";
 import {
+  formatVoterBuildingLabel,
   makeAdminApi,
   seedBuilding,
   seedLotOwner,
@@ -32,6 +33,9 @@ const SUFFIX = RUN_SUFFIX;
 const BUILDING_OPEN = `BF01 Open Meeting Building-${SUFFIX}`;
 const BUILDING_CLOSED_ONLY = `BF01 Closed Only Building-${SUFFIX}`;
 const BUILDING_NO_MEETINGS = `BF01 No Meetings Building-${SUFFIX}`;
+const BUILDING_OPEN_OPTION = formatVoterBuildingLabel(BUILDING_OPEN);
+const BUILDING_CLOSED_ONLY_OPTION = formatVoterBuildingLabel(BUILDING_CLOSED_ONLY);
+const BUILDING_NO_MEETINGS_OPTION = formatVoterBuildingLabel(BUILDING_NO_MEETINGS);
 
 /** True when the building filter feature is active on the deployed target. */
 async function buildingFilterIsActive(baseURL: string): Promise<boolean> {
@@ -105,7 +109,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     // Fill the combobox — the open-meeting building must appear as a listbox option
     await combobox.fill(BUILDING_OPEN);
     await expect(
-      page.getByRole("option", { name: BUILDING_OPEN, exact: true })
+      page.getByRole("option", { name: BUILDING_OPEN_OPTION, exact: true })
     ).toBeVisible({ timeout: 15000 });
   });
 
@@ -128,7 +132,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     // Fill the combobox — the closed-only building must NOT appear as a listbox option
     await combobox.fill(BUILDING_CLOSED_ONLY);
     await expect(
-      page.getByRole("option", { name: BUILDING_CLOSED_ONLY, exact: true })
+      page.getByRole("option", { name: BUILDING_CLOSED_ONLY_OPTION, exact: true })
     ).not.toBeVisible({ timeout: 15000 });
   });
 
@@ -151,7 +155,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     // Fill the combobox — the no-meetings building must NOT appear as a listbox option
     await combobox.fill(BUILDING_NO_MEETINGS);
     await expect(
-      page.getByRole("option", { name: BUILDING_NO_MEETINGS, exact: true })
+      page.getByRole("option", { name: BUILDING_NO_MEETINGS_OPTION, exact: true })
     ).not.toBeVisible({ timeout: 15000 });
   });
 
@@ -164,7 +168,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     await expect(combobox).toBeVisible({ timeout: 15000 });
 
     await combobox.fill(BUILDING_OPEN);
-    await page.getByRole("option", { name: BUILDING_OPEN, exact: true }).click();
+    await page.getByRole("option", { name: BUILDING_OPEN_OPTION, exact: true }).click();
     await expect(
       page.getByRole("button", { name: "Enter Voting" }).first()
     ).toBeVisible({ timeout: 15000 });
