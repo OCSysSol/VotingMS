@@ -744,7 +744,7 @@ export async function submitBallot(page: Page): Promise<void> {
   await expect(page.getByRole("dialog")).toBeVisible();
 
   // If the mixed-warning dialog appeared, dismiss it first before the submit dialog.
-  const mixedDialog = page.getByRole("dialog", { name: "Mixed voting history" });
+  const mixedDialog = page.getByRole("dialog", { name: "Some votes are already recorded" });
   if (await mixedDialog.isVisible()) {
     await mixedDialog.getByRole("button", { name: "Continue" }).click();
     await expect(mixedDialog).not.toBeVisible({ timeout: 5000 });

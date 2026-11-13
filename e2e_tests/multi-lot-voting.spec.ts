@@ -253,8 +253,10 @@ test.describe("Multi-lot voter journey", () => {
     const sidebar = page.locator(".voting-layout__sidebar");
     await expect(sidebar.locator(".lot-selection__item--submitted")).toHaveCount(2);
 
-    // The subtitle says "All lots have been submitted." (scoped to sidebar)
-    await expect(sidebar.getByText("All lots have been submitted.")).toBeVisible();
+    // Submitted lots remain available for review rather than making the selector unavailable.
+    await expect(
+      sidebar.getByText("All lots have submitted ballots. Select lots to review previous votes.")
+    ).toBeVisible();
 
     // "View Submission" button is shown (not "Start Voting")
     await expect(page.getByRole("button", { name: "View Submission" })).toBeVisible();
