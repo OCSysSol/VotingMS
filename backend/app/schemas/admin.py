@@ -178,11 +178,41 @@ class LotOwnerOut(BaseModel):
         ]
 
 
+class LotProxyInput(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
+class LotPersonInput(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
 class LotOwnerCreate(BaseModel):
     lot_number: str = Field(..., max_length=255)
     unit_entitlement: int
     financial_position: str = "normal"
     emails: list[str] = []
+    owners: list[LotPersonInput] = []
+    proxy: LotProxyInput | None = None
     given_name: str | None = Field(default=None, max_length=255)
     surname: str | None = Field(default=None, max_length=255)
 

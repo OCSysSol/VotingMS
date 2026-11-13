@@ -31,6 +31,18 @@ function renderPage(buildingId = "b1", search = "") {
   );
 }
 
+async function addOwnerDraft(
+  user: ReturnType<typeof userEvent.setup>,
+  email: string,
+  givenName = "New",
+  surname = "Owner"
+) {
+  await user.type(screen.getByLabelText("New lot owner email"), email);
+  await user.type(screen.getByLabelText("New owner given name"), givenName);
+  await user.type(screen.getByLabelText("New owner surname"), surname);
+  await user.click(screen.getByRole("button", { name: "Add owner" }));
+}
+
 describe("BuildingDetailPage", () => {
   it("shows loading state inline in table while page header remains visible", () => {
     renderPage();
@@ -51,17 +63,17 @@ describe("BuildingDetailPage", () => {
     expect(screen.getByText("2B")).toBeInTheDocument();
   });
 
-  it("shows building name when building is found", async () => {
+  it("shows the selected OC Plan number as the page title", async () => {
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC-1001" })).toBeInTheDocument();
       expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
     });
   });
 
-  it("shows the building name as the subtitle beneath the OC Plans title", async () => {
+  it("shows the building name as the subtitle beneath the OC Plan title", async () => {
     renderPage();
-    const title = await screen.findByRole("heading", { name: "OC Plans" });
+    const title = await screen.findByRole("heading", { name: "OC-1001" });
     const buildingName = await screen.findByText("Alpha Tower");
     const pageHeader = title.closest(".admin-page-header");
 
@@ -91,6 +103,14 @@ describe("BuildingDetailPage", () => {
       expect(listSearch).toBe("Alice Smith");
       expect(countSearch).toBe("Alice Smith");
     }, { timeout: 3000 });
+  });
+
+  it("right-aligns the owner search in the list toolbar", async () => {
+    renderPage();
+    const search = screen.getByRole("searchbox", { name: "Search owners" });
+    const toolbar = search.closest(".admin-card__header");
+    expect(toolbar).not.toBeNull();
+    expect(toolbar).toHaveStyle({ justifyContent: "flex-end" });
   });
 
   it("shows Add Lot Owner button", async () => {
@@ -140,7 +160,7 @@ describe("BuildingDetailPage", () => {
     // Click the first "Add Lot Owner" button (the page-level one)
     await user.click(screen.getAllByRole("button", { name: "Add Lot Owner" })[0]);
     await user.type(screen.getByLabelText("Lot Number"), "DUPLICATE");
-    await user.type(screen.getByLabelText("Email"), "d@d.com");
+    await addOwnerDraft(user, "d@d.com");
     await user.type(screen.getByLabelText("Unit Entitlement"), "100");
     // Now click the form submit button
     const addButtons = screen.getAllByRole("button", { name: "Add Lot Owner" });
@@ -183,7 +203,7 @@ describe("BuildingDetailPage", () => {
     });
     await user.click(screen.getAllByRole("button", { name: "Add Lot Owner" })[0]);
     await user.type(screen.getByLabelText("Lot Number"), "5E");
-    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await addOwnerDraft(user, "new@example.com");
     await user.type(screen.getByLabelText("Unit Entitlement"), "50");
     const addButtons = screen.getAllByRole("button", { name: "Add Lot Owner" });
     await user.click(addButtons[addButtons.length - 1]);
@@ -200,7 +220,7 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plan" })).toBeInTheDocument();
     });
   });
 
@@ -424,7 +444,7 @@ describe("BuildingDetailPage", () => {
   it("does not show Edit Building button when building is not found", async () => {
     renderPage("b-unknown");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plan" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("button", { name: "Edit Building" })).not.toBeInTheDocument();
   });
@@ -527,7 +547,7 @@ describe("BuildingDetailPage", () => {
     });
   });
 
-  it("renders OC Plans title with building name and OC Plan number subtitles", async () => {
+  it("renders the OC Plan number as the title with the building name as subtitle", async () => {
     server.use(
       http.get("http://localhost/api/admin/buildings/:buildingId", () => {
         return HttpResponse.json({
@@ -542,9 +562,9 @@ describe("BuildingDetailPage", () => {
     );
     renderPage("b-oc");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC-777" })).toBeInTheDocument();
       expect(screen.getByText("Highland Residences")).toBeInTheDocument();
-      expect(screen.getByText("OC Plan OC-777")).toBeInTheDocument();
+      expect(screen.queryByText("OC Plan OC-777")).not.toBeInTheDocument();
     });
   });
 

@@ -537,7 +537,9 @@ export default function BuildingDetailPage() {
       <div className="admin-page-header">
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ marginBottom: 2 }}>OC Plans</h1>
+            <h1 style={{ marginBottom: 2 }}>
+              {building?.oc_plan_number || building?.name || "OC Plan"}
+            </h1>
             {building?.is_archived && (
               <span
                 style={{
@@ -552,8 +554,11 @@ export default function BuildingDetailPage() {
               </span>
             )}
           </div>
-          {building && <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>{building.name}</p>}
-          {building?.oc_plan_number && <p style={{ margin: "2px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>OC Plan {building.oc_plan_number}</p>}
+          {building?.oc_plan_number && (
+            <p style={{ margin: 0, fontSize: "0.875rem", color: "var(--text-muted)" }}>
+              {building.name}
+            </p>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {building && (
@@ -605,7 +610,7 @@ export default function BuildingDetailPage() {
       )}
 
       <div className="admin-card">
-        <div className="admin-card__header" style={{ display: "flex", alignItems: "end", gap: 12 }}>
+        <div className="admin-card__header" style={{ display: "flex", alignItems: "end", justifyContent: "flex-end", gap: 12 }}>
           <div className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
             <label className="field__label" htmlFor="owner-search">Search owners</label>
             <input

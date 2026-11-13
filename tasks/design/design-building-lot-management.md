@@ -1792,6 +1792,103 @@ oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, i
 
 ## OC Plan admin UX additions
 
-The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On the detail page retain the selected OC Plan as the page context and display the associated building name as a subtitle. Add a client-side text filter over the already-loaded owner rows (lot number, person names/emails, proxy name/email) unless the list becomes too large; if server-side pagination is used, make the filter a query parameter and apply it before pagination.
+The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On an individual detail page, render `building.oc_plan_number` as the `<h1>` rather than a literal “OC Plan(s)” heading, and render the building name as the smaller subtitle beneath it. If an OC Plan number is absent, fall back to the building name as the title. Add a server-side text filter over owner rows (lot number, person names/emails, proxy name/email), and right-align the search field in the owner-list toolbar to match the OC Plans list.
 
-Reuse the edit-owner form component for add mode so visual structure cannot drift; add mode supplies empty/default values and uses create submission. When navigating to meeting creation from a selected OC Plan, pass its stable building UUID in the route/query state and initialize the selector from it.
+The `demo` branch already implements the OC Plan navigation/list terminology, selected-OC-Plan title and subtitles, owner/proxy search filter, and Create General Meeting prefill. Those behaviours should be regression-tested rather than reimplemented. The remaining work is Add Lot Owner parity and the Create General Meeting selector terminology documented below.
+
+### Add Lot Owner modal parity
+
+#### Current behaviour
+
+`frontend/src/components/admin/LotOwnerForm.tsx` has two separate implementations:
+
+- `EditModal` manages a lot's owner list, owner names/phones, proxy nomination, unit entitlement, and financial position.
+- `AddForm` uses the same outer dialog shell but only collects lot number, one email, unit entitlement, and financial position.
+
+The add path also sends only `emails: string[]` to `POST /api/admin/buildings/{building_id}/lot-owners`, so owner names, phones, extra owners, and proxy cannot be captured in the initial create action.
+
+#### Frontend design
+
+Keep `LotOwnerForm` as the public boundary and preserve its existing edit-mode behaviour. Rebuild add mode to match the edit modal's visible structure and component vocabulary:
+
+1. Same `.dialog-overlay` / `.dialog` shell, max-width, max-height, heading treatment, required-field legend, spacing, buttons, and accessibility attributes.
+2. `Lot Number` remains the first add-only field because it is the new lot's identity.
+3. Add an `Owners (name + email)` section using the same `PersonEmailAutocomplete`, given-name, surname, phone, edit/remove, and `Add owner` controls as edit mode.
+4. Add the same `Proxy` section, including autocomplete, given name, surname, phone, `Set proxy`, and `Remove proxy` controls.
+5. Keep `Unit Entitlement` and `Financial Position` in the same relative position as edit mode.
+6. The primary action remains `Add Lot Owner`; Cancel, Escape, overlay click, and pending-state behaviour stay consistent with edit mode.
+
+Add mode should use local draft arrays for owners rather than issuing follow-up API calls while the modal is open. At least one owner email is required by this UI. Duplicate emails should be rejected/deduplicated before submit. The autocomplete-selected owner/proxy conflict flow should use the same `PersonConflictModal` as edit mode whenever a submitted name or phone differs from the stored person record.
+
+Do not keep the old single-email fields as an alternate add path. One implementation must own add-mode layout so the two modals cannot drift again.
+
+#### API and transaction design
+
+Extend the existing create request rather than requiring a sequence of create/edit/proxy mutations:
+
+```json
+{
+  "lot_number": "12A",
+  "unit_entitlement": 100,
+  "financial_position": "normal",
+  "owners": [
+    {
+      "email": "owner@example.com",
+      "given_name": "Alex",
+      "surname": "Lee",
+      "phone_number": "+61400000000"
+    }
+  ],
+  "proxy": {
+    "email": "proxy@example.com",
+    "given_name": "Sam",
+    "surname": "Taylor",
+    "phone_number": "+61400000001"
+  }
+}
+```
+
+Backend contract:
+
+- Add reusable owner/proxy input schemas with max-length validation equivalent to `AddOwnerEmailRequest` / `SetProxyRequest`.
+- Extend `LotOwnerCreate` with optional `owners` and `proxy` fields.
+- Retain `emails: list[str]` for backward compatibility and for API consumers that only supply addresses. If `owners` is non-empty it is authoritative; otherwise convert `emails` into unnamed owner entries.
+- Normalize owner and proxy emails to lowercase and trim surrounding whitespace.
+- Use the existing person fill-blanks policy. For an existing person, do not overwrite a non-null name or phone. Conflicts that require overwrite confirmation are resolved in the frontend before submit.
+- Create the lot, owner links, people, and optional one-to-one proxy inside the existing service transaction. Commit once after all records are assembled so a proxy/person failure cannot leave a lot without the requested owner/proxy data.
+- Return the normal `LotOwnerOut`, including `owner_emails` and all `proxy_*` fields, so the frontend can immediately invalidate and refresh the table.
+
+Keep the route path and `building_id` relationship unchanged; `building_id` remains the stable storage/API FK even though the UI calls the entity an OC Plan.
+
+#### Validation and failure handling
+
+- Existing 404 (building not found) and 409 (duplicate lot number per building) semantics remain unchanged.
+- Invalid owner/proxy input returns 422 before persistence.
+- Duplicate owner entries for one lot may be deduplicated by normalized email; the UI should normally prevent them.
+- A request with no owners remains valid at the API layer for backward compatibility, but the Add Lot Owner UI requires at least one owner email.
+- A proxy without an email is invalid; omitted proxy fields mean no proxy nomination.
+- No database migration is required. `persons`, `lot_persons`, and `lot_proxies` already exist.
+
+#### Tests
+
+Backend integration tests:
+
+- Legacy payload using only `emails` still returns 201 and preserves existing behaviour.
+- Nested `owners` persists multiple people with names/phones and returns them in `owner_emails`.
+- Optional nested `proxy` persists and returns `proxy_email`, `proxy_given_name`, `proxy_surname`, and `proxy_phone_number`.
+- Fill-blanks policy does not overwrite existing person name/phone values.
+- Invalid nested owner/proxy payload returns 422 and creates no lot.
+- Duplicate lot number remains 409.
+- Verify the final `LotOwnerOut` shape in all cases.
+
+Frontend tests:
+
+- Add and edit modals have the same shell, heading treatment, section labels, control styling, and field order apart from add-only Lot Number.
+- Add mode exposes owner name/email/phone, add/edit/remove-owner, proxy name/email/phone, set/remove-proxy, entitlement, and financial position.
+- Submitting sends nested `owners` and `proxy`, then calls `onSuccess`.
+- Required-field and malformed-email validation work for owner and proxy inputs.
+- Owner/proxy conflict confirmation works in add mode.
+- Existing duplicate-lot and failed-create paths leave the modal open with an alert.
+- MSW create handler must echo submitted owner/proxy data so component tests prove the payload is consumed.
+
+Update existing component and E2E add-owner tests more precisely than merely checking the dialog shell. No schema migration or preview database branch is required.

@@ -186,6 +186,18 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
+  it("right-aligns the Reopen and Delete actions in one compact group", async () => {
+    renderPage("agm2");
+    const reopen = await screen.findByRole("button", { name: "Reopen Meeting" });
+    const remove = screen.getByRole("button", { name: "Delete Meeting" });
+    expect(reopen.parentElement).toBe(remove.parentElement);
+    expect(reopen.parentElement).toHaveStyle({
+      display: "flex",
+      justifyContent: "flex-end",
+      gap: "8px",
+    });
+  });
+
   it("confirms reopening a closed motion and calls the reopen API", async () => {
     const user = userEvent.setup();
     let reopenedMotionId: string | undefined;

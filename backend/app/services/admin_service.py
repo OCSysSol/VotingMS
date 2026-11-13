@@ -43,6 +43,7 @@ from app.models import (
 )
 from app.models.tenant_settings import TenantSettings
 from app.schemas.admin import (
+    AddOwnerEmailRequest,
     AdminVoteEntryRequest,
     BuildingUpdate,
     GeneralMeetingCreate,
@@ -779,17 +780,23 @@ async def get_or_create_person(
     db: AsyncSession,
     given_name: str | None = None,
     surname: str | None = None,
+    phone_number: str | None = None,
 ) -> Person:
     """Look up a Person by email (case-insensitive). Create if not found.
 
-    Fill-blanks policy: given_name/surname are only applied if the Person row
-    currently has NULL for those fields (never overwrite existing names).
+    Fill-blanks policy: name and phone fields are only applied when the Person
+    row currently has NULL for that field (never overwrite existing data).
     """
     normalised = email.strip().lower()
     result = await db.execute(select(Person).where(Person.email == normalised))
     person = result.scalar_one_or_none()
     if person is None:
-        person = Person(email=normalised, given_name=given_name, surname=surname)
+        person = Person(
+            email=normalised,
+            given_name=given_name,
+            surname=surname,
+            phone_number=phone_number,
+        )
         db.add(person)
         await db.flush()
     else:
@@ -798,6 +805,8 @@ async def get_or_create_person(
             person.given_name = given_name
         if surname is not None and person.surname is None:
             person.surname = surname
+        if phone_number is not None and person.phone_number is None:
+            person.phone_number = phone_number
     return person
 
 
@@ -1552,29 +1561,60 @@ async def add_lot_owner(
     db.add(lot)
     await db.flush()
 
-    for email in data.emails:
-        if email.strip():
-            person = await get_or_create_person(email.strip().lower(), db)
-            from sqlalchemy.dialects.postgresql import insert as pg_insert
-            await db.execute(
-                pg_insert(lot_persons)
-                .values(lot_id=lot.id, person_id=person.id)
-                .on_conflict_do_nothing()
-            )
+    owner_inputs = (
+        data.owners
+        if data.owners
+        else [
+            AddOwnerEmailRequest(email=email)
+            for email in data.emails
+            if email.strip()
+        ]
+    )
+    seen_owner_emails: set[str] = set()
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    for owner in owner_inputs:
+        normalised_email = (owner.email or "").strip().lower()
+        if not normalised_email or normalised_email in seen_owner_emails:
+            continue
+        seen_owner_emails.add(normalised_email)
+        person = await get_or_create_person(
+            normalised_email,
+            db,
+            given_name=(owner.given_name or "").strip() or None,
+            surname=(owner.surname or "").strip() or None,
+            phone_number=(owner.phone_number or "").strip() or None,
+        )
+        await db.execute(
+            pg_insert(lot_persons)
+            .values(lot_id=lot.id, person_id=person.id)
+            .on_conflict_do_nothing()
+        )
+
+    if data.proxy is not None:
+        proxy_person = await get_or_create_person(
+            data.proxy.email.strip().lower(),
+            db,
+            given_name=(data.proxy.given_name or "").strip() or None,
+            surname=(data.proxy.surname or "").strip() or None,
+            phone_number=(data.proxy.phone_number or "").strip() or None,
+        )
+        db.add(LotProxy(lot_id=lot.id, person_id=proxy_person.id))
 
     await db.commit()
 
     persons = await _load_persons_for_one(lot.id, db)
+    proxy_info = await _get_proxy_info(lot.id, db)
     return {
         "id": lot.id,
         "lot_number": lot.lot_number,
         "persons": persons,
         "unit_entitlement": lot.unit_entitlement,
         "financial_position": _format_financial_position(lot.financial_position),
-        "proxy_email": None,
-        "proxy_given_name": None,
-        "proxy_surname": None,
-        "proxy_phone_number": None,
+        "proxy_email": proxy_info["proxy_email"] if proxy_info else None,
+        "proxy_given_name": proxy_info["given_name"] if proxy_info else None,
+        "proxy_surname": proxy_info["surname"] if proxy_info else None,
+        "proxy_phone_number": proxy_info["phone_number"] if proxy_info else None,
     }
 
 

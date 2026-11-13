@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
@@ -56,6 +56,18 @@ function renderAddForm(onSuccess = vi.fn(), onCancel = vi.fn()) {
       />
     </QueryClientProvider>
   );
+}
+
+async function addOwnerDraft(
+  user: ReturnType<typeof userEvent.setup>,
+  email = "new@example.com",
+  givenName = "New",
+  surname = "Owner"
+) {
+  await user.type(screen.getByLabelText("New lot owner email"), email);
+  await user.type(screen.getByLabelText("New owner given name"), givenName);
+  await user.type(screen.getByLabelText("New owner surname"), surname);
+  await user.click(screen.getByRole("button", { name: "Add owner" }));
 }
 
 function renderEditForm(lotOwner: LotOwner, onSuccess = vi.fn(), onCancel = vi.fn()) {
@@ -118,7 +130,9 @@ describe("LotOwnerForm - Add mode", () => {
   it("renders add form fields", () => {
     renderAddForm();
     expect(screen.getByLabelText("Lot Number")).toBeInTheDocument();
-    expect(screen.getByLabelText("Email")).toBeInTheDocument();
+    expect(screen.getByLabelText("New lot owner email")).toBeInTheDocument();
+    expect(screen.getByLabelText("New owner given name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Set proxy email")).toBeInTheDocument();
     expect(screen.getByLabelText("Unit Entitlement")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Lot Owner" })).toBeInTheDocument();
   });
@@ -128,7 +142,7 @@ describe("LotOwnerForm - Add mode", () => {
     const onSuccess = vi.fn();
     renderAddForm(onSuccess);
     await user.type(screen.getByLabelText("Lot Number"), "3C");
-    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await addOwnerDraft(user);
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "150");
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
@@ -137,11 +151,367 @@ describe("LotOwnerForm - Add mode", () => {
     });
   });
 
+  it("submits owner names, phones, and proxy in one create request", async () => {
+    let submitted: Record<string, unknown> | undefined;
+    server.use(
+      http.post("http://localhost/api/admin/buildings/:buildingId/lot-owners", async ({ request }) => {
+        submitted = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({
+          ...existingLotOwner,
+          id: "lo-created",
+          lot_number: "8H",
+          owner_emails: [
+            {
+              id: "ow-new",
+              email: "alice@example.com",
+              given_name: "Alice",
+              surname: "Owner",
+              phone_number: "+61400000001",
+            },
+          ],
+          emails: ["alice@example.com"],
+        }, { status: 201 });
+      })
+    );
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.type(screen.getByLabelText("Lot Number"), "8H");
+    await user.type(screen.getByLabelText("New lot owner email"), "alice@example.com");
+    await user.type(screen.getByLabelText("New owner given name"), "Alice");
+    await user.type(screen.getByLabelText("New owner surname"), "Owner");
+    await user.type(screen.getByLabelText("New owner phone number"), "+61400000001");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await user.type(screen.getByLabelText("Set proxy email"), "proxy@example.com");
+    await user.type(screen.getByLabelText("Proxy given name"), "Peter");
+    await user.type(screen.getByLabelText("Proxy surname"), "Proxy");
+    await user.type(screen.getByLabelText("Proxy phone number"), "+61400000002");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await user.clear(screen.getByLabelText("Unit Entitlement"));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "150");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+
+    await waitFor(() => expect(submitted).toBeDefined());
+    expect(submitted).toMatchObject({
+      lot_number: "8H",
+      unit_entitlement: 150,
+      owners: [{
+        email: "alice@example.com",
+        given_name: "Alice",
+        surname: "Owner",
+        phone_number: "+61400000001",
+      }],
+      proxy: {
+        email: "proxy@example.com",
+        given_name: "Peter",
+        surname: "Proxy",
+        phone_number: "+61400000002",
+      },
+    });
+  });
+
+  it("matches the edit modal owner and proxy controls", () => {
+    renderAddForm();
+    expect(screen.getByText("Owners (name + email)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add owner" })).toBeInTheDocument();
+    expect(screen.getByText("Proxy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set proxy" })).toBeInTheDocument();
+    expect(screen.getByLabelText("New owner phone number")).toBeInTheDocument();
+    expect(screen.getByLabelText("Proxy phone number")).toBeInTheDocument();
+  });
+
+  it("adds, edits, and removes a draft owner before submission", async () => {
+    const user = userEvent.setup();
+    renderAddForm();
+    await addOwnerDraft(user, "draft@example.com", "Dana", "Draft");
+    await user.click(screen.getByRole("button", { name: "Edit draft@example.com" }));
+    await user.clear(screen.getByLabelText("Edit given name"));
+    await user.type(screen.getByLabelText("Edit given name"), "Danielle");
+    await user.clear(screen.getByLabelText("Edit surname"));
+    await user.type(screen.getByLabelText("Edit surname"), "Updated");
+    await user.type(screen.getByLabelText("Edit phone number"), "+61400000003");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Danielle Updated")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove draft@example.com" }));
+    expect(screen.queryByText("Danielle Updated")).not.toBeInTheDocument();
+  });
+
+  it("prevents duplicate draft owners and validates the proxy email", async () => {
+    const user = userEvent.setup();
+    renderAddForm();
+    await addOwnerDraft(user, "same@example.com");
+    await user.type(screen.getByLabelText("New lot owner email"), "same@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    expect(screen.getByText("This owner email has already been added.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    expect(screen.getByText("Proxy email is required.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Set proxy email"), "not-an-email");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    expect(screen.getByText("Please enter a valid email address.")).toBeInTheDocument();
+  });
+
+  it("sets and removes a proxy draft", async () => {
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.type(screen.getByLabelText("Set proxy email"), "proxy@example.com");
+    await user.type(screen.getByLabelText("Proxy given name"), "Pat");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    expect(screen.getByText("Pat")).toBeInTheDocument();
+    expect(screen.getByText("proxy@example.com")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove proxy" }));
+    expect(screen.getByLabelText("Set proxy email")).toBeInTheDocument();
+  });
+
+  it("validates owner email when adding or editing a draft owner", async () => {
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    expect(screen.getByText("Email is required.")).toBeInTheDocument();
+    await addOwnerDraft(user, "edit-me@example.com", "E", "Ditor");
+    await user.click(screen.getByRole("button", { name: "Edit edit-me@example.com" }));
+    await user.clear(screen.getByLabelText("Edit email"));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Email is required.")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Edit email"), "invalid");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("Please enter a valid email address.")).toBeInTheDocument();
+    await user.click(screen.getAllByRole("button", { name: "Cancel" })[0]);
+    expect(screen.queryByLabelText("Edit email")).not.toBeInTheDocument();
+  });
+
+  it("rejects a duplicate email when editing a draft owner", async () => {
+    const user = userEvent.setup();
+    renderAddForm();
+    await addOwnerDraft(user, "one@example.com", "One", "Owner");
+    await user.type(screen.getByLabelText("New lot owner email"), "two@example.com");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await user.click(screen.getByRole("button", { name: "Edit two@example.com" }));
+    await user.clear(screen.getByLabelText("Edit email"));
+    await user.type(screen.getByLabelText("Edit email"), "one@example.com");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(screen.getByText("This owner email has already been added.")).toBeInTheDocument();
+  });
+
+  it("selects an owner and proxy from autocomplete and adds the owner with Enter", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          {
+            id: "p-autocomplete-add",
+            email: "selected@example.com",
+            given_name: "Selected",
+            surname: "Person",
+            phone_number: "+61400000009",
+          },
+        ])
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderAddForm();
+    rtlFireEvent.change(screen.getByLabelText("New lot owner email"), {
+      target: { value: "selected" },
+    });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Selected Person <selected@example.com>"));
+    expect(screen.getByLabelText("New owner given name")).toHaveValue("Selected");
+    await user.type(screen.getByLabelText("New lot owner email"), "{Enter}");
+    expect(screen.getByRole("button", { name: "Edit selected@example.com" })).toBeInTheDocument();
+
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), {
+      target: { value: "selected" },
+    });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    const matchingOptions = screen.getAllByText("Selected Person <selected@example.com>");
+    rtlFireEvent.mouseDown(matchingOptions[matchingOptions.length - 1]);
+    expect(screen.getByLabelText("Proxy given name")).toHaveValue("Selected");
+    expect(screen.getByLabelText("Proxy phone number")).toHaveValue("+61400000009");
+  });
+
+  it("confirms an owner conflict before creating the lot", async () => {
+    let patched = false;
+    const onSuccess = vi.fn();
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          {
+            id: "p-conflict-add",
+            email: "conflict@example.com",
+            given_name: "Original",
+            surname: "Name",
+            phone_number: null,
+          },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () => {
+        patched = true;
+        return HttpResponse.json({
+          id: "p-conflict-add",
+          email: "conflict@example.com",
+          given_name: "Changed",
+          surname: "Name",
+          phone_number: null,
+        });
+      })
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderAddForm(onSuccess);
+    await user.type(screen.getByLabelText("Lot Number"), "9J");
+    rtlFireEvent.change(screen.getByLabelText("New lot owner email"), {
+      target: { value: "conflict" },
+    });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Original Name <conflict@example.com>"));
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "Changed");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await user.clear(screen.getByLabelText("Unit Entitlement"));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "100");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(patched).toBe(true);
+      expect(onSuccess).toHaveBeenCalled();
+    });
+  });
+
+  it("cancels and reports owner conflict update failures", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          {
+            id: "p-conflict-cancel",
+            email: "cancel@example.com",
+            given_name: "Before",
+            surname: null,
+            phone_number: null,
+          },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () =>
+        HttpResponse.json({ detail: "Nope" }, { status: 500 })
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.type(screen.getByLabelText("Lot Number"), "9K");
+    rtlFireEvent.change(screen.getByLabelText("New lot owner email"), {
+      target: { value: "cancel" },
+    });
+    await waitFor(() => screen.getByRole("listbox"), { timeout: 1000 });
+    rtlFireEvent.mouseDown(screen.getByText("Before <cancel@example.com>"));
+    await user.clear(screen.getByLabelText("New owner given name"));
+    await user.type(screen.getByLabelText("New owner given name"), "After");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "100");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument());
+    const conflictCancel = screen.getAllByRole("button", { name: "Cancel" }).find((button) =>
+      button.closest('[aria-labelledby="conflict-modal-title"]') !== null
+    );
+    await user.click(conflictCancel!);
+    expect(screen.queryByRole("button", { name: "Update and save" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(screen.getByText("Failed to update person record. Please try again.")).toBeInTheDocument();
+    });
+  });
+
+  it("confirms a proxy conflict before creating the lot", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          {
+            id: "p-proxy-conflict",
+            email: "proxy-conflict@example.com",
+            given_name: "Proxy",
+            surname: "Before",
+            phone_number: null,
+          },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () =>
+        HttpResponse.json({
+          id: "p-proxy-conflict",
+          email: "proxy-conflict@example.com",
+          given_name: "Proxy",
+          surname: "After",
+          phone_number: null,
+        })
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.type(screen.getByLabelText("Lot Number"), "9L");
+    await addOwnerDraft(user, "owner@example.com");
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), {
+      target: { value: "proxy-conflict" },
+    });
+    const proxyListbox = await screen.findByRole("listbox", {
+      name: "Set proxy email suggestions",
+    }, { timeout: 1000 });
+    rtlFireEvent.mouseDown(within(proxyListbox).getByText("Proxy Before <proxy-conflict@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy surname"));
+    await user.type(screen.getByLabelText("Proxy surname"), "After");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "100");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    expect(screen.queryByRole("button", { name: "Update and save" })).not.toBeInTheDocument();
+  });
+
+  it("reports a proxy conflict update failure", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/persons/search", () =>
+        HttpResponse.json([
+          {
+            id: "p-proxy-failure",
+            email: "proxy-failure@example.com",
+            given_name: "Proxy",
+            surname: "Before",
+            phone_number: null,
+          },
+        ])
+      ),
+      http.patch("http://localhost/api/admin/persons/:personId", () =>
+        HttpResponse.json({ detail: "Nope" }, { status: 500 })
+      )
+    );
+    const { fireEvent: rtlFireEvent } = await import("@testing-library/react");
+    const user = userEvent.setup();
+    renderAddForm();
+    await user.type(screen.getByLabelText("Lot Number"), "9M");
+    await addOwnerDraft(user, "owner@example.com");
+    rtlFireEvent.change(screen.getByLabelText("Set proxy email"), {
+      target: { value: "proxy-failure" },
+    });
+    const proxyListbox = await screen.findByRole("listbox", {
+      name: "Set proxy email suggestions",
+    }, { timeout: 1000 });
+    rtlFireEvent.mouseDown(within(proxyListbox).getByText("Proxy Before <proxy-failure@example.com>"));
+    await user.clear(screen.getByLabelText("Proxy surname"));
+    await user.type(screen.getByLabelText("Proxy surname"), "After");
+    await user.click(screen.getByRole("button", { name: "Set proxy" }));
+    await user.type(screen.getByLabelText("Unit Entitlement"), "100");
+    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Update and save" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Update and save" }));
+    await waitFor(() => {
+      expect(screen.getByText("Failed to update person record. Please try again.")).toBeInTheDocument();
+    });
+  });
+
   it("shows 409 duplicate error", async () => {
     const user = userEvent.setup();
     renderAddForm();
     await user.type(screen.getByLabelText("Lot Number"), "DUPLICATE");
-    await user.type(screen.getByLabelText("Email"), "dup@example.com");
+    await addOwnerDraft(user, "dup@example.com");
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "100");
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
@@ -153,14 +523,14 @@ describe("LotOwnerForm - Add mode", () => {
   it("shows validation error when lot number is empty", async () => {
     const user = userEvent.setup();
     renderAddForm();
-    await user.type(screen.getByLabelText("Email"), "email@example.com");
+    await addOwnerDraft(user, "email@example.com");
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "100");
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
     expect(screen.getByText("Lot number is required.")).toBeInTheDocument();
   });
 
-  it("shows 'Email is required.' and does not submit when add form email is blank", async () => {
+  it("shows an error and does not submit when no owner has been added", async () => {
     const user = userEvent.setup();
     const onSuccess = vi.fn();
     renderAddForm(onSuccess);
@@ -169,7 +539,7 @@ describe("LotOwnerForm - Add mode", () => {
     await user.type(screen.getByLabelText("Unit Entitlement"), "100");
     // email left blank intentionally
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
-    expect(screen.getByText("Email is required.")).toBeInTheDocument();
+    expect(screen.getByText("Add at least one owner.")).toBeInTheDocument();
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
@@ -179,30 +549,28 @@ describe("LotOwnerForm - Add mode", () => {
     await user.type(screen.getByLabelText("Lot Number"), "5E");
     // Use a value that has an @ but no dot in the domain so it fails our regex but
     // userEvent can type it into a type="email" input without jsdom sanitizing it away
-    await user.type(screen.getByLabelText("Email"), "user@nodot");
-    await user.clear(screen.getByLabelText("Unit Entitlement"));
-    await user.type(screen.getByLabelText("Unit Entitlement"), "100");
-    await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
+    await user.type(screen.getByLabelText("New lot owner email"), "user@nodot");
+    await user.click(screen.getByRole("button", { name: "Add owner" }));
     expect(screen.getByText("Please enter a valid email address.")).toBeInTheDocument();
   });
 
   it("email input in add form has type=email (RR3-28)", () => {
     renderAddForm();
-    const emailInput = screen.getByLabelText("Email");
+    const emailInput = screen.getByLabelText("New lot owner email");
     expect(emailInput).toHaveAttribute("type", "email");
   });
 
-  it("marks the email input as required (no 'leave blank' hint)", () => {
+  it("requires at least one owner in the add form", () => {
     renderAddForm();
-    expect(screen.getByLabelText("Email")).toHaveAttribute("aria-required", "true");
-    expect(screen.queryByText("Leave blank if no email address")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add owner" })).toBeInTheDocument();
+    expect(screen.getByText("Owners (name + email)")).toBeInTheDocument();
   });
 
   it("shows validation error when unit entitlement is not a number", async () => {
     const user = userEvent.setup();
     renderAddForm();
     await user.type(screen.getByLabelText("Lot Number"), "5E");
-    await user.type(screen.getByLabelText("Email"), "e@e.com");
+    await addOwnerDraft(user, "e@e.com");
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "abc");
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
@@ -213,7 +581,7 @@ describe("LotOwnerForm - Add mode", () => {
     const user = userEvent.setup();
     renderAddForm();
     await user.type(screen.getByLabelText("Lot Number"), "5E");
-    await user.type(screen.getByLabelText("Email"), "e@e.com");
+    await addOwnerDraft(user, "e@e.com");
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "-5");
     await user.click(screen.getByRole("button", { name: "Add Lot Owner" }));
@@ -289,7 +657,7 @@ describe("LotOwnerForm - Add mode financial position", () => {
       </QueryClientProvider>
     );
     await user.type(screen.getByLabelText("Lot Number"), "3C");
-    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await addOwnerDraft(user);
     await user.clear(screen.getByLabelText("Unit Entitlement"));
     await user.type(screen.getByLabelText("Unit Entitlement"), "150");
     await user.selectOptions(screen.getByLabelText("Financial Position"), "in_arrear");

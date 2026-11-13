@@ -155,6 +155,7 @@ export const ADMIN_BUILDINGS: Building[] = [
     id: "b1",
     name: "Alpha Tower",
     manager_email: "alpha@example.com",
+    oc_plan_number: "OC-1001",
     is_archived: false,
     unarchive_count: 0,
     created_at: "2024-01-01T00:00:00Z",
@@ -163,6 +164,7 @@ export const ADMIN_BUILDINGS: Building[] = [
     id: "b2",
     name: "Beta Court",
     manager_email: "beta@example.com",
+    oc_plan_number: "OC-1002",
     is_archived: false,
     unarchive_count: 0,
     created_at: "2024-02-01T00:00:00Z",
@@ -805,26 +807,57 @@ export const adminHandlers = [
   }),
 
   http.post(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, async ({ request }) => {
-    const body = await request.json() as { lot_number?: string };
+    const body = await request.json() as {
+      lot_number?: string;
+      emails?: string[];
+      owners?: Array<{
+        email: string;
+        given_name?: string | null;
+        surname?: string | null;
+        phone_number?: string | null;
+      }>;
+      proxy?: {
+        email: string;
+        given_name?: string | null;
+        surname?: string | null;
+        phone_number?: string | null;
+      } | null;
+    };
     if (body?.lot_number === "DUPLICATE") {
       return HttpResponse.json(
         { detail: "lot_number 'DUPLICATE' already exists in this building" },
         { status: 409 }
       );
     }
+    const submittedOwners: Array<{
+      email: string;
+      given_name?: string | null;
+      surname?: string | null;
+      phone_number?: string | null;
+    }> = body.owners?.length
+      ? body.owners
+      : (body.emails ?? []).map((email) => ({ email }));
+    const ownerEmails = submittedOwners.map((owner, index) => ({
+      id: `em-new-${index}`,
+      email: owner.email,
+      given_name: owner.given_name ?? null,
+      surname: owner.surname ?? null,
+      phone_number: owner.phone_number ?? null,
+    }));
     const newOwner: LotOwner = {
       id: "lo-new",
       building_id: "b1",
       lot_number: body?.lot_number ?? "NEW",
       given_name: null,
       surname: null,
-      owner_emails: [{ id: "em-new", email: "new@example.com", given_name: null, surname: null, phone_number: null }],
-      emails: ["new@example.com"],
+      owner_emails: ownerEmails,
+      emails: ownerEmails.map((owner) => owner.email),
       unit_entitlement: 50,
       financial_position: "normal",
-      proxy_email: null,
-      proxy_given_name: null,
-      proxy_surname: null,
+      proxy_email: body.proxy?.email ?? null,
+      proxy_given_name: body.proxy?.given_name ?? null,
+      proxy_surname: body.proxy?.surname ?? null,
+      proxy_phone_number: body.proxy?.phone_number ?? null,
     };
     return HttpResponse.json(newOwner, { status: 201 });
   }),

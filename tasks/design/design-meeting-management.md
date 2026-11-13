@@ -449,7 +449,36 @@ No — `voting_closes_at` already exists on the `general_meetings` table. No new
 
 ## OC Plan lookup and meeting list UX
 
-Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the existing building/status/archive filters and pagination. No new schema is required.
+Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the status/archive filters and pagination. The meetings toolbar has one search field, right-aligned to match OC Plans and the owner list. Remove the redundant building-search combobox and its `building` URL filter. There was no dedicated backend endpoint for that combobox: it reused the shared `/api/admin/buildings` endpoint, which remains required by the Create General Meeting selector and other building administration pages.
+
+## Create General Meeting — OC Plan selector terminology
+
+`CreateGeneralMeetingForm` currently labels its selector “Building” and uses the generic building combobox copy even though the selected OC Plan's stable `building_id` is already passed through the `?building=` query parameter from the OC Plan detail page. This remains a UI terminology change; the backend meeting payload and `building_id` FK do not change.
+
+- Change the selector label to `OC Plan`.
+- Use `Search OC Plans` as the placeholder, `OC Plans` as the listbox label, and OC Plan wording in validation copy such as `Please select an OC Plan.`
+- Extend `BuildingSearchCombobox` with optional presentation props (for example `displayLabel` and `listboxLabel`) so other uses can retain their existing Building copy. For the create form, render an option as `<oc_plan_number> — <building name>` when a plan number exists and fall back to `<building name>` when it does not.
+- Keep search querying through the existing building admin API because it already matches both building name and OC plan number.
+- Preserve URL prefill and the ability to change the selection. Keep the query key `building` and payload field `building_id` for compatibility.
+- Make the field accessible name `OC Plan` by retaining the `htmlFor` / `id` relationship.
+
+Tests:
+
+- Create form renders a combobox named `OC Plan`, not `Building`.
+- Options display the OC plan number and building name, with a building-name-only fallback.
+- URL prefill remains selected and displays the same combined label.
+- Clearing the selection shows `Please select an OC Plan.` and prevents submit.
+- Existing create/submit tests are updated to use the new accessible name; list-filter combobox tests continue to expect `Building` because that filter is not this request.
+
+No API, schema, or migration change is required.
+
+## Meeting detail action alignment
+
+Group the meeting action buttons in one right-aligned flex container with an 8px gap. In particular, `Reopen Meeting` and `Delete Meeting` remain adjacent on closed meetings rather than being separated by the page header's space-between layout.
+
+## Meeting archival
+
+The existing admin archive/unarchive lifecycle remains the source of truth. Closed meetings expose `Archive` in the meetings list and archived meetings expose `Unarchive`; the backend archive endpoint remains authenticated by `require_admin` and all regression tests continue to cover the lifecycle.
 
 ## Reopen meeting lifecycle
 
