@@ -63,7 +63,7 @@ test.describe.serial("Admin Lot Owners", () => {
     await page.goto(`/admin/buildings/${building!.id}`);
     await page.getByRole("button", { name: "Add Lot Owner" }).click();
     await page.getByLabel("Lot Number").fill(uniqueLot);
-    await page.getByLabel("Email").fill("lot1@e2e.com");
+    await page.getByRole("textbox", { name: "New lot owner email" }).fill("lot1@e2e.com");
     await page.getByLabel("Unit Entitlement").fill("50");
     await page.getByRole("button", { name: "Add Lot Owner" }).last().click();
 
