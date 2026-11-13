@@ -4,7 +4,9 @@ import { test, expect } from "../fixtures";
 // "add lot owner" if they ran in parallel on the same E2E Building.
 // Use Date.now() to guarantee a unique name per run and avoid collision with
 // the global "E2E Test Building" used by voting-flow tests.
-const E2E_BUILDING = `E2E LotOwners-${Date.now()}`;
+const E2E_RUN_ID = Date.now();
+const E2E_BUILDING = `E2E LotOwners-${E2E_RUN_ID}`;
+const E2E_OC_PLAN = `OC-E2E-${E2E_RUN_ID}`;
 
 test.describe.serial("Admin Lot Owners", () => {
   // Note: Requires a building to exist. Seed via API before tests.
@@ -16,7 +18,9 @@ test.describe.serial("Admin Lot Owners", () => {
         file: {
           name: "buildings.csv",
           mimeType: "text/csv",
-          buffer: Buffer.from(`building_name,manager_email\n${E2E_BUILDING},manager@e2e.com`),
+          buffer: Buffer.from(
+            `building_name,manager_email,oc_plan_number\n${E2E_BUILDING},manager@e2e.com,${E2E_OC_PLAN}`
+          ),
         },
       },
     });
@@ -30,8 +34,9 @@ test.describe.serial("Admin Lot Owners", () => {
 
     await page.goto(`/admin/buildings/${building!.id}`);
     await expect(page.getByText(E2E_BUILDING)).toBeVisible({ timeout: 15000 });
-    // US-OC-UI-01: the page title is "OC Plans"; the building name is shown as a subtitle.
-    await expect(page.getByRole("heading", { level: 1, name: "OC Plans" })).toBeVisible();
+    // Use the OC plan number as the page title, with the building name below it.
+    await expect(page.getByRole("heading", { level: 1, name: E2E_OC_PLAN })).toBeVisible();
+    await expect(page.getByText(E2E_BUILDING)).toBeVisible();
   });
 
   test("add lot owner form submits and shows in table", async ({ page, request }) => {
@@ -42,7 +47,9 @@ test.describe.serial("Admin Lot Owners", () => {
         file: {
           name: "buildings.csv",
           mimeType: "text/csv",
-          buffer: Buffer.from(`building_name,manager_email\n${E2E_BUILDING},manager@e2e.com`),
+          buffer: Buffer.from(
+            `building_name,manager_email,oc_plan_number\n${E2E_BUILDING},manager@e2e.com,${E2E_OC_PLAN}`
+          ),
         },
       },
     });
@@ -73,7 +80,9 @@ test.describe.serial("Admin Lot Owners", () => {
         file: {
           name: "buildings.csv",
           mimeType: "text/csv",
-          buffer: Buffer.from(`building_name,manager_email\n${E2E_BUILDING},manager@e2e.com`),
+          buffer: Buffer.from(
+            `building_name,manager_email,oc_plan_number\n${E2E_BUILDING},manager@e2e.com,${E2E_OC_PLAN}`
+          ),
         },
       },
     });
