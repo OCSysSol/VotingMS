@@ -45,12 +45,12 @@ describe("GeneralMeetingDetailPage", () => {
     expect(screen.getByText("Loading General Meeting...")).toBeInTheDocument();
   });
 
-  it("renders meeting title and building name", async () => {
+  it("renders the meeting title and building name once", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("2024 AGM")).toBeInTheDocument();
     });
-    expect(screen.getAllByText("Alpha Tower").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Alpha Tower")).toHaveLength(1);
   });
 
   it("links the OC Plan in the meeting subtitle", async () => {

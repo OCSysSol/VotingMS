@@ -818,10 +818,6 @@ export default function GeneralMeetingDetailPage() {
         <div className="meeting-detail-layout__info">
           <div className="admin-meta">
             <span className="admin-meta__item">
-              <span className="admin-meta__label">Building</span>
-              {meeting.building_name}
-            </span>
-            <span className="admin-meta__item">
               <span className="admin-meta__label">Meeting</span>
               {formatLocalDateTime(meeting.meeting_at)}
             </span>
