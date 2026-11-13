@@ -82,13 +82,13 @@ describe("BuildingsPage", () => {
     expect(screen.getByText("Import OC Plans")).toBeInTheDocument();
   });
 
-  it("navigates to building detail on name click", async () => {
+  it("navigates to OC Plan detail from the OC Plan link", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Alpha Tower" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Open OC Plan OC-1001" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Alpha Tower" }));
+    await user.click(screen.getByRole("button", { name: "Open OC Plan OC-1001" }));
     expect(mockNavigate).toHaveBeenCalledWith("/admin/buildings/b1");
   });
 

@@ -436,7 +436,21 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 
 ### US-MTG-ARCHIVE-02: Expose meeting archive controls
 
-**Status:** Existing capability (API, archived filter, archive/unarchive list actions, and tests are present). Confirm it remains accessible as part of this work; do not duplicate the feature or add a schema change.
+**Status:** Backend, archived filtering, and list-row controls already exist; expose the same capability from the meeting detail page.
+
+**Description:** As a meeting admin, I want to archive a retained closed meeting from the page where I manage that meeting, and unarchive an archived meeting, so archival is discoverable without returning to the meetings list.
+
+**Acceptance Criteria:**
+
+- [ ] A closed, non-archived meeting detail page shows an `Archive Meeting` action alongside the other meeting actions.
+- [ ] Pending and open meetings do not show the archive action; repeated/archive-invalid states remain protected by the existing authenticated backend endpoint.
+- [ ] Activating `Archive Meeting` opens an explicit confirmation explaining that the meeting will be hidden from the active meetings list and retained for audit.
+- [ ] Confirming calls `POST /api/admin/general-meetings/{id}/archive`, invalidates detail and list queries, keeps the user on the meeting detail page, and shows an `Archived` status indicator plus an `Unarchive Meeting` action.
+- [ ] An archived meeting detail page shows `Archived` and allows `Unarchive Meeting` via `POST /api/admin/general-meetings/{id}/unarchive`; the action refreshes both detail and list data.
+- [ ] Archive errors are shown accessibly on the detail page, and action buttons expose pending/disabled state while the request is in flight.
+- [ ] The frontend `GeneralMeetingDetail` contract includes the `is_archived` boolean already returned by the backend.
+- [ ] Existing archive/unarchive list controls, archived list filtering, authorization, and API behavior remain unchanged.
+- [ ] Component/E2E coverage verifies action visibility, confirmation/cancel, successful archive state, unarchive, API failure, and non-admin rejection through the existing protected endpoint.
 
 ### US-MTG-OC-DETAIL-01: Meeting subtitle includes linked OC Plan
 

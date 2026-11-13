@@ -156,6 +156,7 @@ export interface GeneralMeetingDetail {
   meeting_at: string;
   voting_closes_at: string;
   closed_at: string | null;
+  is_archived: boolean;
   total_eligible_voters: number;
   total_submitted: number;
   total_entitlement: number;
