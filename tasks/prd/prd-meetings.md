@@ -437,3 +437,31 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 ### US-MTG-ARCHIVE-02: Expose meeting archive controls
 
 **Status:** Existing capability (API, archived filter, archive/unarchive list actions, and tests are present). Confirm it remains accessible as part of this work; do not duplicate the feature or add a schema change.
+
+### US-MTG-OC-DETAIL-01: Meeting subtitle includes linked OC Plan
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the meeting subtitle to show both the building name and its OC Plan, with the OC Plan linking to the OC Plan page, so I can quickly move between the meeting and its primary entity.
+
+**Acceptance Criteria:**
+
+- [ ] The meeting detail page shows a subtitle beneath the meeting title containing the building name.
+- [ ] When an OC Plan number exists, the subtitle also shows the OC Plan and links it to `/admin/buildings/{building_id}`.
+- [ ] The link is keyboard accessible and names the OC Plan it opens.
+- [ ] If the OC Plan is absent, the subtitle shows the building name without a dangling separator or empty link.
+- [ ] The meeting detail API returns nullable `oc_plan_number`; no migration is required.
+
+### US-MTG-UI-02: Left-align meeting, OC Plan, and owner search
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the search controls on the Meetings, OC Plans, and owner lists to share a left-aligned layout so the filter rows are consistent.
+
+**Acceptance Criteria:**
+
+- [ ] Each search input is the first control at the left edge of its filter row.
+- [ ] Meetings keeps one search across meeting title, OC Plan, and building; Status follows the search.
+- [ ] OC Plans keeps Search followed by Show archived; the New OC Plan action remains available.
+- [ ] The owner list search is left-aligned beneath the OC Plan actions.
+- [ ] No search control relies on right alignment or an auto margin.

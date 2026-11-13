@@ -17,7 +17,7 @@
  */
 
 import { test, expect, RUN_SUFFIX } from "../fixtures";
-import { makeAdminApi } from "../workflows/helpers";
+import { generateOcPlanNumber, makeAdminApi } from "../workflows/helpers";
 
 const BUILDING_NAME_PENDING = `E2E Start Meeting Pending Building-${RUN_SUFFIX}`;
 const BUILDING_NAME_START = `E2E Start Meeting Start Building-${RUN_SUFFIX}`;
@@ -72,13 +72,24 @@ test.describe("Admin Start Meeting button", () => {
         // Try to find an existing building first
         const listRes = await api.get(`/api/admin/buildings?name=${encodeURIComponent(name)}`);
         if (listRes.ok()) {
-          const buildings = (await listRes.json()) as { id: string; name: string }[];
+          const buildings = (await listRes.json()) as { id: string; name: string; oc_plan_number: string | null }[];
           const existing = buildings.find((b) => b.name === name);
-          if (existing) return existing.id;
+          if (existing) {
+            if (!existing.oc_plan_number?.trim()) {
+              await api.patch(`/api/admin/buildings/${existing.id}`, {
+                data: { oc_plan_number: generateOcPlanNumber(name) },
+              });
+            }
+            return existing.id;
+          }
 
           // Not found in list — create it
           const createRes = await api.post("/api/admin/buildings", {
-            data: { name, manager_email: managerEmail },
+            data: {
+              name,
+              manager_email: managerEmail,
+              oc_plan_number: generateOcPlanNumber(name),
+            },
           });
           if (createRes.ok()) {
             const b = (await createRes.json()) as { id: string };

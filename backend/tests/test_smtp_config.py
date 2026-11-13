@@ -35,6 +35,7 @@ from app.services.smtp_config_service import (
     is_smtp_configured,
     set_email_delivery_enabled,
     sync_email_delivery_from_testing_mode,
+    sync_sms_enabled_from_testing_mode,
     update_smtp_config,
 )
 from app.services.email_service import SmtpNotConfiguredError
@@ -347,6 +348,51 @@ class TestSmtpConfigService:
             mock_settings.testing_mode = True
             await sync_email_delivery_from_testing_mode(db_session)
         assert await is_email_delivery_enabled(db_session) is False
+
+    async def test_sync_sms_disables_provider_in_testing_mode(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session)
+        config = await get_smtp_config(db_session)
+        config.sms_enabled = True
+        await db_session.commit()
+
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = True
+            await sync_sms_enabled_from_testing_mode(db_session)
+
+        config = await get_smtp_config(db_session)
+        assert config.sms_enabled is False
+
+    async def test_sync_sms_enables_provider_outside_testing_mode(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session)
+        config = await get_smtp_config(db_session)
+        config.sms_enabled = False
+        await db_session.commit()
+
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = False
+            await sync_sms_enabled_from_testing_mode(db_session)
+
+        config = await get_smtp_config(db_session)
+        assert config.sms_enabled is True
+
+    async def test_sync_sms_keeps_matching_value(
+        self, db_session: AsyncSession
+    ):
+        await _seed_smtp_config(db_session)
+        config = await get_smtp_config(db_session)
+        config.sms_enabled = False
+        await db_session.commit()
+
+        with patch("app.services.smtp_config_service.settings") as mock_settings:
+            mock_settings.testing_mode = True
+            await sync_sms_enabled_from_testing_mode(db_session)
+
+        config = await get_smtp_config(db_session)
+        assert config.sms_enabled is False
 
     # --- get_decrypted_password ---
 

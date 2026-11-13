@@ -610,7 +610,7 @@ export default function BuildingDetailPage() {
       )}
 
       <div className="admin-card">
-        <div className="admin-card__header" style={{ display: "flex", alignItems: "end", justifyContent: "flex-end", gap: 12 }}>
+        <div className="admin-card__header" style={{ display: "flex", alignItems: "end", justifyContent: "flex-start", gap: 12 }}>
           <div className="field" style={{ maxWidth: 360, marginBottom: 0 }}>
             <label className="field__label" htmlFor="owner-search">Search owners</label>
             <input

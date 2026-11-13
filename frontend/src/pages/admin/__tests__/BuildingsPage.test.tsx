@@ -63,6 +63,17 @@ describe("BuildingsPage", () => {
     expect(screen.getByText("Beta Court")).toBeInTheDocument();
   });
 
+  it("renders the OC Plan search first and left-aligned in the table toolbar", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
+    });
+    const search = screen.getByRole("textbox", { name: "Search OC Plans" });
+    const filterRow = search.closest(".admin-card__header")?.firstElementChild;
+    expect(filterRow).toHaveStyle({ justifyContent: "flex-start" });
+    expect(filterRow?.firstElementChild).toContainElement(search);
+  });
+
   it("renders CSV upload section", async () => {
     renderPage();
     await waitFor(() => {

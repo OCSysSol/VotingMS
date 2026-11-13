@@ -1741,7 +1741,7 @@ This feature:
 3. Preserves \`id: UUID\` as the PK on \`buildings\` with zero disruption to existing foreign keys.
 4. Requires no backfill for existing rows (\`oc_plan_number\` defaults to \`NULL\`).
 5. Updates Admin UI (table columns, create/edit modals, search filtering by both name and OC plan).
-6. Updates Voter UI (public meeting endpoints, combobox, and meeting headers formatted as \`\${building_name} — \${oc_plan_number}\`).
+6. Updates Voter UI public data and the building selector. The selector formats options and selected text as \`\${oc_plan_number} - \${building_name}\`; meeting headers retain their separately specified formatting.
 7. Enhances CSV/Excel bulk import to accept \`oc_plan_number\` as an optional column.
 
 ## 2. Technical Design
@@ -1785,14 +1785,14 @@ oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, i
 - Admin \`BuildingTable\`: add "OC Plan" column (renders \`—\` when null/empty).
 - Admin \`BuildingsPage\`: add OC Plan input in create modal; search bar filters by name or plan.
 - Admin \`BuildingDetailPage\`: edit modal allows updating \`oc_plan_number\`; header shows OC plan.
-- Voter \`VoterBuildingCombobox\`, \`VotingPage\`, \`ConfirmationPage\`, \`GeneralMeetingSummaryPage\`: display formatted \`\${building_name} — \${oc_plan_number}\` (or just \`\${building_name}\` if plan is absent).
+- Voter \`VoterBuildingCombobox\`: search both fields and display \`\${oc_plan_number} - \${building_name}\` (or just \`\${building_name}\` if plan is absent). Other voter headers retain their separately specified formatting.
 
 ## 3. Schema Migration Required
 **Yes.** New Alembic revision to add \`oc_plan_number\`, add index, and drop \`uq_buildings_name\`.
 
 ## OC Plan admin UX additions
 
-The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On an individual detail page, render `building.oc_plan_number` as the `<h1>` rather than a literal “OC Plan(s)” heading, and render the building name as the smaller subtitle beneath it. If an OC Plan number is absent, fall back to the building name as the title. Add a server-side text filter over owner rows (lot number, person names/emails, proxy name/email), and right-align the search field in the owner-list toolbar to match the OC Plans list.
+The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On an individual detail page, render `building.oc_plan_number` as the `<h1>` rather than a literal “OC Plan(s)” heading, and render the building name as the smaller subtitle beneath it. If an OC Plan number is absent, fall back to the building name as the title. Add a server-side text filter over owner rows (lot number, person names/emails, proxy name/email), and left-align the search field in the owner-list toolbar to match the OC Plans and Meetings lists.
 
 The `demo` branch already implements the OC Plan navigation/list terminology, selected-OC-Plan title and subtitles, owner/proxy search filter, and Create General Meeting prefill. Those behaviours should be regression-tested rather than reimplemented. The remaining work is Add Lot Owner parity and the Create General Meeting selector terminology documented below.
 
@@ -1892,3 +1892,121 @@ Frontend tests:
 - MSW create handler must echo submitted owner/proxy data so component tests prove the payload is consumed.
 
 Update existing component and E2E add-owner tests more precisely than merely checking the dialog shell. No schema migration or preview database branch is required.
+
+## OC Plan search alignment and test seed population
+
+### Left-aligned search toolbars
+
+The OC Plans list, Meetings list, and owner list on an individual OC Plan page must use a consistent left-aligned filter row:
+
+- The search control is the first item at the left edge of the filter container.
+- Secondary controls such as status or “Show archived” follow the search field.
+- No toolbar uses `margin-left: auto`, `justify-content: flex-end`, or another spacer that moves the search field to the right.
+- On the OC Plans list, keep “+ New OC Plan” in the page action area, but move search and “Show archived” into a table-card filter header whose contents start at the left.
+- On Meetings, render search first and the status selector second. Remove the current auto margin.
+- On the owner list, change its table-card header from end alignment to start alignment.
+
+Use the existing `.field`, `.field__input`, `.admin-card__header`, and inline layout conventions already accepted by `design-system.md`. Add component tests that assert the filter row alignment contract, not only the existence of the input.
+
+### E2E building generation
+
+`e2e_tests/workflows/helpers.ts` currently creates buildings with only `name` and `manager_email`, leaving test OC Plan values empty. Update the shared test seed path so every generated building receives a non-empty OC Plan:
+
+1. Add a deterministic generator that produces `PS` + six digits + one uppercase letter, for example `PS345123A`.
+2. Derive the digits/letter from a stable hash of the building name and an optional sequence so concurrent specs do not all receive the same number.
+3. Allow callers to provide an explicit complete OC Plan value, including suffixed multi-plan values such as `PS345123A1` or `PS345123A2`.
+4. Include `oc_plan_number` in `POST /api/admin/buildings`.
+5. When an existing building is found without an OC Plan, PATCH it to populate the value; when the helper is called for a distinct OC Plan number, match by that value rather than incorrectly reusing a same-name row with a different plan.
+6. Export the generator so `e2e_tests/global-setup.ts` can use the same rule for its directly-created voting and admin buildings, or refactor those paths onto the shared helper.
+
+Supporting multiple OC Plans for one building name does not require a schema change. The existing model represents each OC Plan as a building/OC Plan row with its own `oc_plan_number`; callers pass distinct suffixed values when they need multiple plans. Keep existing test names and IDs stable where possible.
+
+### Tests
+
+- Seed helper sends `oc_plan_number` on create and patches an existing row that lacks one.
+- Generated plans match `^PS\d{6}[A-Z]$`; explicit values such as `PS345123A1` and `PS345123A2` are preserved exactly.
+- Global setup and helper-created buildings are returned with a non-empty plan.
+- OC Plans, Meetings, and owner search inputs all start at the same left-aligned position in their filter row.
+- Existing OC Plan title, owner search, pagination, and sorting tests remain green.
+
+No database migration is required.
+
+## Voter building selector — search and display contract
+
+### Current data path
+
+`BuildingSelectPage` calls `GET /api/buildings` and passes the returned
+`BuildingOut[]` to `VoterBuildingCombobox`. That public endpoint already returns
+both `name` and `oc_plan_number` and applies the authoritative eligibility filter
+(active, non-archived building with an open meeting). The voter selector then
+filters the bounded response in memory. No voter-specific search endpoint,
+query parameter, or backend change is required for this behaviour.
+
+`BuildingDropdown` is not imported by the voter flow. The active implementation
+is `VoterBuildingCombobox`; do not create a second selector implementation.
+
+### Required display format
+
+When an OC Plan is present, the dropdown option and the combobox text shown
+after/while a building is selected must both use:
+
+```text
+<oc_plan_number> - <building name>
+```
+
+Examples:
+
+```text
+PS345123A - The Vale
+PS345123A1 - The Vale
+PS345123A2 - The Vale
+```
+
+The order is intentionally OC Plan first. Use one shared formatter for both the
+input value and option labels so they cannot drift. Trim whitespace from the OC
+Plan. When the OC Plan is null, empty, or whitespace-only, fall back to the
+building name alone rather than rendering a dangling separator or placeholder.
+
+This replaces the older voter-combobox format
+`<building name> — <oc_plan_number>` for the selector only. Other meeting or
+confirmation headers are outside this change unless separately specified.
+
+### Search behaviour
+
+Search is a case-insensitive substring match against either field:
+
+- building-name substring, e.g. `vale` matches `The Vale`;
+- OC Plan substring, e.g. `345123` or `A2` matches the corresponding option;
+- combined display text is not required as a separate backend search field.
+
+The query must match both fields independently, not only the rendered label.
+The selector keeps its current keyboard, outside-click, Escape, "All buildings",
+clear-selection, and accessibility behaviour:
+
+- `role="combobox"` and `role="listbox"` remain in use;
+- Arrow Up/Down and Enter continue to navigate/select;
+- Escape/outside click restore the current selection;
+- typing after a selection continues to clear the selected building ID;
+- selecting "All buildings" continues to emit the empty ID.
+
+Update the placeholder to communicate both searchable attributes, for example
+`Type building name or OC Plan…`. Keep the accessible label
+`Select your building`.
+
+### Tests
+
+Component coverage must verify:
+
+- an OC Plan option renders as `PS345123A - Building Name`;
+- the selected input renders the same order and separator;
+- searching by a building-name substring returns the matching option;
+- searching by an OC Plan substring returns the matching option;
+- a query matching neither field yields only "All buildings";
+- missing/blank OC Plan renders the building name alone;
+- duplicate building names with different plans remain distinguishable by OC Plan;
+- clear/reset restores the correct formatted selection.
+
+E2E coverage should search the seeded open-meeting building once by building
+name and once by its generated OC Plan, then select it and assert the same
+`OC Plan - Building` text in the combobox. Existing building-eligibility and
+voter-auth tests remain authoritative.

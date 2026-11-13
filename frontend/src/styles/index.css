@@ -1895,6 +1895,23 @@ button, input, select, textarea {
   letter-spacing: 0.07em;
 }
 
+.meeting-detail__subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+}
+
+.meeting-detail__subtitle a {
+  color: var(--navy);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 /* === ADMIN STATS === */
 .admin-stats {
   display: flex;

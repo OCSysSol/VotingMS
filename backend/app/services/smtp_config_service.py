@@ -153,6 +153,19 @@ async def sync_email_delivery_from_testing_mode(db: AsyncSession) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def sync_sms_enabled_from_testing_mode(db: AsyncSession) -> None:
+    """Force the global SMS provider switch from TESTING_MODE on every app startup.
+
+    This mirrors email_delivery_enabled. It intentionally does not change the
+    tenant voter-channel setting ``otp_sms_enabled``.
+    """
+    config = await get_smtp_config(db)
+    desired = not settings.testing_mode
+    if config.sms_enabled != desired:
+        config.sms_enabled = desired
+        await db.commit()
+
+
 def _decrypt_secret(enc: str | None, key: str, field_name: str) -> str:
     """Decrypt an encrypted secret field; return empty string on any failure."""
     if not enc:

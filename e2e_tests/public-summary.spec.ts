@@ -11,9 +11,10 @@
  */
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
-import { makeAdminApi } from "./workflows/helpers";
+import { generateOcPlanNumber, makeAdminApi } from "./workflows/helpers";
 
 const BUILDING_NAME = `E2E Summary Test Building-${RUN_SUFFIX}`;
+const BUILDING_OC_PLAN = generateOcPlanNumber(BUILDING_NAME);
 const LOT_NUMBER = "SUM-1";
 const LOT_EMAIL = "summary-e2e@test.com";
 const LOT_ENTITLEMENT = 15;
@@ -32,13 +33,21 @@ test.describe("Public AGM summary page", () => {
     // Create or find the building
     const buildingsRes = await api.get(`/api/admin/buildings?name=${encodeURIComponent(BUILDING_NAME)}`);
     if (!buildingsRes.ok()) throw new Error(`GET /api/admin/buildings returned ${buildingsRes.status()}: ${await buildingsRes.text()}`);
-    const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+    const buildings = (await buildingsRes.json()) as { id: string; name: string; oc_plan_number: string | null }[];
     let building = buildings.find((b) => b.name === BUILDING_NAME);
     if (!building) {
       const res = await api.post("/api/admin/buildings", {
-        data: { name: BUILDING_NAME, manager_email: "summary-mgr@test.com" },
+        data: {
+          name: BUILDING_NAME,
+          manager_email: "summary-mgr@test.com",
+          oc_plan_number: BUILDING_OC_PLAN,
+        },
       });
-      building = (await res.json()) as { id: string; name: string };
+      building = (await res.json()) as { id: string; name: string; oc_plan_number: string | null };
+    } else if (!building.oc_plan_number?.trim()) {
+      await api.patch(`/api/admin/buildings/${building.id}`, {
+        data: { oc_plan_number: BUILDING_OC_PLAN },
+      });
     }
     const buildingId = building.id;
 

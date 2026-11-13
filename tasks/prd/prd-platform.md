@@ -405,3 +405,33 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 - [x] Add structured events for OTP request receipt, selected channel, delivery attempt start, success/failure, and elapsed time.
 - [x] Correlate events by request/meeting ID without logging OTP codes, SMTP passwords, full email addresses, or message bodies.
 - [x] Log failures with a sanitized provider category and detail. Per US-OTP-DELIVERY-01, keep the API and voter UI indistinguishable for known and unknown addresses.
+
+### US-SMS-UI-01: Test SMS uses the same interaction as test email
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the Test SMS flow to match Test Email so that both SMS and email configuration can be verified through the same predictable modal workflow.
+
+**Acceptance Criteria:**
+
+- [ ] The SMS form action row contains `Save` and `Send test SMS`, matching the Mail Server action layout.
+- [ ] `Send test SMS` opens a modal with a `Recipient phone number` field and `Cancel` / `Send` actions.
+- [ ] Escape, overlay click, and Cancel close the modal.
+- [ ] Send is disabled for an empty number or while a request is in flight.
+- [ ] Success and delivery errors appear in the SMS form after the modal closes.
+- [ ] The trigger is disabled when provider-level SMS is off or the selected provider is not fully configured.
+- [ ] The old inline test SMS panel is removed.
+
+### US-SMS-TESTMODE-01: SMS provider enablement follows TESTING_MODE
+
+**Status:** Proposed
+
+**Description:** As an operator, I want the provider-level SMS toggle to reset from `TESTING_MODE` exactly as Email delivery does, so test deployments do not attempt real SMS delivery after a cold start.
+
+**Acceptance Criteria:**
+
+- [ ] On application startup, `TESTING_MODE=true` persists provider-level `sms_enabled=false`.
+- [ ] On application startup, `TESTING_MODE=false` persists provider-level `sms_enabled=true`.
+- [ ] The reset mirrors `email_delivery_enabled`; an admin can still toggle the setting in the running process.
+- [ ] The voter-channel `otp_sms_enabled` setting is unchanged by this reset.
+- [ ] Startup remains sequential and uses the existing transient database retry policy.

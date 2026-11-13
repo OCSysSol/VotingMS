@@ -778,7 +778,7 @@ This document covers all building management, lot owner management, CSV/Excel im
   - `GET /api/general-meeting/{id}/summary` returns `GeneralMeetingSummaryOut` with `building_name` and `oc_plan_number`.
   - `POST /api/auth/verify` returns `AuthVerifyResponse` with `building_name` and `oc_plan_number`.
   - `GET /api/general-meeting/{id}/my-ballot` returns `MyBallotResponse` with `building_name` and `oc_plan_number`.
-- [x] Voter Building Combobox (`VoterBuildingCombobox`) renders options as `${building_name} — ${oc_plan_number}` when `oc_plan_number` is present, or `${building_name}` when null/empty.
+- [ ] Voter Building Combobox (`VoterBuildingCombobox`) renders options and selected text as `${oc_plan_number} - ${building_name}` when `oc_plan_number` is present, or `${building_name}` when null/empty.
 - [x] Voter Building Combobox search filters match either building name or OC plan number.
 - [x] Voter meeting headers (VotingPage, ConfirmationPage, SummaryPage) display `${building_name} — ${oc_plan_number}` when `oc_plan_number` is present, or `${building_name}` when null/empty.
 - [x] Typecheck/lint passes; all unit, integration, and E2E tests pass at 100% coverage.
@@ -799,14 +799,52 @@ As an admin, I want the admin navigation and pages to use OC Plans terminology w
 - [x] Add Lot Owner must accept owner names/contact details and a proxy in the same modal, without creating a partial lot if any part of the create request fails.
 - [x] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it.
 - [x] On Create General Meeting, label the entity selector “OC Plan”, show the OC plan number in selectable options, and use OC Plan wording for its validation/error copy.
-- [x] Right-align the Meetings and owner-list search fields to match the OC Plans search layout.
+- [ ] Left-align the OC Plans, Meetings, and owner-list search fields as a consistent filter-row design.
 - [x] Keep one meetings search field covering titles, OC Plans, and buildings.
 - [x] Keep Reopen and Delete adjacent and right-aligned on the meeting detail page.
 - [x] Preserve existing Building IDs and relationships; no data model rename is required.
 
+### US-OC-TESTDATA-01: Generated test buildings include OC Plans
+
+**Status:** Proposed
+
+**Description:** As a QA engineer, I want generated E2E buildings populated with realistic OC Plan values so tests exercise the same primary identifier admins use in production.
+
+**Acceptance Criteria:**
+
+- [ ] Shared E2E building creation populates `oc_plan_number`.
+- [ ] The default pattern is `PS` followed by six digits and one uppercase letter, for example `PS345123A`.
+- [ ] Generation is deterministic from the building name / sequence so reruns do not create unstable IDs.
+- [ ] Callers can supply explicit suffixed values such as `PS345123A1` or `PS345123A2` when one building name has multiple OC Plans.
+- [ ] Existing matching buildings without a plan are updated to include one.
+- [ ] The global-setup voting and admin buildings use the same seeding rule.
+- [ ] No schema migration is required.
+
+### US-VOTER-BLD-SEARCH-01: Search voter building selector by name or OC Plan
+
+**Status:** Proposed
+
+As a voter, I want to search the building selector by either building name or
+OC Plan and see the OC Plan first in each result, so I can identify the correct
+owners corporation when multiple plans share a building name.
+
+**Acceptance Criteria:**
+
+- [ ] Voter building search matches a case-insensitive substring of either the building name or `oc_plan_number`.
+- [ ] Each dropdown option with an OC Plan is displayed as `<oc_plan_number> - <building_name>`, for example `PS345123A - The Vale`.
+- [ ] The text shown above/after selection in the combobox uses the same `<oc_plan_number> - <building_name>` order and separator.
+- [ ] Missing, null, or whitespace-only OC Plans fall back to the building name alone.
+- [ ] Multiple plans that share a building name remain distinguishable by OC Plan.
+- [ ] Searching by building name and searching by OC Plan both find the corresponding building.
+- [ ] Clearing or resetting the selector restores the correctly formatted current selection, or an empty field when no building is selected.
+- [ ] Existing open-meeting building eligibility, keyboard navigation, selection, and voter authentication behaviour are unchanged.
+- [ ] The voter selector continues to use the bounded `GET /api/buildings` response; no new backend search endpoint is required.
+- [ ] Component and E2E tests cover both search keys, option labels, selected text, blank plans, and duplicate building names.
+
 ## Functional Requirements
 
 - FR-1: A building record contains: technical ID (UUID PK), name (string, non-unique), optional OC plan number (`oc_plan_number`, nullable VARCHAR, indexed), manager email address, and associated lot owner records. Buildings can be created individually via a form or bulk-created/updated via CSV or Excel upload. Multiple OC plans may share the same building name (the database unique constraint `uq_buildings_name` is removed).
+- FR-BLD-SEARCH: The voter building selector searches both building name and OC Plan using case-insensitive substring matching. Options and the selected combobox text display `<oc_plan_number> - <building_name>` when a plan exists, otherwise `<building_name>`.
 - FR-3: A lot owner record contains: building ID, lot number (string), unit entitlement (non-negative integer), financial position (`normal` | `in_arrear`). Lot number must be unique per building. Multiple lots may share the same person (email) within a building (multi-lot owners). Lot owner records cannot be deleted — only created or edited.
 - FR-6: Import for lot owners accepts CSV or Excel (.xlsx / .xls). Import performs upsert semantics (never deletes lots). Changes do not affect the weight snapshot of any already-open meeting.
 - FR-V2: `LotOwner.financial_position` is a non-nullable enum: `'normal'` | `'in_arrear'`. Default is `'normal'`. Can be updated via import, manual edit, or admin form.

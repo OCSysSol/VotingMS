@@ -432,7 +432,7 @@ async def _check_migration_head() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: check migration head, apply TESTING_MODE's email-delivery policy,
+    # Startup: check migration head, apply TESTING_MODE's delivery policies,
     # then requeue pending email deliveries.
     #
     # IMPORTANT — sequential execution is intentional and must not be changed
@@ -440,7 +440,7 @@ async def lifespan(app: FastAPI):
     #
     # Each startup DB operation acquires a connection from AsyncSessionLocal
     # sequentially. This keeps startup predictable and guarantees the delivery
-    # policy is persisted before any pending report email can be requeued.
+    # policies are persisted before any pending report email can be requeued.
     #
     # Retry startup DB tasks on transient connection errors.
     # Under concurrent Lambda cold-starts (e.g. 3 parallel E2E shards), asyncpg's
@@ -449,7 +449,10 @@ async def lifespan(app: FastAPI):
     # Uses the same exception types as get_db() in database.py.
     from app.database import AsyncSessionLocal, _DB_RETRY_ATTEMPTS, _DB_RETRY_BASE_WAIT
     from app.services.email_service import EmailService
-    from app.services.smtp_config_service import sync_email_delivery_from_testing_mode
+    from app.services.smtp_config_service import (
+        sync_email_delivery_from_testing_mode,
+        sync_sms_enabled_from_testing_mode,
+    )
     from sqlalchemy.exc import DBAPIError, OperationalError
     from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
@@ -458,6 +461,7 @@ async def lifespan(app: FastAPI):
             await _check_migration_head()
             async with AsyncSessionLocal() as db:
                 await sync_email_delivery_from_testing_mode(db)
+                await sync_sms_enabled_from_testing_mode(db)
                 await EmailService().requeue_pending_on_startup(db)
             break
         except (OperationalError, DBAPIError, SQLAlchemyTimeoutError, asyncio.TimeoutError):

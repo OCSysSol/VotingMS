@@ -82,6 +82,7 @@ export default function SettingsPage() {
   const [isTestingSms, setIsTestingSms] = useState(false);
   const [smsTestPhone, setSmsTestPhone] = useState("");
   const [smsTestResult, setSmsTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [showTestSmsModal, setShowTestSmsModal] = useState(false);
 
   // User management state
   const hasFetchedUsers = useRef(false);
@@ -376,6 +377,7 @@ export default function SettingsPage() {
   }
 
   async function handleSmsTest() {
+    setShowTestSmsModal(false);
     setSmsTestResult(null);
     setIsTestingSms(true);
     try {
@@ -388,6 +390,27 @@ export default function SettingsPage() {
       setIsTestingSms(false);
       setSmsTestPhone("");
     }
+  }
+
+  function closeTestSmsModal() {
+    setShowTestSmsModal(false);
+    setSmsTestPhone("");
+  }
+
+  function isSmsProviderConfiguredForTest(): boolean {
+    if (smsProvider === "smtp2go") {
+      return smtp2goApiKeyIsSet && Boolean(smtp2goSenderNumber.trim());
+    }
+    if (smsProvider === "twilio") {
+      return Boolean(twilioAccountSid.trim()) && twilioAuthTokenIsSet && Boolean(twilioFromNumber.trim());
+    }
+    if (smsProvider === "clicksend") {
+      return Boolean(clicksendUsername.trim()) && clicksendApiKeyIsSet && Boolean(clicksendFromNumber.trim());
+    }
+    if (smsProvider === "webhook") {
+      return Boolean(webhookUrl.trim());
+    }
+    return false;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -1153,42 +1176,29 @@ export default function SettingsPage() {
                 </p>
               )}
 
-              <button
-                type="submit"
-                className="btn btn--primary"
-                data-testid="sms-save-btn"
-                disabled={isSmsSaving}
-              >
-                {isSmsSaving ? "Saving…" : "Save"}
-              </button>
-            </form>
-
-            {smsEnabled && (
-              <div style={{ marginTop: 24 }}>
-                <p className="admin-card__title" style={{ marginBottom: 12 }}>Send test SMS</p>
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label className="field__label" htmlFor="sms-test-phone">Phone number</label>
-                    <input
-                      id="sms-test-phone"
-                      className="field__input"
-                      type="tel"
-                      value={smsTestPhone}
-                      onChange={(e) => setSmsTestPhone(e.target.value)}
-                      placeholder="+61412345678"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    disabled={isTestingSms || !smsTestPhone}
-                    onClick={() => { void handleSmsTest(); }}
-                  >
-                    {isTestingSms ? "Sending…" : "Send test SMS"}
-                  </button>
-                </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  data-testid="sms-save-btn"
+                  disabled={isSmsSaving}
+                >
+                  {isSmsSaving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={isTestingSms || !smsEnabled || !isSmsProviderConfiguredForTest()}
+                  onClick={() => {
+                    setSmsTestResult(null);
+                    setSmsTestPhone("");
+                    setShowTestSmsModal(true);
+                  }}
+                >
+                  {isTestingSms ? "Sending…" : "Send test SMS"}
+                </button>
               </div>
-            )}
+            </form>
           </div>
         </div>
       </div>
@@ -1410,6 +1420,53 @@ export default function SettingsPage() {
                 className="btn btn--primary"
                 disabled={!testEmailRecipient || isTestingSmtp}
                 onClick={() => { void handleSmtpTest(); }}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Test SMS modal */}
+      {showTestSmsModal && (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="test-sms-modal-title"
+          onKeyDown={(e) => { if (e.key === "Escape") closeTestSmsModal(); }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeTestSmsModal(); }}
+        >
+          <div className="dialog">
+            <h2 id="test-sms-modal-title" className="dialog__title">Send test SMS</h2>
+            <div className="dialog__body">
+              <div className="field">
+                <label className="field__label" htmlFor="test-sms-recipient">Recipient phone number</label>
+                <input
+                  id="test-sms-recipient"
+                  className="field__input"
+                  type="tel"
+                  value={smsTestPhone}
+                  onChange={(e) => setSmsTestPhone(e.target.value)}
+                  placeholder="+61412345678"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="dialog__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={closeTestSmsModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!smsTestPhone.trim() || isTestingSms}
+                onClick={() => { void handleSmsTest(); }}
               >
                 Send
               </button>

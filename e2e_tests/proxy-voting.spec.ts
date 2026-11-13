@@ -19,10 +19,11 @@
 
 import { test, expect, RUN_SUFFIX } from "./fixtures";
 import type { APIRequestContext } from "@playwright/test";
-import { getTestOtp, makeAdminApi } from "./workflows/helpers";
+import { generateOcPlanNumber, getTestOtp, makeAdminApi } from "./workflows/helpers";
 
 // ── Scenario 2: mixed voter (own lot + proxy lot) ─────────────────────────────
 const MIXED_BUILDING_NAME = `E2E Mixed Proxy Test Building-${RUN_SUFFIX}`;
+const MIXED_BUILDING_OC_PLAN = generateOcPlanNumber(MIXED_BUILDING_NAME);
 const MIXED_LOT_A_NUMBER = "MX-A";
 const MIXED_LOT_A_OWNER_EMAIL = "mixed-voter@test.com"; // owns MX-A directly
 const MIXED_LOT_C_NUMBER = "MX-C";
@@ -70,6 +71,7 @@ test.describe("Proxy voter journey", () => {
     const buildings = (await buildingsRes.json()) as {
       id: string;
       name: string;
+      oc_plan_number: string | null;
     }[];
     let building = buildings.find((b) => b.name === MIXED_BUILDING_NAME);
     if (!building) {
@@ -77,9 +79,18 @@ test.describe("Proxy voter journey", () => {
         data: {
           name: MIXED_BUILDING_NAME,
           manager_email: "mixed-mgr@test.com",
+          oc_plan_number: MIXED_BUILDING_OC_PLAN,
         },
       });
-      building = (await res.json()) as { id: string; name: string };
+      building = (await res.json()) as {
+        id: string;
+        name: string;
+        oc_plan_number: string | null;
+      };
+    } else if (!building.oc_plan_number?.trim()) {
+      await api.patch(`/api/admin/buildings/${building.id}`, {
+        data: { oc_plan_number: MIXED_BUILDING_OC_PLAN },
+      });
     }
     mixedBuildingId = building.id;
 

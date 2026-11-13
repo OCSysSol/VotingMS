@@ -150,6 +150,7 @@ export interface GeneralMeetingDetail {
   id: string;
   building_id?: string;
   building_name: string;
+  oc_plan_number?: string | null;
   title: string;
   status: string;
   meeting_at: string;

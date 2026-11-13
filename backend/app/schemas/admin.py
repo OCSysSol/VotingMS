@@ -637,6 +637,7 @@ class GeneralMeetingDetail(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID | None = None
     building_name: str
+    oc_plan_number: str | None = None
     title: str
     status: str
     meeting_at: datetime

@@ -2315,7 +2315,11 @@ async def count_general_meetings(
 
 async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSession) -> dict:
     result = await db.execute(
-        select(GeneralMeeting, Building.name.label("building_name"))
+        select(
+            GeneralMeeting,
+            Building.name.label("building_name"),
+            Building.oc_plan_number.label("oc_plan_number"),
+        )
         .join(Building, GeneralMeeting.building_id == Building.id)
         .where(GeneralMeeting.id == general_meeting_id)
     )
@@ -2323,7 +2327,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
     if row is None:
         raise HTTPException(status_code=404, detail="General Meeting not found")
 
-    general_meeting, building_name = row
+    general_meeting, building_name, oc_plan_number = row
 
     # Load motions
     motions_result = await db.execute(
@@ -2817,6 +2821,7 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
         "id": general_meeting.id,
         "building_id": general_meeting.building_id,
         "building_name": building_name,
+        "oc_plan_number": oc_plan_number,
         "title": general_meeting.title,
         "status": effective.value if hasattr(effective, "value") else effective,
         "meeting_at": general_meeting.meeting_at,
