@@ -65,6 +65,7 @@ test.describe.serial("Admin Lot Owners", () => {
     await page.getByLabel("Lot Number").fill(uniqueLot);
     await page.getByRole("textbox", { name: "New lot owner email" }).fill("lot1@e2e.com");
     await page.getByLabel("Unit Entitlement").fill("50");
+    await page.getByRole("button", { name: "Add owner", exact: true }).click();
     await page.getByRole("button", { name: "Add Lot Owner" }).last().click();
 
     await expect(page.getByText(uniqueLot)).toBeVisible({ timeout: 15000 });
