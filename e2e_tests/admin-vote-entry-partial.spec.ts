@@ -235,6 +235,110 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
     // M2 Against total should be 80 (Lot B only)
     await expect(page.getByText("80").first()).toBeVisible({ timeout: 10000 });
   });
+
+  test("Gap 1.4: lot owner votes on M1, then admin enters vote for that same lot on remaining motion M2 via UI", async ({ page }) => {
+    test.setTimeout(120000);
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await makeAdminApi(baseURL);
+
+    // Create a fresh open meeting on the same building with 2 motions
+    const partialMeetingTitle = `E2E Partial Lot UI Entry-${RUN_SUFFIX}-${Date.now()}`;
+    const partialMeetingId = await createOpenMeeting(api, buildingId, partialMeetingTitle, [
+      {
+        title: MOTION1_TITLE,
+        description: "Approve the annual budget.",
+        orderIndex: 1,
+        motionType: "general",
+      },
+      {
+        title: MOTION2_TITLE,
+        description: "Approve the bylaw change.",
+        orderIndex: 2,
+        motionType: "general",
+      },
+    ]);
+
+    try {
+      await clearBallots(api, partialMeetingId);
+
+      const detailRes = await api.get(`/api/admin/general-meetings/${partialMeetingId}`);
+      expect(detailRes.ok()).toBe(true);
+      const detail = (await detailRes.json()) as { motions: { id: string; display_order: number }[] };
+      const m1 = detail.motions.find((m) => m.display_order === 1)!;
+      const m2 = detail.motions.find((m) => m.display_order === 2)!;
+
+      // Hide M2 initially so Lot A owner only votes on M1
+      const hideRes = await api.patch(`/api/admin/motions/${m2.id}/visibility`, {
+        data: { is_visible: false },
+      });
+      expect(hideRes.ok()).toBe(true);
+
+      // Lot A owner submits ballot for M1 ("yes")
+      await submitBallotViaApi(api, LOT_A_EMAIL, partialMeetingId, [lotAId], [
+        { motion_id: m1.id, choice: "yes" },
+      ]);
+
+      // Admin makes M2 visible
+      const showRes = await api.patch(`/api/admin/motions/${m2.id}/visibility`, {
+        data: { is_visible: true },
+      });
+      expect(showRes.ok()).toBe(true);
+
+      // Navigate to the meeting detail page and open Enter In-Person Votes
+      await page.goto(`/admin/general-meetings/${partialMeetingId}`);
+      await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+
+      await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
+      const selectDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
+      await expect(selectDialog).toBeVisible({ timeout: 10000 });
+
+      // Select Lot A (which already voted on M1) and proceed to Step 2
+      const lotACheckbox = selectDialog.getByLabel(`Select lot ${LOT_A}`);
+      await expect(lotACheckbox).toBeVisible({ timeout: 5000 });
+      await expect(lotACheckbox).toBeEnabled();
+      await lotACheckbox.check();
+
+      await selectDialog.getByRole("button", { name: /Proceed to vote entry/ }).click();
+      const voteGrid = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+      await expect(voteGrid).toBeVisible({ timeout: 10000 });
+
+      // M1 is already voted online for Lot A -> disabled; M2 is unvoted -> enabled
+      const m1YesBtn = voteGrid.getByRole("button", { name: `yes for lot ${LOT_A} motion ${MOTION1_TITLE}` });
+      const m2NoBtn = voteGrid.getByRole("button", { name: `no for lot ${LOT_A} motion ${MOTION2_TITLE}` });
+      await expect(m1YesBtn).toBeDisabled();
+      await expect(m2NoBtn).toBeEnabled();
+
+      // Admin selects Against ("no") for Lot A on M2 and submits
+      await m2NoBtn.click();
+      await expect(m2NoBtn).toHaveAttribute("aria-pressed", "true");
+
+      await voteGrid.getByRole("button", { name: "Submit votes" }).click();
+      const confirmDialog = page.getByRole("dialog", { name: "Submit in-person votes?" });
+      await expect(confirmDialog).toBeVisible({ timeout: 10000 });
+      await confirmDialog.getByRole("button", { name: "Confirm" }).click();
+
+      // Panel closes on successful submission
+      await expect(voteGrid).not.toBeVisible({ timeout: 15000 });
+
+      // Close meeting and verify both M1 (Yes from owner) and M2 (No from admin) are recorded for Lot A
+      await api.post(`/api/admin/general-meetings/${partialMeetingId}/close`);
+      const motionDetails = await getMeetingDetails(api, partialMeetingId);
+      const finalM1 = motionDetails.find((m) => m.id === m1.id)!;
+      const finalM2 = motionDetails.find((m) => m.id === m2.id)!;
+
+      expect(finalM1.tally.yes.voter_count).toBe(1);
+      expect(finalM1.tally.yes.entitlement_sum).toBe(100);
+      expect(finalM1.voter_lists.yes.some((v) => v.lot_number === LOT_A)).toBe(true);
+
+      expect(finalM2.tally.no.voter_count).toBe(1);
+      expect(finalM2.tally.no.entitlement_sum).toBe(100);
+      expect(finalM2.voter_lists.no.some((v) => v.lot_number === LOT_A)).toBe(true);
+    } finally {
+      await api.post(`/api/admin/general-meetings/${partialMeetingId}/close`).catch(() => {});
+      await api.delete(`/api/admin/general-meetings/${partialMeetingId}`).catch(() => {});
+      await api.dispose();
+    }
+  });
 });
 
 // ── Gap 2: Voter name displayed in admin results UI ───────────────────────────
