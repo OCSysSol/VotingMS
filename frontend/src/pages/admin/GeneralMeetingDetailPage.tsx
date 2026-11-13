@@ -759,41 +759,43 @@ export default function GeneralMeetingDetailPage() {
           <h1 style={{ margin: 0 }}>{meeting.title}</h1>
           <StatusBadge status={meeting.status} />
         </div>
-        {meeting.status === "pending" && (
-          <StartGeneralMeetingButton
-            meetingId={meetingId!}
-            onSuccess={handleCloseSuccess}
-          />
-        )}
-        {meeting.status === "open" && (
-          <CloseGeneralMeetingButton
-            meetingId={meetingId!}
-            meetingTitle={meeting.title}
-            onSuccess={handleCloseSuccess}
-          />
-        )}
-        {meeting.status === "closed" && meeting.closed_at && (
-          <button
-            type="button"
-            className="btn btn--primary"
-            onClick={() => {
-              setReopenMeetingError(null);
-              setShowReopenMeetingDialog(true);
-            }}
-          >
-            Reopen Meeting
-          </button>
-        )}
-        {(meeting.status === "closed" || meeting.status === "pending") && (
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={handleDelete}
-            disabled={deleteMutation.isPending}
-          >
-            Delete Meeting
-          </button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          {meeting.status === "pending" && (
+            <StartGeneralMeetingButton
+              meetingId={meetingId!}
+              onSuccess={handleCloseSuccess}
+            />
+          )}
+          {meeting.status === "open" && (
+            <CloseGeneralMeetingButton
+              meetingId={meetingId!}
+              meetingTitle={meeting.title}
+              onSuccess={handleCloseSuccess}
+            />
+          )}
+          {meeting.status === "closed" && meeting.closed_at && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                setReopenMeetingError(null);
+                setShowReopenMeetingDialog(true);
+              }}
+            >
+              Reopen Meeting
+            </button>
+          )}
+          {(meeting.status === "closed" || meeting.status === "pending") && (
+            <button
+              type="button"
+              className="btn btn--danger"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              Delete Meeting
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="meeting-detail-layout">

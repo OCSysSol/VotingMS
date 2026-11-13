@@ -909,29 +909,68 @@ function AddForm({
   onCancel: () => void;
 }) {
   const [lotNumber, setLotNumber] = useState("");
-  const [email, setEmail] = useState("");
   const [unitEntitlement, setUnitEntitlement] = useState("");
   const [financialPosition, setFinancialPosition] = useState("normal");
   const [formError, setFormError] = useState<string | null>(null);
+
+  type DraftPerson = {
+    id: string;
+    email: string;
+    given_name: string;
+    surname: string;
+    phone_number: string;
+    suggestedPerson: PersonOut | null;
+  };
+
+  const draftIdRef = useRef(0);
+  const [owners, setOwners] = useState<DraftPerson[]>([]);
+  const [newOwnerEmail, setNewOwnerEmail] = useState("");
+  const [newOwnerGivenName, setNewOwnerGivenName] = useState("");
+  const [newOwnerSurname, setNewOwnerSurname] = useState("");
+  const [newOwnerPhone, setNewOwnerPhone] = useState("");
+  const [newOwnerSuggestedPerson, setNewOwnerSuggestedPerson] = useState<PersonOut | null>(null);
+  const [ownerError, setOwnerError] = useState<string | null>(null);
+  const [editingOwnerId, setEditingOwnerId] = useState<string | null>(null);
+  const [editOwnerEmail, setEditOwnerEmail] = useState("");
+  const [editOwnerGivenName, setEditOwnerGivenName] = useState("");
+  const [editOwnerSurname, setEditOwnerSurname] = useState("");
+  const [editOwnerPhone, setEditOwnerPhone] = useState("");
+
+  const [proxy, setProxy] = useState<DraftPerson | null>(null);
+  const [newProxyEmail, setNewProxyEmail] = useState("");
+  const [proxyGivenName, setProxyGivenName] = useState("");
+  const [proxySurname, setProxySurname] = useState("");
+  const [proxyPhone, setProxyPhone] = useState("");
+  const [proxySuggestedPerson, setProxySuggestedPerson] = useState<PersonOut | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+
+  const [pendingConflict, setPendingConflict] = useState<
+    | { kind: "owner"; ownerIndex: number; person: PersonOut; email: string }
+    | { kind: "proxy"; person: PersonOut; email: string }
+    | null
+  >(null);
+  const [pendingOwners, setPendingOwners] = useState<DraftPerson[] | null>(null);
+  const [pendingProxy, setPendingProxy] = useState<DraftPerson | null>(null);
 
   const overlayRef = useRef<HTMLDivElement>(null);
 
   // Close on Escape
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !pendingConflict) {
         onCancel();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
+  }, [onCancel, pendingConflict]);
 
   const addMutation = useMutation<LotOwner, Error, LotOwnerCreateRequest>({
     mutationFn: (data) => addLotOwner(buildingId, data),
     onSuccess: () => {
       setLotNumber("");
-      setEmail("");
+      setOwners([]);
+      setProxy(null);
       setUnitEntitlement("");
       setFormError(null);
       onSuccess();
@@ -940,6 +979,182 @@ function AddForm({
       setFormError(err.message);
     },
   });
+
+  function createDraftPerson(
+    email: string,
+    givenName: string,
+    surname: string,
+    phoneNumber: string,
+    suggestedPerson: PersonOut | null
+  ): DraftPerson {
+    return {
+      id: `draft-owner-${draftIdRef.current++}`,
+      email: email.trim().toLowerCase(),
+      given_name: givenName.trim(),
+      surname: surname.trim(),
+      phone_number: phoneNumber.trim(),
+      suggestedPerson,
+    };
+  }
+
+  function handleAddOwner() {
+    setOwnerError(null);
+    const email = newOwnerEmail.trim().toLowerCase();
+    if (!email) {
+      setOwnerError("Email is required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setOwnerError("Please enter a valid email address.");
+      return;
+    }
+    if (owners.some((owner) => owner.email === email)) {
+      setOwnerError("This owner email has already been added.");
+      return;
+    }
+    setOwners((current) => [
+      ...current,
+      createDraftPerson(
+        email,
+        newOwnerGivenName,
+        newOwnerSurname,
+        newOwnerPhone,
+        newOwnerSuggestedPerson
+      ),
+    ]);
+    setNewOwnerEmail("");
+    setNewOwnerGivenName("");
+    setNewOwnerSurname("");
+    setNewOwnerPhone("");
+    setNewOwnerSuggestedPerson(null);
+  }
+
+  function handleStartOwnerEdit(owner: DraftPerson) {
+    setEditingOwnerId(owner.id);
+    setEditOwnerEmail(owner.email);
+    setEditOwnerGivenName(owner.given_name);
+    setEditOwnerSurname(owner.surname);
+    setEditOwnerPhone(owner.phone_number);
+    setOwnerError(null);
+  }
+
+  function handleSaveOwnerEdit(ownerId: string) {
+    setOwnerError(null);
+    const email = editOwnerEmail.trim().toLowerCase();
+    if (!email) {
+      setOwnerError("Email is required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setOwnerError("Please enter a valid email address.");
+      return;
+    }
+    if (owners.some((owner) => owner.id !== ownerId && owner.email === email)) {
+      setOwnerError("This owner email has already been added.");
+      return;
+    }
+    setOwners((current) =>
+      current.map((owner) =>
+        owner.id === ownerId
+          ? {
+              ...owner,
+              email,
+              given_name: editOwnerGivenName.trim(),
+              surname: editOwnerSurname.trim(),
+              phone_number: editOwnerPhone.trim(),
+            }
+          : owner
+      )
+    );
+    setEditingOwnerId(null);
+  }
+
+  function handleSetProxy() {
+    setProxyError(null);
+    const email = newProxyEmail.trim().toLowerCase();
+    if (!email) {
+      setProxyError("Proxy email is required.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setProxyError("Please enter a valid email address.");
+      return;
+    }
+    setProxy(
+      createDraftPerson(
+        email,
+        proxyGivenName,
+        proxySurname,
+        proxyPhone,
+        proxySuggestedPerson
+      )
+    );
+    setNewProxyEmail("");
+    setProxyGivenName("");
+    setProxySurname("");
+    setProxyPhone("");
+    setProxySuggestedPerson(null);
+  }
+
+  function hasPersonConflict(
+    draft: DraftPerson,
+    suggested: PersonOut | null
+  ): boolean {
+    if (!suggested) return false;
+    return (
+      (draft.given_name !== "" && draft.given_name !== (suggested.given_name ?? "")) ||
+      (draft.surname !== "" && draft.surname !== (suggested.surname ?? "")) ||
+      (draft.phone_number !== "" && draft.phone_number !== (suggested.phone_number ?? ""))
+    );
+  }
+
+  function submitDrafts(nextOwners: DraftPerson[], nextProxy: DraftPerson | null) {
+    const ownerConflictIndex = nextOwners.findIndex((owner) =>
+      hasPersonConflict(owner, owner.suggestedPerson)
+    );
+    if (ownerConflictIndex >= 0) {
+      const owner = nextOwners[ownerConflictIndex];
+      setPendingOwners(nextOwners);
+      setPendingProxy(nextProxy);
+      setPendingConflict({
+        kind: "owner",
+        ownerIndex: ownerConflictIndex,
+        person: owner.suggestedPerson!,
+        email: owner.email,
+      });
+      return;
+    }
+    if (nextProxy && hasPersonConflict(nextProxy, nextProxy.suggestedPerson)) {
+      setPendingOwners(nextOwners);
+      setPendingProxy(nextProxy);
+      setPendingConflict({
+        kind: "proxy",
+        person: nextProxy.suggestedPerson!,
+        email: nextProxy.email,
+      });
+      return;
+    }
+
+    addMutation.mutate({
+      lot_number: lotNumber.trim(),
+      owners: nextOwners.map((owner) => ({
+        email: owner.email,
+        given_name: owner.given_name || null,
+        surname: owner.surname || null,
+        phone_number: owner.phone_number || null,
+      })),
+      proxy: nextProxy
+        ? {
+            email: nextProxy.email,
+            given_name: nextProxy.given_name || null,
+            surname: nextProxy.surname || null,
+            phone_number: nextProxy.phone_number || null,
+          }
+        : null,
+      unit_entitlement: parseInt(unitEntitlement, 10),
+      financial_position: financialPosition,
+    });
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -958,21 +1173,55 @@ function AddForm({
       setFormError("Lot number is required.");
       return;
     }
-    if (!email.trim()) {
-      setFormError("Email is required.");
-      return;
-    }
-    if (!isValidEmail(email)) {
-      setFormError("Please enter a valid email address.");
+    if (owners.length === 0) {
+      setOwnerError("Add at least one owner.");
       return;
     }
 
-    addMutation.mutate({
-      lot_number: lotNumber,
-      emails: [email.trim().toLowerCase()],
-      unit_entitlement: parsed,
-      financial_position: financialPosition,
-    });
+    submitDrafts(owners, proxy);
+  }
+
+  async function handleConflictConfirm() {
+    if (!pendingConflict || !pendingOwners) return;
+    const selectedOwner = pendingConflict.kind === "owner"
+      ? pendingOwners[pendingConflict.ownerIndex]
+      : null;
+    try {
+      await updatePerson(pendingConflict.person.id, {
+        given_name: (selectedOwner?.given_name || pendingProxy?.given_name) || null,
+        surname: (selectedOwner?.surname || pendingProxy?.surname) || null,
+        phone_number: (selectedOwner?.phone_number || pendingProxy?.phone_number) || null,
+      });
+    } catch {
+      if (pendingConflict.kind === "owner") {
+        setOwnerError("Failed to update person record. Please try again.");
+      } else {
+        setProxyError("Failed to update person record. Please try again.");
+      }
+      return;
+    }
+
+    const nextOwners = pendingOwners.map((owner, index) =>
+      pendingConflict.kind === "owner" && index === pendingConflict.ownerIndex
+        ? { ...owner, suggestedPerson: null }
+        : owner
+    );
+    const nextProxy =
+      pendingConflict.kind === "proxy" && pendingProxy
+        ? { ...pendingProxy, suggestedPerson: null }
+        : pendingProxy;
+    setOwners(nextOwners);
+    setProxy(nextProxy);
+    setPendingConflict(null);
+    setPendingOwners(null);
+    setPendingProxy(null);
+    submitDrafts(nextOwners, nextProxy);
+  }
+
+  function handleConflictCancel() {
+    setPendingConflict(null);
+    setPendingOwners(null);
+    setPendingProxy(null);
   }
 
   function handleOverlayClick(e: React.MouseEvent<HTMLDivElement>) {
@@ -982,31 +1231,28 @@ function AddForm({
   }
 
   return (
-    <div
-      className="dialog-overlay"
-      ref={overlayRef}
-      onClick={handleOverlayClick}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="add-modal-title"
-    >
+    <>
       <div
-        className="dialog"
-        style={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}
+        className="dialog-overlay"
+        ref={overlayRef}
+        onClick={handleOverlayClick}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="add-modal-title"
       >
-        <h3
-          id="add-modal-title"
-          className="admin-card__title"
-          style={{ marginBottom: 20 }}
+        <div
+          className="dialog"
+          style={{ maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}
         >
-          Add Lot Owner
-        </h3>
+          <h3
+            id="add-modal-title"
+            className="admin-card__title"
+            style={{ marginBottom: 20 }}
+          >
+            Add Lot Owner
+          </h3>
 
-        <form onSubmit={handleSubmit} className="admin-form">
-          {/* US-ACC-08: required field legend */}
-          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
-            <span aria-hidden="true">*</span> Required field
-          </p>
+          <form onSubmit={handleSubmit} className="admin-form">
           <div className="field">
             {/* US-ACC-08: visible * marker + aria-required on required inputs */}
             <label className="field__label field__label--required" htmlFor="lot-number">
@@ -1022,20 +1268,280 @@ function AddForm({
             />
           </div>
 
-          <div className="field">
-            <label className="field__label field__label--required" htmlFor="lot-email">
-              Email
-            </label>
-            <input
-              id="lot-email"
-              className="field__input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              aria-required="true"
-            />
+          <div className="field" style={{ marginBottom: 20 }}>
+            <label className="field__label">Owners (name + email)</label>
+            <ul
+              style={{ listStyle: "none", padding: 0, margin: "0 0 10px" }}
+              aria-label="Owner email addresses"
+            >
+              {owners.map((owner) => (
+                <li
+                  key={owner.id}
+                  style={{
+                    padding: "8px 0",
+                    borderBottom: "1px solid var(--border-subtle)",
+                    fontSize: "0.875rem",
+                  }}
+                >
+                  {editingOwnerId === owner.id ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <input
+                        className="field__input"
+                        type="email"
+                        placeholder="email@example.com"
+                        value={editOwnerEmail}
+                        onChange={(e) => setEditOwnerEmail(e.target.value)}
+                        aria-label="Edit email"
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input
+                          className="field__input"
+                          type="text"
+                          placeholder="Given name"
+                          value={editOwnerGivenName}
+                          onChange={(e) => setEditOwnerGivenName(e.target.value)}
+                          aria-label="Edit given name"
+                        />
+                        <input
+                          className="field__input"
+                          type="text"
+                          placeholder="Surname"
+                          value={editOwnerSurname}
+                          onChange={(e) => setEditOwnerSurname(e.target.value)}
+                          aria-label="Edit surname"
+                        />
+                      </div>
+                      <input
+                        className="field__input"
+                        type="tel"
+                        placeholder="+61412345678 (optional)"
+                        value={editOwnerPhone}
+                        onChange={(e) => setEditOwnerPhone(e.target.value)}
+                        aria-label="Edit phone number"
+                      />
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button
+                          type="button"
+                          className="btn btn--primary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => handleSaveOwnerEdit(owner.id)}
+                        >
+                          Save
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => setEditingOwnerId(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span>
+                        {owner.given_name || owner.surname
+                          ? `${owner.given_name} ${owner.surname}`.trim()
+                          : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
+                        }
+                        {" "}
+                        <span style={{ color: "var(--text-secondary)" }}>{owner.email}</span>
+                        {owner.phone_number && (
+                          <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                            {owner.phone_number}
+                          </span>
+                        )}
+                      </span>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => handleStartOwnerEdit(owner)}
+                          aria-label={`Edit ${owner.email}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn--secondary"
+                          style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                          onClick={() => setOwners((current) => current.filter((entry) => entry.id !== owner.id))}
+                          aria-label={`Remove ${owner.email}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 8 }}>
+              <PersonEmailAutocomplete
+                id="add-lot-owner-email-input"
+                value={newOwnerEmail}
+                onChange={(value) => {
+                  setNewOwnerEmail(value);
+                  setNewOwnerSuggestedPerson(null);
+                }}
+                onSelect={(person) => {
+                  setNewOwnerEmail(person.email ?? "");
+                  setNewOwnerGivenName(person.given_name ?? "");
+                  setNewOwnerSurname(person.surname ?? "");
+                  setNewOwnerPhone(person.phone_number ?? "");
+                  setNewOwnerSuggestedPerson(person);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    handleAddOwner();
+                  }
+                }}
+                placeholder="email@example.com"
+                aria-label="New lot owner email"
+                disabled={addMutation.isPending}
+              />
+              <div style={{ display: "flex", gap: 6 }}>
+                <input
+                  className="field__input"
+                  type="text"
+                  placeholder="Given name (optional)"
+                  value={newOwnerGivenName}
+                  onChange={(e) => setNewOwnerGivenName(e.target.value)}
+                  aria-label="New owner given name"
+                />
+                <input
+                  className="field__input"
+                  type="text"
+                  placeholder="Surname (optional)"
+                  value={newOwnerSurname}
+                  onChange={(e) => setNewOwnerSurname(e.target.value)}
+                  aria-label="New owner surname"
+                />
+              </div>
+              <input
+                className="field__input"
+                type="tel"
+                placeholder="Phone number (optional)"
+                value={newOwnerPhone}
+                onChange={(e) => setNewOwnerPhone(e.target.value)}
+                aria-label="New owner phone number"
+              />
+              <button
+                type="button"
+                className="btn btn--secondary"
+                onClick={handleAddOwner}
+                disabled={addMutation.isPending}
+                style={{ whiteSpace: "nowrap", alignSelf: "flex-start" }}
+              >
+                Add owner
+              </button>
+            </div>
+            {ownerError && (
+              <p className="field__error" style={{ marginTop: 6 }} role="alert">
+                {ownerError}
+              </p>
+            )}
           </div>
 
+          <div className="field" style={{ marginBottom: 20 }}>
+            <label className="field__label">Proxy</label>
+            {proxy ? (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 0", fontSize: "0.875rem" }}>
+                <span>
+                  {(proxy.given_name || proxy.surname)
+                    ? `${proxy.given_name} ${proxy.surname}`.trim()
+                    : <em style={{ color: "var(--text-muted)" }}>— no name —</em>
+                  }
+                  {" "}
+                  <span style={{ color: "var(--text-secondary)" }}>{proxy.email}</span>
+                  {proxy.phone_number && (
+                    <span style={{ color: "var(--text-muted)", marginLeft: 6 }}>
+                      {proxy.phone_number}
+                    </span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  style={{ padding: "3px 10px", fontSize: "0.75rem" }}
+                  onClick={() => setProxy(null)}
+                  disabled={addMutation.isPending}
+                >
+                  Remove proxy
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <PersonEmailAutocomplete
+                  id="add-lot-proxy-input"
+                  value={newProxyEmail}
+                  onChange={(value) => {
+                    setNewProxyEmail(value);
+                    setProxySuggestedPerson(null);
+                  }}
+                  onSelect={(person) => {
+                    setNewProxyEmail(person.email ?? "");
+                    setProxyGivenName(person.given_name ?? "");
+                    setProxySurname(person.surname ?? "");
+                    setProxyPhone(person.phone_number ?? "");
+                    setProxySuggestedPerson(person);
+                  }}
+                  placeholder="proxy@example.com"
+                  aria-label="Set proxy email"
+                  disabled={addMutation.isPending}
+                />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Given name (optional)"
+                    value={proxyGivenName}
+                    onChange={(e) => setProxyGivenName(e.target.value)}
+                    aria-label="Proxy given name"
+                  />
+                  <input
+                    className="field__input"
+                    type="text"
+                    placeholder="Surname (optional)"
+                    value={proxySurname}
+                    onChange={(e) => setProxySurname(e.target.value)}
+                    aria-label="Proxy surname"
+                  />
+                </div>
+                <input
+                  className="field__input"
+                  type="tel"
+                  placeholder="Phone number (optional)"
+                  value={proxyPhone}
+                  onChange={(e) => setProxyPhone(e.target.value)}
+                  aria-label="Proxy phone number"
+                />
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  onClick={handleSetProxy}
+                  disabled={addMutation.isPending}
+                  style={{ whiteSpace: "nowrap", alignSelf: "flex-start" }}
+                >
+                  Set proxy
+                </button>
+              </div>
+            )}
+            {proxyError && (
+              <p className="field__error" style={{ marginTop: 6 }} role="alert">
+                {proxyError}
+              </p>
+            )}
+          </div>
+
+          {/* US-ACC-08: required field legend */}
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
+            <span aria-hidden="true">*</span> Required field
+          </p>
           <div className="field">
             <label className="field__label field__label--required" htmlFor="lot-entitlement">
               Unit Entitlement
@@ -1090,7 +1596,16 @@ function AddForm({
           </div>
         </form>
       </div>
-    </div>
+      </div>
+
+      {pendingConflict && (
+        <PersonConflictModal
+          email={pendingConflict.email}
+          onConfirm={() => { void handleConflictConfirm(); }}
+          onCancel={handleConflictCancel}
+        />
+      )}
+    </>
   );
 }
 

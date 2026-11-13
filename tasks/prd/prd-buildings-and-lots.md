@@ -788,16 +788,21 @@ This document covers all building management, lot owner management, CSV/Excel im
 
 ### US-OC-UI-01: Make OC Plans the primary admin entity
 
-**Status:** Proposed (the OC Plan data model, dual columns, and building/OC search already exist)
+**Status:** Implemented
 
 As an admin, I want the admin navigation and pages to use OC Plans terminology while retaining building names as context.
 
-- [ ] Rename the Buildings navigation item and list heading to “OC Plans”.
-- [ ] On the selected OC Plan page, show “OC Plans” as the title and the building name as a subtitle; show the OC plan number where available.
-- [ ] Add a case-insensitive owner filter on the OC Plan detail page matching lot number, owner name/email, and proxy name/email; clearing it restores the full list.
-- [ ] Make Add Lot Owner use the same layout, field order, labels, and styling as Edit Lot Owner while preserving add defaults.
-- [ ] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it.
-- [ ] Preserve existing Building IDs and relationships; no data model rename is required.
+- [x] Rename the Buildings navigation item and list heading to “OC Plans”.
+- [x] On the selected OC Plan page, show the actual OC Plan field value as the title and the building name as a subtitle.
+- [x] Add a case-insensitive owner filter on the OC Plan detail page matching lot number, owner name/email, and proxy name/email; clearing it restores the full list.
+- [x] Make Add Lot Owner use the same layout, field order, labels, and styling as Edit Lot Owner while preserving add defaults.
+- [x] Add Lot Owner must accept owner names/contact details and a proxy in the same modal, without creating a partial lot if any part of the create request fails.
+- [x] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it.
+- [x] On Create General Meeting, label the entity selector “OC Plan”, show the OC plan number in selectable options, and use OC Plan wording for its validation/error copy.
+- [x] Right-align the Meetings and owner-list search fields to match the OC Plans search layout.
+- [x] Keep one meetings search field covering titles, OC Plans, and buildings.
+- [x] Keep Reopen and Delete adjacent and right-aligned on the meeting detail page.
+- [x] Preserve existing Building IDs and relationships; no data model rename is required.
 
 ## Functional Requirements
 

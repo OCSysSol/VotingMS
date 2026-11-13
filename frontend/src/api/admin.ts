@@ -195,11 +195,27 @@ export interface EmailDeliveryInfo {
 // Request types
 // ---------------------------------------------------------------------------
 
+export interface LotPersonCreateRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+  phone_number?: string | null;
+}
+
+export interface LotProxyCreateRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+  phone_number?: string | null;
+}
+
 export interface LotOwnerCreateRequest {
   lot_number: string;
   given_name?: string | null;
   surname?: string | null;
-  emails: string[];
+  emails?: string[];
+  owners?: LotPersonCreateRequest[];
+  proxy?: LotProxyCreateRequest | null;
   unit_entitlement: number;
   financial_position?: string;
 }

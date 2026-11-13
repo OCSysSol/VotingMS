@@ -19,6 +19,10 @@ export interface BuildingSearchComboboxProps {
   onChange: (id: string, name: string) => void;
   placeholder?: string;
   id?: string;
+  displayLabel?: (building: Building) => string;
+  listboxLabel?: string;
+  clearLabel?: string;
+  emptyLabel?: string;
 }
 
 export default function BuildingSearchCombobox({
@@ -26,6 +30,10 @@ export default function BuildingSearchCombobox({
   onChange,
   placeholder = "Search buildings",
   id = "building-combobox",
+  displayLabel = (building) => building.name,
+  listboxLabel = "Buildings",
+  clearLabel = "All buildings",
+  emptyLabel = "No buildings found",
 }: BuildingSearchComboboxProps) {
   const [inputText, setInputText] = useState("");
   const [isOpen, setIsOpen] = useState(false);
@@ -65,13 +73,13 @@ export default function BuildingSearchCombobox({
   useEffect(() => {
     if (!initialised) {
       if (value && resolvedBuilding) {
-        setInputText(resolvedBuilding.name);
+        setInputText(displayLabel(resolvedBuilding));
         setInitialised(true);
       } else if (!value) {
         setInitialised(true);
       }
     }
-  }, [value, resolvedBuilding, initialised]);
+  }, [value, resolvedBuilding, initialised, displayLabel]);
 
   // Close on outside click
   useEffect(() => {
@@ -95,8 +103,9 @@ export default function BuildingSearchCombobox({
 
   function selectBuilding(building: Building | null) {
     if (building) {
-      setInputText(building.name);
-      onChange(building.id, building.name);
+      const label = displayLabel(building);
+      setInputText(label);
+      onChange(building.id, label);
     } else {
       setInputText("");
       onChange("", "");
@@ -180,7 +189,7 @@ export default function BuildingSearchCombobox({
         <ul
           id={listboxId}
           role="listbox"
-          aria-label="Buildings"
+          aria-label={listboxLabel}
           style={{
             position: "absolute",
             top: "100%",
@@ -212,7 +221,7 @@ export default function BuildingSearchCombobox({
               fontStyle: "italic",
             }}
           >
-            All buildings
+            {clearLabel}
           </li>
           {buildings.map((b, i) => (
             <li
@@ -235,7 +244,7 @@ export default function BuildingSearchCombobox({
                 borderTop: "1px solid var(--border-subtle)",
               }}
             >
-              {b.name}
+              {displayLabel(b)}
             </li>
           ))}
           {buildings.length === 0 && (
@@ -249,7 +258,7 @@ export default function BuildingSearchCombobox({
                 borderTop: "1px solid var(--border-subtle)",
               }}
             >
-              No buildings found
+              {emptyLabel}
             </li>
           )}
         </ul>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -30,21 +30,6 @@ function renderPage(initialSearch = "") {
   );
 }
 
-/** Helper: open the building combobox and select an option by display text.
- *  Uses fireEvent.mouseDown on the option (matching the onMouseDown handler in the component)
- *  which also calls e.preventDefault() to keep focus on the input.
- */
-async function selectBuildingOption(_user: ReturnType<typeof userEvent.setup>, optionText: string) {
-  const combobox = screen.getByRole("combobox", { name: "Building" });
-  // Click to open (safe even if already open)
-  fireEvent.click(combobox);
-  await waitFor(() => {
-    expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument();
-  });
-  const option = screen.getByRole("option", { name: optionText });
-  fireEvent.mouseDown(option);
-}
-
 describe("GeneralMeetingListPage", () => {
   // --- Happy path ---
 
@@ -55,6 +40,17 @@ describe("GeneralMeetingListPage", () => {
     expect(screen.getByRole("button", { name: "Create General Meeting" })).toBeInTheDocument();
     // Loading message is inside the table body
     expect(screen.getByText("Loading General Meetings...")).toBeInTheDocument();
+  });
+
+  it("renders one search field aligned to the right of the toolbar", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    expect(screen.getAllByRole("searchbox")).toHaveLength(1);
+    expect(screen.queryByRole("combobox", { name: "Building" })).not.toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "Search" }).parentElement)
+      .toHaveStyle({ marginLeft: "auto" });
   });
 
   it("sends the shared meeting, OC Plan, and building search to list and count", async () => {
@@ -172,306 +168,6 @@ describe("GeneralMeetingListPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Failed to load General Meetings.")).toBeInTheDocument();
     });
-  });
-
-  // --- Building filter combobox ---
-
-  it("renders building combobox input with placeholder 'All buildings'", async () => {
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument();
-    });
-    const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-    expect(combobox.placeholder).toBe("All buildings");
-    expect(combobox.value).toBe("");
-  });
-
-  it("opens dropdown on focus and shows All buildings option", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("combobox", { name: "Building" }));
-    await waitFor(() => {
-      expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument();
-    });
-    expect(screen.getByRole("option", { name: "All buildings" })).toBeInTheDocument();
-  });
-
-  it("shows building options from the buildings API (only non-archived)", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("combobox", { name: "Building" }));
-    await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Alpha Tower" })).toBeInTheDocument();
-    });
-    expect(screen.getByRole("option", { name: "Beta Court" })).toBeInTheDocument();
-  });
-
-  it("does not show archived buildings in the dropdown", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    fireEvent.click(screen.getByRole("combobox", { name: "Building" }));
-    await waitFor(() => {
-      expect(screen.getByRole("option", { name: "Alpha Tower" })).toBeInTheDocument();
-    });
-    expect(screen.queryByRole("option", { name: "Gamma House" })).not.toBeInTheDocument();
-  });
-
-  it("shows 'No buildings found' when search has no matches", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    await user.type(combobox, "ZZZNONEXISTENT");
-    await waitFor(() => {
-      expect(screen.getByText("No buildings found")).toBeInTheDocument();
-    });
-  });
-
-  it("filters meetings when a building is selected (sends building_id to server)", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-      expect(screen.getByText("2023 AGM")).toBeInTheDocument();
-      expect(screen.getByText("2026 AGM")).toBeInTheDocument();
-    });
-    await selectBuildingOption(user, "Alpha Tower");
-    // Only Alpha Tower meetings (agm1 / 2024 AGM, agm3 / 2026 AGM) should show
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    expect(screen.getByText("2026 AGM")).toBeInTheDocument();
-    expect(screen.queryByText("2023 AGM")).not.toBeInTheDocument();
-  });
-
-  it("selecting the other building shows only that building's meetings", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("2023 AGM")).toBeInTheDocument();
-    });
-    await selectBuildingOption(user, "Beta Court");
-    await waitFor(() => {
-      expect(screen.getByText("2023 AGM")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
-    expect(screen.queryByText("2026 AGM")).not.toBeInTheDocument();
-  });
-
-  it("selecting All buildings after filtering shows all meetings", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    await selectBuildingOption(user, "Beta Court");
-    await waitFor(() => {
-      expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
-    });
-    await selectBuildingOption(user, "All buildings");
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    expect(screen.getByText("2023 AGM")).toBeInTheDocument();
-    expect(screen.getByText("2026 AGM")).toBeInTheDocument();
-  });
-
-  it("selected building name appears in combobox input after selection", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    await selectBuildingOption(user, "Alpha Tower");
-    const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-    expect(combobox.value).toBe("Alpha Tower");
-  });
-
-  it("combobox input is cleared when All buildings is selected", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    await selectBuildingOption(user, "Alpha Tower");
-    await selectBuildingOption(user, "All buildings");
-    const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-    expect(combobox.value).toBe("");
-  });
-
-  it("reads building URL param on mount and shows building name in combobox", async () => {
-    renderPage("?building=b2");
-    await waitFor(() => {
-      // Should show only Beta Court meeting
-      expect(screen.getByText("2023 AGM")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
-    expect(screen.queryByText("2026 AGM")).not.toBeInTheDocument();
-    // Combobox shows building name after init
-    await waitFor(() => {
-      const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(combobox.value).toBe("Beta Court");
-    });
-  });
-
-  it("pre-selects b1 from URL param and shows only Alpha Tower meetings", async () => {
-    renderPage("?building=b1");
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    expect(screen.getByText("2026 AGM")).toBeInTheDocument();
-    expect(screen.queryByText("2023 AGM")).not.toBeInTheDocument();
-    await waitFor(() => {
-      const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(combobox.value).toBe("Alpha Tower");
-    });
-  });
-
-  it("shows no meetings when URL param building id does not match any building", async () => {
-    renderPage("?building=nonexistent");
-    await waitFor(() => {
-      // No match → server returns empty
-      expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
-      expect(screen.queryByText("2023 AGM")).not.toBeInTheDocument();
-      expect(screen.queryByText("2026 AGM")).not.toBeInTheDocument();
-    });
-  });
-
-  it("Escape key closes the combobox dropdown", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-    fireEvent.keyDown(combobox, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Buildings" })).not.toBeInTheDocument());
-  });
-
-  it("ArrowDown + Enter selects the first building option", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    // Wait for buildings to load before keyboard navigation
-    await waitFor(() => expect(screen.getByRole("option", { name: "Alpha Tower" })).toBeInTheDocument());
-    // First ArrowDown moves to "All buildings" (index 0)
-    act(() => { fireEvent.keyDown(combobox, { key: "ArrowDown" }); });
-    // Second ArrowDown moves to first building (index 1 = Alpha Tower)
-    act(() => { fireEvent.keyDown(combobox, { key: "ArrowDown" }); });
-    // Press Enter to select the highlighted option (should be Alpha Tower)
-    act(() => { fireEvent.keyDown(combobox, { key: "Enter" }); });
-    await waitFor(() => {
-      const input = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(input.value).toBe("Alpha Tower");
-    });
-  });
-
-  it("ArrowDown + Enter on All buildings (index 0) clears the selection", async () => {
-    renderPage("?building=b1");
-    await waitFor(() => {
-      const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(combobox.value).toBe("Alpha Tower");
-    });
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-    // ArrowDown to "All buildings" (index 0), then Enter
-    act(() => { fireEvent.keyDown(combobox, { key: "ArrowDown" }); });
-    act(() => { fireEvent.keyDown(combobox, { key: "Enter" }); });
-    await waitFor(() => {
-      const input = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(input.value).toBe("");
-    });
-  });
-
-  it("ArrowUp wraps around from first option to last", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-    // ArrowUp from default (-1 active) wraps to last
-    act(() => { fireEvent.keyDown(combobox, { key: "ArrowUp" }); });
-    // Should show the listbox still open
-    expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument();
-  });
-
-  it("Enter with no item highlighted (activeIndex=-1) does not select anything", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-    // Press Enter without ArrowDown — activeIndex = -1, no selection should happen
-    act(() => { fireEvent.keyDown(combobox, { key: "Enter" }); });
-    // Dropdown closes (because comboOpen is true, Enter with no selection just closes it)
-    // Actually looking at the code: Enter when comboOpen=true with activeIndex=-1:
-    // neither activeIndex===0 nor activeIndex>0 is true → no selection, dropdown stays open
-    // The input value should remain empty
-    const input = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-    expect(input.value).toBe("");
-  });
-
-  it("Enter on closed combobox opens the dropdown", async () => {
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    fireEvent.click(combobox);
-    // Close it
-    act(() => { fireEvent.keyDown(combobox, { key: "Escape" }); });
-    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Buildings" })).not.toBeInTheDocument());
-    // Open it with Enter
-    act(() => { fireEvent.keyDown(combobox, { key: "Enter" }); });
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-  });
-
-  it("typing in combobox while a building is selected clears the building URL param", async () => {
-    const user = userEvent.setup();
-    renderPage("?building=b1");
-    await waitFor(() => {
-      const combobox = screen.getByRole("combobox", { name: "Building" }) as HTMLInputElement;
-      expect(combobox.value).toBe("Alpha Tower");
-    });
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    // Typing should clear the URL building param
-    await user.type(combobox, "x");
-    // All meetings should show again (no building filter)
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-  });
-
-  it("typing in combobox sends name filter to buildings API", async () => {
-    const user = userEvent.setup();
-    let capturedUrl = "";
-    server.use(
-      http.get("http://localhost/api/admin/buildings", ({ request }) => {
-        capturedUrl = request.url;
-        const url = new URL(request.url);
-        const name = url.searchParams.get("name");
-        if (name === "Alpha") {
-          return HttpResponse.json([
-            { id: "b1", name: "Alpha Tower", manager_email: "alpha@example.com", is_archived: false, created_at: "2024-01-01T00:00:00Z" },
-          ]);
-        }
-        return HttpResponse.json([]);
-      })
-    );
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    const combobox = screen.getByRole("combobox", { name: "Building" });
-    await user.type(combobox, "Alpha");
-    await waitFor(() => {
-      expect(capturedUrl).toContain("name=Alpha");
-    });
-  });
-
-  it("dropdown closes when clicking outside", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("combobox", { name: "Building" })).toBeInTheDocument());
-    await user.click(screen.getByRole("combobox", { name: "Building" }));
-    await waitFor(() => expect(screen.getByRole("listbox", { name: "Buildings" })).toBeInTheDocument());
-    // Click on Status filter to move focus away
-    await user.click(screen.getByRole("heading", { name: "General Meetings" }));
-    await waitFor(() => expect(screen.queryByRole("listbox", { name: "Buildings" })).not.toBeInTheDocument());
   });
 
   // --- Status filter ---
@@ -596,50 +292,6 @@ describe("GeneralMeetingListPage", () => {
       expect(screen.queryByText("2023 AGM")).not.toBeInTheDocument();
       expect(screen.queryByText("2026 AGM")).not.toBeInTheDocument();
     });
-  });
-
-  // --- Combined building + status filter ---
-
-  it("applies both building and status filters simultaneously", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    // b1 has open (2024 AGM) and pending (2026 AGM); filter to b1 + open
-    await selectBuildingOption(user, "Alpha Tower");
-    await user.selectOptions(screen.getByLabelText("Status"), "open");
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("2026 AGM")).not.toBeInTheDocument();
-    expect(screen.queryByText("2023 AGM")).not.toBeInTheDocument();
-  });
-
-  it("changing building filter preserves the status filter in URL", async () => {
-    const user = userEvent.setup();
-    renderPage("?status=open");
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    await selectBuildingOption(user, "Alpha Tower");
-    // Status filter should still be "open" after changing building
-    const statusSelect = screen.getByLabelText("Status") as HTMLSelectElement;
-    expect(statusSelect.value).toBe("open");
-  });
-
-  it("changing status filter preserves building filter (URL still has building param)", async () => {
-    const user = userEvent.setup();
-    renderPage("?building=b1");
-    await waitFor(() => {
-      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
-    });
-    await user.selectOptions(screen.getByLabelText("Status"), "pending");
-    // Only the pending b1 meeting should show
-    await waitFor(() => {
-      expect(screen.getByText("2026 AGM")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("2024 AGM")).not.toBeInTheDocument();
   });
 
   // --- RR2-06: URL params for page ---
@@ -936,88 +588,6 @@ describe("GeneralMeetingListPage", () => {
   });
 
   // --- RR2-03: filter toggle resets pagination to page 1 ---
-
-  it("RR2-03: changing building filter resets page to 1", async () => {
-    // 21 meetings under b1 (2 pages), 1 meeting under b2 (1 page)
-    const b1Meetings = Array.from({ length: 21 }, (_, i) => ({
-      id: `m${i + 1}`,
-      building_id: "b1",
-      building_name: "Alpha Tower",
-      title: `Alpha Meeting ${i + 1}`,
-      status: "open",
-      meeting_at: "2024-06-01T10:00:00Z",
-      voting_closes_at: "2024-06-01T12:00:00Z",
-      created_at: "2024-01-01T00:00:00Z",
-    }));
-    const b2Meeting = {
-      id: "b2m1",
-      building_id: "b2",
-      building_name: "Beta Court",
-      title: "Beta Meeting 1",
-      status: "closed",
-      meeting_at: "2024-06-01T10:00:00Z",
-      voting_closes_at: "2024-06-01T12:00:00Z",
-      created_at: "2024-01-01T00:00:00Z",
-    };
-
-    server.use(
-      http.get("http://localhost/api/admin/buildings", ({ request }) => {
-        const url = new URL(request.url);
-        const isArchivedParam = url.searchParams.get("is_archived");
-        const limitParam = url.searchParams.get("limit");
-        const nameParam = url.searchParams.get("name");
-        let filtered = [
-          { id: "b1", name: "Alpha Tower", manager_email: "a@x.com", is_archived: false, created_at: "2024-01-01T00:00:00Z" },
-          { id: "b2", name: "Beta Court", manager_email: "b@x.com", is_archived: false, created_at: "2024-02-01T00:00:00Z" },
-        ];
-        if (isArchivedParam !== null) {
-          const ia = isArchivedParam === "true";
-          filtered = filtered.filter((b) => b.is_archived === ia);
-        }
-        if (nameParam) filtered = filtered.filter((b) => b.name.toLowerCase().includes(nameParam.toLowerCase()));
-        const limit = limitParam !== null ? parseInt(limitParam, 10) : filtered.length;
-        return HttpResponse.json(filtered.slice(0, limit));
-      }),
-      http.get("http://localhost/api/admin/general-meetings/count", ({ request }) => {
-        const url = new URL(request.url);
-        const bid = url.searchParams.get("building_id");
-        if (bid === "b1") return HttpResponse.json({ count: 21 });
-        if (bid === "b2") return HttpResponse.json({ count: 1 });
-        return HttpResponse.json({ count: 22 });
-      }),
-      http.get("http://localhost/api/admin/general-meetings", ({ request }) => {
-        const url = new URL(request.url);
-        const bid = url.searchParams.get("building_id");
-        const offset = parseInt(url.searchParams.get("offset") ?? "0", 10);
-        const limit = parseInt(url.searchParams.get("limit") ?? "20", 10);
-        const all = bid === "b2" ? [b2Meeting] : bid === "b1" ? b1Meetings : [...b1Meetings, b2Meeting];
-        return HttpResponse.json(all.slice(offset, offset + limit));
-      })
-    );
-
-    const user = userEvent.setup();
-    renderPage();
-
-    // Wait for page 1 of all meetings to load
-    await waitFor(() => {
-      expect(screen.getByText("Alpha Meeting 1")).toBeInTheDocument();
-    });
-
-    // Navigate to page 2 (b1 has 21 meetings → 2 pages)
-    await user.click(screen.getAllByRole("button", { name: "Go to page 2" })[0]);
-    await waitFor(() => {
-      expect(screen.getByText("Alpha Meeting 21")).toBeInTheDocument();
-    });
-
-    // Change building filter via combobox — page should reset to 1
-    await selectBuildingOption(user, "Beta Court");
-
-    // Should be back on page 1 showing Beta Meeting 1
-    await waitFor(() => {
-      expect(screen.getByText("Beta Meeting 1")).toBeInTheDocument();
-    });
-    expect(screen.queryByText("Alpha Meeting 21")).not.toBeInTheDocument();
-  });
 
   it("RR2-03: changing status filter resets page to 1", async () => {
     // 21 open meetings (2 pages), 1 closed meeting (1 page)
