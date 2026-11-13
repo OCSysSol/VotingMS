@@ -3134,6 +3134,31 @@ class TestCreateLotOwnerNestedPeople:
         )
         assert lot is None
 
+    async def test_invalid_nested_proxy_returns_422_without_creating_lot(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-INVALID-PROXY",
+                "unit_entitlement": 70,
+                "owners": [{"email": "owner@example.com"}],
+                "proxy": {"email": " "},
+            },
+        )
+
+        assert response.status_code == 422
+        lot = await db_session.scalar(
+            select(Lot).where(
+                Lot.building_id == building.id,
+                Lot.lot_number == "NEST-INVALID-PROXY",
+            )
+        )
+        assert lot is None
+
     async def test_update_lot_owner_given_name_and_surname(
         self, client: AsyncClient, db_session: AsyncSession, building: Building
     ):

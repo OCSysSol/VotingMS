@@ -43,6 +43,7 @@ from app.models import (
 )
 from app.models.tenant_settings import TenantSettings
 from app.schemas.admin import (
+    AddOwnerEmailRequest,
     AdminVoteEntryRequest,
     BuildingUpdate,
     GeneralMeetingCreate,
