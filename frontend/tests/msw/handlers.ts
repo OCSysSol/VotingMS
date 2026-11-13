@@ -37,6 +37,7 @@ export let smtpConfigFixture: SmtpConfig = {
   smtp_username: "",
   smtp_from_email: "",
   password_is_set: false,
+  email_delivery_enabled: true,
 };
 
 export function resetSmtpConfigFixture() {
@@ -46,6 +47,7 @@ export function resetSmtpConfigFixture() {
     smtp_username: "",
     smtp_from_email: "",
     password_is_set: false,
+    email_delivery_enabled: true,
   };
 }
 
@@ -1416,8 +1418,20 @@ export const adminHandlers = [
       smtp_username: (body.smtp_username as string) ?? "",
       smtp_from_email: fromEmail,
       password_is_set: body.smtp_password ? true : hadPassword,
+      email_delivery_enabled: smtpConfigFixture.email_delivery_enabled,
     };
     return HttpResponse.json(smtpConfigFixture);
+  }),
+
+  http.patch(`${BASE}/api/admin/config/smtp/delivery`, async ({ request }) => {
+    const body = await request.json() as { enabled?: boolean };
+    smtpConfigFixture = {
+      ...smtpConfigFixture,
+      email_delivery_enabled: Boolean(body.enabled),
+    };
+    return HttpResponse.json({
+      email_delivery_enabled: smtpConfigFixture.email_delivery_enabled,
+    });
   }),
 
   http.post(`${BASE}/api/admin/config/smtp/test`, () => {

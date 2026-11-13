@@ -764,6 +764,23 @@ class TestRequestSubscriptionChange:
 
     # --- SMTP not configured (503) ---
 
+    async def test_returns_409_when_email_delivery_disabled(
+        self, operator_client: AsyncClient, db_session: AsyncSession
+    ):
+        with patch(
+            "app.services.smtp_config_service.get_smtp_config",
+            new_callable=AsyncMock,
+        ) as mock_cfg:
+            mock_cfg.return_value = _make_smtp_config(email_delivery_enabled=False)
+
+            response = await operator_client.post(
+                "/api/admin/subscription/request-change",
+                json={"requested_tier": "Pro"},
+            )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Email delivery is disabled"
+
     async def test_returns_503_when_smtp_not_configured(
         self, operator_client: AsyncClient, db_session: AsyncSession
     ):
@@ -829,6 +846,27 @@ class TestRequestSubscriptionChange:
 
 @pytest.mark.asyncio
 class TestSendSubscriptionChangeRequestService:
+    async def test_rejects_when_email_delivery_disabled(
+        self, db_session: AsyncSession
+    ):
+        from app.services.admin_service import send_subscription_change_request
+        from app.services.email_service import EmailDeliveryDisabledError
+
+        with patch(
+            "app.services.smtp_config_service.get_smtp_config",
+            new_callable=AsyncMock,
+        ) as mock_cfg:
+            mock_cfg.return_value = _make_smtp_config(email_delivery_enabled=False)
+
+            with pytest.raises(EmailDeliveryDisabledError):
+                await send_subscription_change_request(
+                    db_session,
+                    origin="https://example.com",
+                    current_tier="Starter",
+                    requested_tier="Growth",
+                    requester_email="admin@example.com",
+                )
+
     async def test_raises_smtp_not_configured_when_host_missing(
         self, db_session: AsyncSession
     ):
@@ -894,6 +932,7 @@ def _make_smtp_config(
     smtp_username: str = "smtpuser@example.com",
     smtp_from_email: str = "from@example.com",
     smtp_password_enc: bytes | None = b"enc-pwd",
+    email_delivery_enabled: bool = True,
 ) -> object:
     """Return a lightweight mock of SmtpConfig for unit testing."""
 
@@ -906,4 +945,5 @@ def _make_smtp_config(
     cfg.smtp_username = smtp_username
     cfg.smtp_from_email = smtp_from_email
     cfg.smtp_password_enc = smtp_password_enc
+    cfg.email_delivery_enabled = email_delivery_enabled
     return cfg

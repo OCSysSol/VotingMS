@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, testSmtpConfig, getSmsConfig, updateSmsConfig, testSmsConfig } from "../../api/config";
+import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, updateSmtpDelivery, testSmtpConfig, getSmsConfig, updateSmsConfig, testSmsConfig } from "../../api/config";
 import type { TenantConfig, SmsConfigOut, SmsProvider } from "../../api/config";
 import { listAdminUsers, inviteAdminUser, removeAdminUser } from "../../api/users";
 import type { AdminUser } from "../../api/users";
@@ -42,6 +42,9 @@ export default function SettingsPage() {
   const [smtpFromEmail, setSmtpFromEmail] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
   const [smtpPasswordIsSet, setSmtpPasswordIsSet] = useState(false);
+  const [emailDeliveryEnabled, setEmailDeliveryEnabled] = useState(true);
+  const [isUpdatingEmailDelivery, setIsUpdatingEmailDelivery] = useState(false);
+  const [emailDeliveryError, setEmailDeliveryError] = useState("");
   const [isSmtpUnconfigured, setIsSmtpUnconfigured] = useState(false);
   const [isSmtpSaving, setIsSmtpSaving] = useState(false);
   const [smtpSaveSuccess, setSmtpSaveSuccess] = useState(false);
@@ -133,6 +136,7 @@ export default function SettingsPage() {
         setSmtpUsername(smtp.smtp_username);
         setSmtpFromEmail(smtp.smtp_from_email);
         setSmtpPasswordIsSet(smtp.password_is_set);
+        setEmailDeliveryEnabled(smtp.email_delivery_enabled ?? true);
         const isUnconfigured = !smtp.smtp_host || !smtp.smtp_username || !smtp.smtp_from_email || !smtp.password_is_set;
         setIsSmtpUnconfigured(isUnconfigured);
 
@@ -290,6 +294,23 @@ export default function SettingsPage() {
       setSmtpSaveError(message);
     } finally {
       setIsSmtpSaving(false);
+    }
+  }
+
+  async function handleEmailDeliveryToggle(enabled: boolean) {
+    const previous = emailDeliveryEnabled;
+    setEmailDeliveryEnabled(enabled);
+    setEmailDeliveryError("");
+    setIsUpdatingEmailDelivery(true);
+    try {
+      const updated = await updateSmtpDelivery(enabled);
+      setEmailDeliveryEnabled(updated.email_delivery_enabled);
+    } catch (err) {
+      setEmailDeliveryEnabled(previous);
+      const message = err instanceof Error ? err.message : "Failed to update email delivery.";
+      setEmailDeliveryError(message);
+    } finally {
+      setIsUpdatingEmailDelivery(false);
     }
   }
 
@@ -801,6 +822,35 @@ export default function SettingsPage() {
               <p className="admin-card__title">Mail Server</p>
             </div>
             <div className="admin-card__body">
+              <div className="field">
+                <label className="field__label" htmlFor="email-delivery-enabled">
+                  <input
+                    id="email-delivery-enabled"
+                    type="checkbox"
+                    checked={emailDeliveryEnabled}
+                    disabled={isUpdatingEmailDelivery}
+                    onChange={(e) => { void handleEmailDeliveryToggle(e.target.checked); }}
+                    style={{ marginRight: 8 }}
+                  />
+                  Email delivery
+                </label>
+                <p
+                  className="field__hint"
+                  style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}
+                >
+                  Controls actual SMTP delivery for OTP and results emails. This is separate
+                  from the Email verification channel setting. Testing deployments reset
+                  this setting when the server starts.
+                </p>
+                {!emailDeliveryEnabled && (
+                  <div className="warning-banner" role="alert">
+                    Email delivery is disabled. OTP and results emails will not be sent.
+                  </div>
+                )}
+                {emailDeliveryError && (
+                  <p className="field__error" role="alert">{emailDeliveryError}</p>
+                )}
+              </div>
               {isSmtpUnconfigured && (
                 <div className="warning-banner" role="alert">
                   ⚠️ Mail server is not configured — emails will not be sent until SMTP settings are saved.
@@ -901,7 +951,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     className="btn btn--secondary"
-                    disabled={isTestingSmtp || isSmtpUnconfigured}
+                    disabled={isTestingSmtp || isSmtpUnconfigured || !emailDeliveryEnabled}
                     onClick={() => { setSmtpTestResult(null); setShowTestEmailModal(true); }}
                   >
                     {isTestingSmtp ? "Sending…" : "Send test email"}

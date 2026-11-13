@@ -429,12 +429,14 @@ async def send_subscription_change_request(
 
     Raises SmtpNotConfiguredError if SMTP is not configured.
     """
-    from app.services.email_service import SmtpNotConfiguredError
+    from app.services.email_service import EmailDeliveryDisabledError, SmtpNotConfiguredError
     from app.services.smtp_config_service import get_smtp_config, get_decrypted_password
     import aiosmtplib
     from email.mime.text import MIMEText
 
     smtp_config = await get_smtp_config(db)
+    if not smtp_config.email_delivery_enabled:
+        raise EmailDeliveryDisabledError("Email delivery is disabled")
     if (
         not smtp_config.smtp_host
         or not smtp_config.smtp_username

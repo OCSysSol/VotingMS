@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import SettingsPage from "../SettingsPage";
-import { resetConfigFixture, resetAdminUsersFixture, resetSubscriptionFixture, CURRENT_USER_ID, ADMIN_USER_CURRENT, ADMIN_USER_OTHER } from "../../../../tests/msw/handlers";
+import { resetConfigFixture, resetAdminUsersFixture, resetSmtpConfigFixture, resetSubscriptionFixture, ADMIN_USER_CURRENT, ADMIN_USER_OTHER } from "../../../../tests/msw/handlers";
 import * as configApi from "../../../api/config";
 import * as usersApi from "../../../api/users";
 import * as subscriptionApi from "../../../api/subscription";
@@ -44,6 +44,7 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     resetConfigFixture();
     resetAdminUsersFixture();
+    resetSmtpConfigFixture();
     resetSubscriptionFixture();
   });
 
@@ -752,6 +753,81 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("Username")).toBeInTheDocument();
     expect(screen.getByLabelText("From email address")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  it("loads and toggles effective email delivery independently of credentials", async () => {
+    const user = userEvent.setup();
+    let patchedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+          email_delivery_enabled: true,
+        })
+      ),
+      http.patch(`${BASE}/api/admin/config/smtp/delivery`, async ({ request }) => {
+        patchedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ email_delivery_enabled: false });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(patchedBody).toEqual({ enabled: false });
+    expect(screen.getByText(/Email delivery is disabled/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send test email" })).toBeDisabled();
+  });
+
+  it("reverts the email delivery toggle and shows an error when the PATCH fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+          email_delivery_enabled: true,
+        })
+      ),
+      http.patch(`${BASE}/api/admin/config/smtp/delivery`, () =>
+        HttpResponse.json({ detail: "Update failed" }, { status: 500 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+  });
+
+  it("shows fallback email delivery error for a non-Error rejection", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(configApi, "updateSmtpDelivery").mockRejectedValueOnce("plain error");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByText("Failed to update email delivery.")).toBeInTheDocument();
   });
 
   it("shows unconfigured notice when SMTP is not set up", async () => {
@@ -2197,6 +2273,19 @@ describe("SettingsPage", () => {
     await waitFor(() => {
       expect(screen.getByText("SMS settings saved.")).toBeInTheDocument();
     });
+  });
+
+  it("SMS success message disappears after 3 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(screen.getByText("SMS settings saved.")).toBeInTheDocument());
+    act(() => vi.advanceTimersByTime(3100));
+    await waitFor(() => expect(screen.queryByText("SMS settings saved.")).not.toBeInTheDocument());
+    vi.useRealTimers();
   });
 
   it("SMS settings save: UI has NOT transitioned while pending, HAS transitioned after complete", async () => {

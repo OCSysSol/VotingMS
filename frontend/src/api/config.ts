@@ -49,6 +49,7 @@ export interface SmtpConfig {
   smtp_username: string;
   smtp_from_email: string;
   password_is_set: boolean;
+  email_delivery_enabled: boolean;
 }
 
 export interface SmtpConfigUpdate {
@@ -63,6 +64,10 @@ export interface SmtpStatus {
   configured: boolean;
 }
 
+export interface SmtpDelivery {
+  email_delivery_enabled: boolean;
+}
+
 export async function getSmtpConfig(): Promise<SmtpConfig> {
   return apiFetch<SmtpConfig>("/api/admin/config/smtp");
 }
@@ -71,6 +76,13 @@ export async function updateSmtpConfig(data: SmtpConfigUpdate): Promise<SmtpConf
   return apiFetch<SmtpConfig>("/api/admin/config/smtp", {
     method: "PUT",
     body: JSON.stringify(data),
+  });
+}
+
+export async function updateSmtpDelivery(enabled: boolean): Promise<SmtpDelivery> {
+  return apiFetch<SmtpDelivery>("/api/admin/config/smtp/delivery", {
+    method: "PATCH",
+    body: JSON.stringify({ enabled }),
   });
 }
 

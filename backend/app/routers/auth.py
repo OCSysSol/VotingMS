@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.dependencies import require_admin
 from app.logging_config import get_logger
 from app.models.auth_otp import AuthOtp
 from app.models.building import Building
@@ -284,9 +285,10 @@ async def request_otp(
             await db.commit()
 
         # 7. Deliver the OTP via the effective channel.
-        skip_email_effective = settings.testing_mode
-        if not skip_email_effective:
-            if effective_channel == "sms":
+        if effective_channel == "sms":
+            # SMS remains skipped in testing mode. The DB-backed delivery switch
+            # applies only to SMTP; channel toggles remain in tenant_config.
+            if not settings.testing_mode:
                 # SMS path: phone number is on the matched Person row.
                 phone_number = direct_person.phone_number if direct_person else None
                 if phone_number:
@@ -332,44 +334,51 @@ async def request_otp(
                         channel="sms",
                         elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
                     )
-            else:
-                # Default email path
-                delivery_started_at = time.perf_counter()
-                logger.info(
-                    "otp_delivery_attempt_started",
+        elif sms_cfg.email_delivery_enabled:
+            # Default email path
+            delivery_started_at = time.perf_counter()
+            logger.info(
+                "otp_delivery_attempt_started",
+                request_id=request_id,
+                agm_id=str(body.general_meeting_id),
+                channel="email",
+            )
+            try:
+                await send_otp_email(
+                    to_email=body.email,
+                    meeting_title=meeting.title,
+                    code=code,
+                    db=db,
+                )
+            except Exception as exc:
+                # Log the SMTP failure but still return 200 — the OTP is already stored
+                # in the DB, so the voter can still authenticate (or retry sending).
+                # A 500 here would expose SMTP misconfiguration and break the auth flow
+                # even though the OTP record was successfully created.
+                logger.error(
+                    "otp_delivery_attempt_failed",
                     request_id=request_id,
                     agm_id=str(body.general_meeting_id),
                     channel="email",
+                    provider_category=type(exc).__name__,
+                    provider_detail=_sanitized_otp_provider_error(exc),
+                    elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
                 )
-                try:
-                    await send_otp_email(
-                        to_email=body.email,
-                        meeting_title=meeting.title,
-                        code=code,
-                        db=db,
-                    )
-                except Exception as exc:
-                    # Log the SMTP failure but still return 200 — the OTP is already stored
-                    # in the DB, so the voter can still authenticate (or retry sending).
-                    # A 500 here would expose SMTP misconfiguration and break the auth flow
-                    # even though the OTP record was successfully created.
-                    logger.error(
-                        "otp_delivery_attempt_failed",
-                        request_id=request_id,
-                        agm_id=str(body.general_meeting_id),
-                        channel="email",
-                        provider_category=type(exc).__name__,
-                        provider_detail=_sanitized_otp_provider_error(exc),
-                        elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
-                    )
-                else:
-                    logger.info(
-                        "otp_delivery_attempt_succeeded",
-                        request_id=request_id,
-                        agm_id=str(body.general_meeting_id),
-                        channel="email",
-                        elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
-                    )
+            else:
+                logger.info(
+                    "otp_delivery_attempt_succeeded",
+                    request_id=request_id,
+                    agm_id=str(body.general_meeting_id),
+                    channel="email",
+                    elapsed_ms=round((time.perf_counter() - delivery_started_at) * 1000),
+                )
+        else:
+            logger.info(
+                "otp_email_delivery_suppressed",
+                request_id=request_id,
+                agm_id=str(body.general_meeting_id),
+                reason="delivery_disabled",
+            )
     else:
         # Still update the rate limit so attackers can't use "no rate limit" as
         # a signal that the email was not found.
@@ -703,12 +712,14 @@ async def get_latest_otp(
     email: str,
     meeting_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
+    _current_user=Depends(require_admin),
 ) -> dict:
     """
     Test-only endpoint: returns the most recent unused OTP for (email, meeting_id).
-    Only available when settings.testing_mode is True.
+    Requires admin authentication and is available only when testing mode has
+    disabled effective email delivery.
     """
-    if not settings.testing_mode:
+    if not settings.testing_mode or await smtp_config_service.is_email_delivery_enabled(db):
         raise HTTPException(status_code=404)
 
     result = await db.execute(

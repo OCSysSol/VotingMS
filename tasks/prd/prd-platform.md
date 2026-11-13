@@ -202,6 +202,30 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 
 ---
 
+### US-SMTP-07: Admin can suppress email delivery for testing without deleting SMTP settings
+
+**Status:** ✅ Implemented — branch: `codex/otp-email-delivery-toggle`
+
+**Description:** As an admin, I want to enable or disable actual email delivery from the Mail Server settings so that human UAT can send real email when needed, while automated testing can run without making any SMTP calls.
+
+**Acceptance Criteria:**
+
+- [ ] The Email Server tab contains an "Email delivery" toggle alongside the existing SMTP configuration fields.
+- [ ] The toggle is saved independently through a dedicated admin API and does not require resubmitting or deleting stored SMTP credentials.
+- [ ] When email delivery is disabled, OTP emails, results reports, pending-report retries, and SMTP test emails make no SMTP calls.
+- [ ] Disabling email delivery does not remove Email from the voter's enabled OTP channels; request-OTP continues to generate the OTP and returns the existing enumeration-safe response.
+- [ ] When email delivery is enabled, existing SMTP behaviour is unchanged.
+- [ ] On every application startup, `TESTING_MODE=true` sets email delivery to disabled and `TESTING_MODE=false` sets it to enabled. A cold start may therefore undo a temporary manual UAT change.
+- [ ] When `TESTING_MODE=true` and email delivery is disabled, the latest-OTP retrieval endpoint is available only to authenticated admins.
+- [ ] The latest-OTP retrieval endpoint is unavailable when email delivery is enabled or when `TESTING_MODE=false`.
+- [ ] The Settings page clearly distinguishes "Email delivery" from the existing "Email verification" channel toggle and warns when delivery is disabled.
+- [ ] The "Send test email" action is disabled while email delivery is off.
+- [ ] Automated E2E tests retrieve OTPs using the authenticated admin API and do not trigger SMTP.
+- [ ] Backend and frontend tests pass at the repository's required coverage threshold.
+- [ ] Typecheck and lint pass.
+
+---
+
 ### US-006: Sync lot owner data from PropertyIQ
 
 **Status:** 🔄 Partial — PropertyIQ API credentials pending
