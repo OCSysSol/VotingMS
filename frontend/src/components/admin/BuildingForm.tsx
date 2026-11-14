@@ -14,7 +14,7 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
   const [ocPlanNumber, setOcPlanNumber] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
 
-  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number?: string | null }>({
+  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number: string }>({
     mutationFn: (data) => createBuilding(data),
     onSuccess: () => {
       onSuccess();
@@ -27,12 +27,13 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (!ocPlanNumber.trim()) { setFormError("OC Plan number is required."); return; }
     if (!name.trim()) { setFormError("Building name is required."); return; }
     if (!managerEmail.trim()) { setFormError("Manager email is required."); return; }
     mutation.mutate({
       name: name.trim(),
       manager_email: managerEmail.trim(),
-      oc_plan_number: ocPlanNumber.trim() || null,
+      oc_plan_number: ocPlanNumber.trim(),
     });
   }
 
@@ -46,6 +47,18 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
         <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.5rem" }}>
           <span aria-hidden="true">*</span> Required field
         </p>
+        <div className="field">
+          <label className="field__label field__label--required" htmlFor="building-oc-plan-number">OC Plan Number</label>
+          <input
+            id="building-oc-plan-number"
+            className="field__input"
+            type="text"
+            value={ocPlanNumber}
+            onChange={(e) => setOcPlanNumber(e.target.value)}
+            placeholder="e.g. PS345123A"
+            aria-required="true"
+          />
+        </div>
         <div className="field">
           {/* US-ACC-08: visible * marker (aria-hidden) + aria-required on input */}
           <label className="field__label field__label--required" htmlFor="building-name">Building Name</label>
@@ -69,17 +82,6 @@ export default function BuildingForm({ onSuccess, onCancel }: BuildingFormProps)
             onChange={(e) => setManagerEmail(e.target.value)}
             placeholder="e.g. manager@example.com"
             aria-required="true"
-          />
-        </div>
-        <div className="field">
-          <label className="field__label" htmlFor="building-oc-plan-number">OC Plan Number</label>
-          <input
-            id="building-oc-plan-number"
-            className="field__input"
-            type="text"
-            value={ocPlanNumber}
-            onChange={(e) => setOcPlanNumber(e.target.value)}
-            placeholder="e.g. OC123456"
           />
         </div>
         {formError && (

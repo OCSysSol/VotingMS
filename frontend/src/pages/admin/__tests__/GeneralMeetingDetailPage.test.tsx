@@ -513,6 +513,86 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
+  it("shows Send Summary Email and Download Summary PDF beside each other", async () => {
+    renderPage("agm2");
+
+    const send = await screen.findByRole("button", { name: "Send Summary Email" });
+    const download = screen.getByRole("button", { name: "Download Summary PDF" });
+
+    expect(send.parentElement).toBe(download.parentElement);
+    expect(download).toHaveClass("btn--secondary");
+  });
+
+  it("downloads the summary PDF without navigating", async () => {
+    const user = userEvent.setup();
+    mockNavigate.mockClear();
+    let requested = false;
+    let downloadedFilename = "";
+    server.use(
+      http.get(
+        "http://localhost/api/admin/general-meetings/:meetingId/results.pdf",
+        () => {
+          requested = true;
+          return new HttpResponse(new Blob(["%PDF-1.4"]), {
+            headers: { "Content-Type": "application/pdf" },
+          });
+        }
+      )
+    );
+    URL.createObjectURL = vi.fn(() => "blob:meeting-pdf");
+    URL.revokeObjectURL = vi.fn();
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloadedFilename = this.download;
+      });
+
+    renderPage("agm2");
+    await user.click(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    );
+
+    await waitFor(() => {
+      expect(requested).toBe(true);
+      expect(anchorClick).toHaveBeenCalled();
+    });
+    expect(downloadedFilename).toMatch(/^results-.*-agm2\.pdf$/);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:meeting-pdf");
+    expect(mockNavigate).not.toHaveBeenCalled();
+    anchorClick.mockRestore();
+  });
+
+  it("shows a download error without hiding the action", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(
+        "http://localhost/api/admin/general-meetings/:meetingId/results.pdf",
+        () => HttpResponse.json({ detail: "PDF failed" }, { status: 500 })
+      )
+    );
+    renderPage("agm2");
+
+    await user.click(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("500");
+    expect(
+      screen.getByRole("button", { name: "Download Summary PDF" })
+    ).toBeEnabled();
+  });
+
+  it("keeps PDF download available when the email failure banner is visible", async () => {
+    renderPage("agm-failed-email");
+
+    expect(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Resend Summary Email" })
+    ).not.toBeInTheDocument();
+  });
+
   it("shows generic error when non-404 fetch fails", async () => {
     server.use(
       http.get("http://localhost/api/admin/general-meetings/:meetingId", () => {
@@ -670,6 +750,19 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Motions")).toBeInTheDocument();
     });
+  });
+
+  it("places motion actions above the Motions heading", async () => {
+    renderPage();
+
+    const addMotion = await screen.findByRole("button", { name: "Add Motion" });
+    const floorVotes = screen.getByRole("button", { name: "Enter Floor Votes" });
+    const heading = screen.getByRole("heading", { name: "Motions" });
+
+    expect(addMotion.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(floorVotes.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("shows move buttons for open meeting with multiple motions", async () => {
@@ -3187,36 +3280,36 @@ describe("Admin In-Person Vote Entry", () => {
     );
   }
 
-  it("shows Enter In-Person Votes button when meeting is open", async () => {
+  it("shows Enter Floor Votes button when meeting is open", async () => {
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
   });
 
-  it("does not show Enter In-Person Votes button when meeting is closed", async () => {
+  it("does not show Enter Floor Votes button when meeting is closed", async () => {
     renderPage("agm2");
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Enter Floor Votes" })).not.toBeInTheDocument();
     });
   });
 
-  it("does not show Enter In-Person Votes button when meeting is pending", async () => {
+  it("does not show Enter Floor Votes button when meeting is pending", async () => {
     renderPage("agm-pending");
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Enter Floor Votes" })).not.toBeInTheDocument();
     });
   });
 
-  it("opens AdminVoteEntryPanel when Enter In-Person Votes is clicked", async () => {
+  it("opens AdminVoteEntryPanel when Enter Floor Votes is clicked", async () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
   });
 
@@ -3224,17 +3317,17 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     // Cancel the panel
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     await user.click(cancelBtn);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /Enter In-Person Votes/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Enter Floor Votes/i })).not.toBeInTheDocument();
     });
     // No success modal shown after cancel
     expect(screen.queryByRole("dialog", { name: /Votes submitted/i })).not.toBeInTheDocument();
@@ -3244,9 +3337,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3258,7 +3351,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     // Success modal should appear with "Votes submitted" heading
@@ -3273,9 +3366,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3286,7 +3379,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -3302,9 +3395,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3315,7 +3408,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {

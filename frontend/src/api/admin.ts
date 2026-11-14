@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchVoid } from "./client";
+import { apiFetch, apiFetchBlob, apiFetchVoid } from "./client";
 import type { Building, GeneralMeeting, LotOwner, MotionType } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -81,6 +81,7 @@ export interface VoterEntry {
   entitlement: number;
   proxy_email?: string | null;
   submitted_by_admin?: boolean;
+  submitted_by_admin_username?: string | null;
   submitted_at?: string | null;
 }
 
@@ -376,7 +377,7 @@ export interface GeneralMeetingCreateRequest {
 export interface BuildingCreateRequest {
   name: string;
   manager_email: string;
-  oc_plan_number?: string | null;
+  oc_plan_number: string;
 }
 
 export interface BuildingUpdateRequest {
@@ -623,6 +624,10 @@ export async function resendReport(meetingId: string): Promise<ResendReportOut> 
   return apiFetch<ResendReportOut>(`/api/admin/general-meetings/${meetingId}/resend-report`, {
     method: "POST",
   });
+}
+
+export async function downloadMeetingResultsPdf(meetingId: string): Promise<Blob> {
+  return apiFetchBlob(`/api/admin/general-meetings/${meetingId}/results.pdf`);
 }
 
 export async function deleteGeneralMeeting(meetingId: string): Promise<void> {

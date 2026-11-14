@@ -798,12 +798,33 @@ As an admin, I want the admin navigation and pages to use OC Plans terminology w
 - [x] Add a case-insensitive owner filter on the OC Plan detail page matching lot number, owner name/email, and proxy name/email; clearing it restores the full list.
 - [x] Make Add Lot Owner use the same layout, field order, labels, and styling as Edit Lot Owner while preserving add defaults.
 - [x] Add Lot Owner must accept owner names/contact details and a proxy in the same modal, without creating a partial lot if any part of the create request fails.
-- [x] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it.
+- [x] Launching Create General Meeting from an OC Plan preselects its building, while allowing the admin to change it; the selected `OC Plan` field displays the OC Plan number rather than the building name.
 - [x] On Create General Meeting, label the entity selector “OC Plan”, show the OC plan number in selectable options, and use OC Plan wording for its validation/error copy.
 - [ ] Left-align the OC Plans, Meetings, and owner-list search fields as a consistent filter-row design.
 - [x] Keep one meetings search field covering titles, OC Plans, and buildings.
 - [x] Keep Reopen and Delete adjacent and right-aligned on the meeting detail page.
 - [x] Preserve existing Building IDs and relationships; no data model rename is required.
+
+### US-OC-CREATE-02: Require and prioritise OC Plan number when creating an OC Plan
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting host, I want OC Plan number to be the first and mandatory field when creating an OC Plan so new records are identified by their legal plan designation rather than a descriptive building name.
+
+**Acceptance Criteria:**
+
+- [x] In the `New OC Plan` modal, `OC Plan Number` appears before `Building Name`.
+- [x] `OC Plan Number` has a required marker, `aria-required="true"`, and is the first focus target in the modal.
+- [x] Submitting with a missing or whitespace-only OC Plan number shows an inline `OC Plan number is required.` error and does not call the create API.
+- [x] `POST /api/admin/buildings` rejects a missing or whitespace-only `oc_plan_number` with 422 and does not create the record.
+- [x] `BuildingCreate.oc_plan_number` is required and trimmed; the create service also rejects blank values defensively.
+- [x] Existing building rows may retain a null OC Plan number; no database `NOT NULL` migration or legacy backfill is required.
+- [x] Bulk building import behaviour is unchanged by this story unless a separate migration policy is approved.
+- [x] When Create General Meeting is launched from an OC Plan detail page, the preselected `OC Plan` input displays only `oc_plan_number`; building name is used only as a fallback for legacy plans with no number.
+- [x] The building UUID remains the internal meeting foreign key and query-parameter value.
+- [x] Frontend and backend tests cover field order, required validation, API rejection, and the displayed prefill.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
 
 ### US-OC-TESTDATA-01: Generated test buildings include OC Plans
 

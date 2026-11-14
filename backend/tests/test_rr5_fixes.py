@@ -367,7 +367,11 @@ class TestBuildingCreateMaxLength:
     # --- Boundary values ---
 
     def test_name_at_max_length_passes(self):
-        data = BuildingCreate(name="A" * 255, manager_email="a@b.com")
+        data = BuildingCreate(
+            name="A" * 255,
+            manager_email="a@b.com",
+            oc_plan_number="PLAN-MAX-NAME",
+        )
         assert len(data.name) == 255
 
     def test_name_over_max_length_raises_422(self):
@@ -376,7 +380,11 @@ class TestBuildingCreateMaxLength:
 
     def test_email_at_max_length_passes(self):
         local = "a" * (254 - len("@b.com"))
-        data = BuildingCreate(name="MyBuilding", manager_email=f"{local}@b.com")
+        data = BuildingCreate(
+            name="MyBuilding",
+            manager_email=f"{local}@b.com",
+            oc_plan_number="PLAN-MAX-EMAIL",
+        )
         assert len(data.manager_email) == 254
 
     def test_email_over_max_length_raises_422(self):

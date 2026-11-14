@@ -226,6 +226,28 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 
 ---
 
+### US-SMTP-08: Attach the complete voting-results PDF to the summary email
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting host, I want the summary email to include a complete voting-results PDF so recipients have a durable offline record of all tallies and voter details.
+
+**Acceptance Criteria:**
+
+- [x] Every successful summary-report send attaches a PDF generated from the same meeting-detail data used by the admin results view.
+- [x] The email remains multipart and keeps the existing HTML body plus a PDF attachment with an `application/pdf` content type and a safe, descriptive filename.
+- [x] The PDF contains all information required by `US-PDF-DL-01`, including voter-level details and `Floor vote` labels for admin-entered ballots.
+- [x] PDF generation happens from authoritative meeting/vote data at send time; no object-storage copy is required for the initial implementation.
+- [x] SMTP retries regenerate the attachment from current closed-meeting data and continue to use the existing delivery record/advisory-lock deduplication.
+- [x] PDF generation failures are surfaced through the existing email delivery error/retry state rather than sending an email without the required attachment.
+- [x] A test inspects the constructed MIME message and verifies that both an HTML part and a PDF attachment are present.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
+
+**Storage recommendation:** Generate PDFs on demand from the database while the report is needed. The database remains the source of truth, avoiding stale duplicated files and avoiding an unauthenticated public object URL for sensitive voter data. If legal or audit requirements later need an immutable copy of each delivered email, archive that exact PDF to a private bucket with tenant-scoped metadata, checksum, retention policy, and short-lived signed access; do not use the existing public Blob upload helper for this report.
+
+---
+
 ### US-006: Sync lot owner data from PropertyIQ
 
 **Status:** 🔄 Partial — PropertyIQ API credentials pending

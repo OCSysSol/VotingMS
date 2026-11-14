@@ -53,9 +53,9 @@ async function fillAndSubmit(user: ReturnType<typeof userEvent.setup>) {
   });
   fireEvent.click(screen.getByRole("combobox", { name: "OC Plan" }));
   await waitFor(() => {
-    expect(screen.getByRole("option", { name: "OC-1001 — Alpha Tower" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "OC-1001" })).toBeInTheDocument();
   });
-  fireEvent.mouseDown(screen.getByRole("option", { name: "OC-1001 — Alpha Tower" }));
+  fireEvent.mouseDown(screen.getByRole("option", { name: "OC-1001" }));
   await user.type(screen.getByLabelText("Title", { selector: "#agm-title" }), "Test AGM");
   await user.type(screen.getByLabelText("Meeting Date / Time"), "2025-06-01T10:00");
   await user.type(screen.getByLabelText("Voting Closes At"), "2025-06-01T12:00");
@@ -75,8 +75,8 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     fireEvent.click(screen.getByRole("combobox", { name: "OC Plan" }));
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "OC-1001 — Alpha Tower" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "OC-1002 — Beta Court" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "OC-1001" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "OC-1002" })).toBeInTheDocument();
     });
   });
 
@@ -84,22 +84,45 @@ describe("CreateGeneralMeetingForm", () => {
     renderComponent();
     fireEvent.click(screen.getByRole("combobox", { name: "OC Plan" }));
     await waitFor(() => {
-      expect(screen.getByRole("option", { name: "OC-1001 — Alpha Tower" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "OC-1001" })).toBeInTheDocument();
     });
     expect(screen.queryByRole("option", { name: "Gamma House" })).not.toBeInTheDocument();
   });
 
   it("shows selected building name in combobox input after selection", async () => {
     renderComponent();
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     const input = screen.getByRole("combobox", { name: "OC Plan" }) as HTMLInputElement;
-    expect(input.value).toBe("OC-1001 — Alpha Tower");
+    expect(input.value).toBe("OC-1001");
   });
 
   it("preselects the building from the URL query parameter", async () => {
     renderComponent("/admin/general-meetings/new?building=b1");
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "OC Plan" })).toHaveValue("OC-1001 — Alpha Tower");
+      expect(screen.getByRole("combobox", { name: "OC Plan" })).toHaveValue("OC-1001");
+    });
+  });
+
+  it("falls back to building name when a legacy OC Plan has no number", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings", () =>
+        HttpResponse.json([
+          {
+            id: "legacy-b1",
+            name: "Legacy Court",
+            oc_plan_number: null,
+            manager_email: "legacy@example.com",
+            is_archived: false,
+            created_at: "2024-01-01T00:00:00Z",
+          },
+        ])
+      )
+    );
+
+    renderComponent("/admin/general-meetings/new?building=legacy-b1");
+
+    await waitFor(() => {
+      expect(screen.getByRole("combobox", { name: "OC Plan" })).toHaveValue("Legacy Court");
     });
   });
 
@@ -117,7 +140,7 @@ describe("CreateGeneralMeetingForm", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "OC Plan" })).toBeInTheDocument();
     });
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
     expect(screen.getByText("Title is required.")).toBeInTheDocument();
   });
@@ -128,7 +151,7 @@ describe("CreateGeneralMeetingForm", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "OC Plan" })).toBeInTheDocument();
     });
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     await user.type(screen.getByLabelText("Title", { selector: "#agm-title" }), "Test AGM");
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
     expect(screen.getByText("Meeting date/time is required.")).toBeInTheDocument();
@@ -140,7 +163,7 @@ describe("CreateGeneralMeetingForm", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "OC Plan" })).toBeInTheDocument();
     });
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     await user.type(screen.getByLabelText("Title", { selector: "#agm-title" }), "Test AGM");
     await user.type(screen.getByLabelText("Meeting Date / Time"), "2025-06-01T10:00");
     await user.click(screen.getByRole("button", { name: "Create General Meeting" }));
@@ -153,7 +176,7 @@ describe("CreateGeneralMeetingForm", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "OC Plan" })).toBeInTheDocument();
     });
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     await user.type(screen.getByLabelText("Title", { selector: "#agm-title" }), "Test AGM");
     await user.type(screen.getByLabelText("Meeting Date / Time"), "2025-06-01T12:00");
     await user.type(screen.getByLabelText("Voting Closes At"), "2025-06-01T10:00");
@@ -177,7 +200,7 @@ describe("CreateGeneralMeetingForm", () => {
     await waitFor(() => {
       expect(screen.getByRole("combobox", { name: "OC Plan" })).toBeInTheDocument();
     });
-    await selectBuilding("OC-1001 — Alpha Tower");
+    await selectBuilding("OC-1001");
     await user.type(screen.getByLabelText("Title", { selector: "#agm-title" }), "Test AGM");
     await user.type(screen.getByLabelText("Meeting Date / Time"), "2025-06-01T10:00");
     await user.type(screen.getByLabelText("Voting Closes At"), "2025-06-01T12:00");

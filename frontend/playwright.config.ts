@@ -28,6 +28,12 @@ export default defineConfig({
     {
       name: "setup",
       testMatch: "**/global.setup.ts",
+      // Setup performs several bounded recovery waits for Vercel and Neon
+      // cold starts. Their combined budget can exceed the regular test timeout.
+      // Give the idempotent setup one explicit 10-minute attempt instead of
+      // repeatedly killing it before its own retry diagnostics can complete.
+      timeout: 10 * 60_000,
+      retries: 0,
     },
 
     // ── Admin tests ───────────────────────────────────────────────────────────

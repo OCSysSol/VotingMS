@@ -1156,6 +1156,14 @@ export const adminHandlers = [
     }
     return HttpResponse.json(ADMIN_MEETING_DETAIL);
   }),
+  http.get(`${BASE}/api/admin/general-meetings/:meetingId/results.pdf`, () => {
+    return new HttpResponse(new Blob(["%PDF-1.4\nmock report"], { type: "application/pdf" }), {
+      headers: {
+        "Content-Type": "application/pdf",
+        "Content-Disposition": 'attachment; filename="meeting-results.pdf"',
+      },
+    });
+  }),
 
   http.post(`${BASE}/api/admin/general-meetings/:meetingId/start`, ({ params }) => {
     if (params.meetingId === "agm-not-pending") {

@@ -14,7 +14,7 @@
  *
  * Gap 3 — AdminRevoteWarningDialog:
  *   After admin-entering votes for a lot, opening the Enter Votes panel again
- *   shows the "Admin votes recorded" badge for that lot. Selecting
+ *   shows the "Floor votes recorded" badge for that lot. Selecting
  *   it and submitting triggers the warning dialog. "Go back" dismisses it.
  *   "Continue anyway" proceeds to the confirm step, which submits and shows the
  *   skipped_count banner (backend skips already-admin-submitted lots).
@@ -144,9 +144,9 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
     await page.goto(`/admin/general-meetings/${meetingId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-    // Open the Enter In-Person Votes panel
-    await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
+    // Open the Enter Floor Votes panel
+    await page.getByRole("button", { name: "Enter Floor Votes" }).click();
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
 
     // Lot A should NOT appear in the list because it has already app-submitted
     await expect(page.getByLabel(`Select lot ${LOT_A}`)).not.toBeVisible({ timeout: 5000 });
@@ -284,12 +284,12 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
       });
       expect(showRes.ok()).toBe(true);
 
-      // Navigate to the meeting detail page and open Enter In-Person Votes
+      // Navigate to the meeting detail page and open Enter Floor Votes
       await page.goto(`/admin/general-meetings/${partialMeetingId}`);
       await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-      await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
-      const selectDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
+      await page.getByRole("button", { name: "Enter Floor Votes" }).click();
+      const selectDialog = page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" });
       await expect(selectDialog).toBeVisible({ timeout: 10000 });
 
       // Select Lot A (which already voted on M1) and proceed to Step 2
@@ -299,7 +299,7 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
       await lotACheckbox.check();
 
       await selectDialog.getByRole("button", { name: /Proceed to vote entry/ }).click();
-      const voteGrid = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+      const voteGrid = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
       await expect(voteGrid).toBeVisible({ timeout: 10000 });
 
       // M1 is already voted online for Lot A -> disabled; M2 is unvoted -> enabled
@@ -315,7 +315,7 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
       await expect(m2NoBtn).toHaveAttribute("aria-pressed", "true");
 
       await voteGrid.getByRole("button", { name: "Submit votes" }).click();
-      const confirmDialog = page.getByRole("dialog", { name: "Submit in-person votes?" });
+      const confirmDialog = page.getByRole("dialog", { name: "Submit floor votes?" });
       await expect(confirmDialog).toBeVisible({ timeout: 10000 });
       await confirmDialog.getByRole("button", { name: "Confirm" }).click();
 
@@ -566,9 +566,9 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await page.goto(`/admin/general-meetings/${meetingId}`);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-    // Open the Enter In-Person Votes panel
-    await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
+    // Open the Enter Floor Votes panel
+    await page.getByRole("button", { name: "Enter Floor Votes" }).click();
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
 
     // LOT_APP (app-submitted) must NOT appear — it is excluded from the list
     await expect(page.getByLabel(`Select lot ${LOT_APP}`)).not.toBeVisible({ timeout: 5000 });
@@ -580,8 +580,8 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
 
     // The source-aware admin summary is shown next to LOT_ADMIN
     // Scope to the dialog to avoid picking up badges elsewhere on the page
-    const dialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
-    await expect(dialog.getByText("Admin votes recorded")).toBeVisible({ timeout: 5000 });
+    const dialog = page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" });
+    await expect(dialog.getByText("Floor votes recorded")).toBeVisible({ timeout: 5000 });
   });
 
   test("Gap 3.2: submitting with admin-submitted lot shows warning dialog; 'Go back' dismisses it", async ({ page }) => {
@@ -591,8 +591,8 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
     // Open Step 1
-    await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: "Enter Floor Votes" }).click();
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
 
     // Select the admin-submitted lot
     const adminLotCheckbox = page.getByLabel(`Select lot ${LOT_ADMIN}`);
@@ -601,12 +601,12 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
 
     // Proceed to Step 2
     await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" })).toBeVisible({ timeout: 10000 });
 
     // Step 2 grid shows the source-aware admin summary and per-motion label
-    const voteGridDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
-    await expect(voteGridDialog.getByText("Admin votes recorded")).toBeVisible({ timeout: 5000 });
-    await expect(voteGridDialog.getByText("Admin voted")).toBeVisible({ timeout: 5000 });
+    const voteGridDialog = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
+    await expect(voteGridDialog.getByText("Floor votes recorded")).toBeVisible({ timeout: 5000 });
+    await expect(voteGridDialog.getByText("Floor vote recorded")).toBeVisible({ timeout: 5000 });
 
     // Click "Submit votes" — this triggers the AdminRevoteWarningDialog (not the ConfirmDialog)
     // because the selected lot was previously entered by admin
@@ -617,7 +617,7 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await expect(page.getByRole("dialog", { name: /Some lots have already been entered/ })).toContainText(`Lot ${LOT_ADMIN}`);
 
     // Warning dialog is visible — confirm we are NOT yet at the regular ConfirmDialog
-    await expect(page.getByRole("dialog", { name: "Submit in-person votes?" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "Submit floor votes?" })).not.toBeVisible();
 
     // Click "Go back" — dialog should close, we remain on the vote grid (Step 2)
     await page.getByRole("button", { name: "Go back" }).click();
@@ -626,7 +626,7 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await expect(page.getByRole("dialog", { name: /Some lots have already been entered/ })).not.toBeVisible({ timeout: 5000 });
 
     // We are still on the vote grid (Step 2 dialog still open)
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" })).toBeVisible({ timeout: 5000 });
   });
 
   test("Gap 3.3: 'Continue anyway' proceeds to confirm, submits, and shows skipped_count banner", async ({ page }) => {
@@ -636,17 +636,17 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
     // Open Step 1
-    await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
+    await page.getByRole("button", { name: "Enter Floor Votes" }).click();
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })).toBeVisible({ timeout: 10000 });
 
     // Select the admin-submitted lot
     await page.getByLabel(`Select lot ${LOT_ADMIN}`).check();
 
     // Proceed to Step 2
     await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
-    await expect(page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" })).toBeVisible({ timeout: 10000 });
 
-    const voteGridDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+    const voteGridDialog = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
 
     // Click "Submit votes" — revote warning appears
     await voteGridDialog.getByRole("button", { name: "Submit votes" }).click();
@@ -657,10 +657,10 @@ test.describe("Gap 3: AdminRevoteWarningDialog end-to-end", () => {
 
     // Warning dialog dismissed; regular ConfirmDialog appears
     await expect(page.getByRole("dialog", { name: /Some lots have already been entered/ })).not.toBeVisible({ timeout: 5000 });
-    await expect(page.getByRole("dialog", { name: "Submit in-person votes?" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByRole("dialog", { name: "Submit floor votes?" })).toBeVisible({ timeout: 10000 });
 
     // Confirm submission
-    await page.getByRole("dialog", { name: "Submit in-person votes?" }).getByRole("button", { name: "Confirm" }).click();
+    await page.getByRole("dialog", { name: "Submit floor votes?" }).getByRole("button", { name: "Confirm" }).click();
 
     // Backend skips the admin-submitted lot — skipped_count banner should appear
     // The banner text is: "{N} lot(s) were skipped (already had entries). {M} lot(s) were submitted successfully."

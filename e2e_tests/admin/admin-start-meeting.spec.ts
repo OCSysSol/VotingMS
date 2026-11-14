@@ -32,6 +32,7 @@ let pendingAgmId = "";
 let startAgmId = "";   // used exclusively by the "click Start Meeting" test
 let openAgmId = "";
 let closedAgmId = "";
+let pendingBuildingId = "";
 
 test.describe("Admin Start Meeting button", () => {
   // Run tests serially in this describe block to prevent parallel beforeAll
@@ -182,7 +183,7 @@ test.describe("Admin Start Meeting button", () => {
     }
 
     // --- Pending AGM (building A — read-only by test 1) ---
-    const pendingBuildingId = await getOrCreateBuilding(
+    pendingBuildingId = await getOrCreateBuilding(
       BUILDING_NAME_PENDING,
       "start-pending-mgr@test.com"
     );
@@ -244,6 +245,17 @@ test.describe("Admin Start Meeting button", () => {
 
     // "Start Meeting" button must be visible
     await expect(page.getByRole("button", { name: "Start Meeting" })).toBeVisible();
+  });
+
+  test("meeting creation from OC Plan preselects the plan number", async ({ page }) => {
+    test.setTimeout(120000);
+
+    await page.goto(`/admin/buildings/${pendingBuildingId}`);
+    await page.getByRole("button", { name: "Create General Meeting" }).click();
+
+    await expect(page.getByRole("combobox", { name: "OC Plan" })).toHaveValue(
+      generateOcPlanNumber(BUILDING_NAME_PENDING)
+    );
   });
 
   test("clicking Start Meeting shows confirmation dialog, confirming transitions to Open", async ({

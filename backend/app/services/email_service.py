@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import aiosmtplib
+from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -42,6 +43,10 @@ from app.models import (
 )
 from app.models.building import Building
 from app.services.admin_service import get_general_meeting_detail
+from app.services.report_pdf_service import (
+    generate_meeting_results_pdf,
+    report_pdf_filename,
+)
 
 logger = get_logger(__name__)
 
@@ -202,6 +207,7 @@ class EmailService:
             total_submitted=detail["total_submitted"],
             meeting_url=meeting_url,
         )
+        pdf_bytes = generate_meeting_results_pdf(detail)
 
         if not smtp_config.smtp_host or not smtp_config.smtp_username or not smtp_config.smtp_from_email or smtp_config.smtp_password_enc is None:
             raise SmtpNotConfiguredError(
@@ -210,14 +216,25 @@ class EmailService:
         smtp_password = get_decrypted_password(smtp_config)
 
         # Send via SMTP (STARTTLS)
-        msg = MIMEMultipart("alternative")
+        msg = MIMEMultipart("mixed")
         msg["Subject"] = f"General Meeting Results Report: {agm_title}"
         msg["From"] = smtp_config.smtp_from_email
         to_addr = settings.email_override if settings.email_override else manager_email
         msg["To"] = to_addr
         if settings.email_override:
             msg["X-Original-To"] = manager_email
-        msg.attach(MIMEText(html_body, "html"))
+
+        html_part = MIMEMultipart("alternative")
+        html_part.attach(MIMEText(html_body, "html"))
+        msg.attach(html_part)
+
+        pdf_part = MIMEApplication(pdf_bytes, _subtype="pdf")
+        pdf_part.add_header(
+            "Content-Disposition",
+            "attachment",
+            filename=report_pdf_filename(detail),
+        )
+        msg.attach(pdf_part)
 
         log.info("email_send_started", agm_id=str(agm_id), to=to_addr)
         await aiosmtplib.send(

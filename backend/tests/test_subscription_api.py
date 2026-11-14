@@ -441,7 +441,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Limit Test OK Below", "manager_email": "ltok@test.com"},
+            json={"name": "Limit Test OK Below", "manager_email": "ltok@test.com", "oc_plan_number": "PLAN-LTOK"},
         )
         assert response.status_code == 201
 
@@ -453,7 +453,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Unlimited Test BldgX", "manager_email": "ulx@test.com"},
+            json={"name": "Unlimited Test BldgX", "manager_email": "ulx@test.com", "oc_plan_number": "PLAN-ULX"},
         )
         assert response.status_code == 201
 
@@ -477,7 +477,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Should Be Blocked Limit", "manager_email": "sbl@test.com"},
+            json={"name": "Should Be Blocked Limit", "manager_email": "sbl@test.com", "oc_plan_number": "PLAN-SBL"},
         )
         assert response.status_code == 422
         detail = response.json()["detail"]
@@ -499,7 +499,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Should Fail Context", "manager_email": "sfc@test.com"},
+            json={"name": "Should Fail Context", "manager_email": "sfc@test.com", "oc_plan_number": "PLAN-SFC"},
         )
         assert response.status_code == 422
         detail = response.json()["detail"]
@@ -533,7 +533,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Should Succeed Despite Archived Z", "manager_email": "okz@test.com"},
+            json={"name": "Should Succeed Despite Archived Z", "manager_email": "okz@test.com", "oc_plan_number": "PLAN-OKZ"},
         )
         assert response.status_code == 201
 
@@ -552,7 +552,7 @@ class TestBuildingLimitEnforcement:
 
         response = await operator_client.post(
             "/api/admin/buildings",
-            json={"name": "Fails No Plan", "manager_email": "fnp@test.com"},
+            json={"name": "Fails Limit", "manager_email": "fnp@test.com", "oc_plan_number": "PLAN-FNP"},
         )
         assert response.status_code == 422
         assert "current" in response.json()["detail"]

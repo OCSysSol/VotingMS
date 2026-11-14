@@ -26,6 +26,7 @@ import { test, expect, RUN_SUFFIX } from "../fixtures";
 import type { APIRequestContext } from "@playwright/test";
 import path from "path";
 import { fileURLToPath } from "url";
+import { readFile } from "node:fs/promises";
 import {
   makeAdminApi,
   getMeetingDetails,
@@ -1162,24 +1163,24 @@ test("33M.18: dunsgaard logs in, sees lot 7, votes on all interactive motions", 
 });
 
 // ===========================================================================
-// Step 19: Admin enters in-person votes for 2 available lots on visible motions
+// Step 19: Admin enters floor votes for 2 available lots on visible motions
 // ===========================================================================
-test("33M.19: admin enters in-person votes for available lots", async ({ page }) => {
+test("33M.19: admin enters floor votes for available lots", async ({ page }) => {
   test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
   await page.goto(`/admin/general-meetings/${meetingId}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-  // Click "Enter In-Person Votes"
-  await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
+  // Click "Enter Floor Votes"
+  await page.getByRole("button", { name: "Enter Floor Votes" }).click();
 
   // Wait for step-1 dialog
   await expect(
-    page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })
+    page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })
   ).toBeVisible({ timeout: 15000 });
 
-  const dialog1 = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
+  const dialog1 = page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" });
   const availableCheckboxes = dialog1.locator('input[type="checkbox"]:not([disabled])');
   const checkboxCount = await availableCheckboxes.count();
 
@@ -1198,7 +1199,7 @@ test("33M.19: admin enters in-person votes for available lots", async ({ page })
   // Proceed to vote entry
   await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
 
-  const voteGrid = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const voteGrid = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   await expect(voteGrid).toBeVisible({ timeout: 15000 });
 
   // Vote "yes" (For) for all available (enabled) buttons
@@ -1214,12 +1215,12 @@ test("33M.19: admin enters in-person votes for available lots", async ({ page })
   // Submit votes
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
 
-  // Confirm dialog (aria-labelledby -> "Submit in-person votes?")
-  await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
+  // Confirm dialog (aria-labelledby -> "Submit floor votes?")
+  await expect(page.getByRole("dialog", { name: /Submit floor votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
 
   // On success with no skips the panel closes; if skipped lots exist a "Done" inline button appears.
-  const voteGridDialog = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const voteGridDialog = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   const doneButton = page.getByRole("button", { name: "Done" });
   const doneBtnVisible = await doneButton.isVisible().catch(() => false);
   if (doneBtnVisible) {
@@ -1229,9 +1230,9 @@ test("33M.19: admin enters in-person votes for available lots", async ({ page })
 });
 
 // ===========================================================================
-// Step 20: Make M10 visible, admin enters in-person votes
+// Step 20: Make M10 visible, admin enters floor votes
 // ===========================================================================
-test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ page }) => {
+test("33M.20: admin makes motion 10 visible, enters floor votes", async ({ page }) => {
   test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
   test.setTimeout(180000);
 
@@ -1249,12 +1250,12 @@ test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ p
   await page.goto(`/admin/general-meetings/${meetingId}`);
   await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
 
-  await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
+  await page.getByRole("button", { name: "Enter Floor Votes" }).click();
   await expect(
-    page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })
+    page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })
   ).toBeVisible({ timeout: 15000 });
 
-  const dialog1 = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
+  const dialog1 = page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" });
   const availableCheckboxes = dialog1.locator('input[type="checkbox"]:not([disabled])');
   const checkboxCount = await availableCheckboxes.count();
 
@@ -1266,7 +1267,7 @@ test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ p
   await availableCheckboxes.nth(0).check();
   await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
 
-  const voteGrid = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const voteGrid = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   await expect(voteGrid).toBeVisible({ timeout: 15000 });
 
   const allForButtons = voteGrid.getByRole("button", { name: /^yes for lot/ });
@@ -1279,9 +1280,9 @@ test("33M.20: admin makes motion 10 visible, enters in-person votes", async ({ p
   }
 
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
-  await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("dialog", { name: /Submit floor votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
-  const vgDialog20 = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const vgDialog20 = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   const doneBtn20 = page.getByRole("button", { name: "Done" });
   if (await doneBtn20.isVisible().catch(() => false)) { await doneBtn20.click(); }
   await expect(vgDialog20).not.toBeVisible({ timeout: 15000 });
@@ -1323,13 +1324,13 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
   // When the meeting is open, closing M11 replaces "Close Motion" with "Reopen Motion"
   await expect(page.getByTestId(`reopen-motion-btn-${m11Id}`)).toBeVisible({ timeout: 15000 });
 
-  // Enter in-person votes
-  await page.getByRole("button", { name: "Enter In-Person Votes" }).click();
+  // Enter floor votes
+  await page.getByRole("button", { name: "Enter Floor Votes" }).click();
   await expect(
-    page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" })
+    page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" })
   ).toBeVisible({ timeout: 15000 });
 
-  const dialog1 = page.getByRole("dialog", { name: "Enter In-Person Votes — Select Lots" });
+  const dialog1 = page.getByRole("dialog", { name: "Enter Floor Votes — Select Lots" });
   const availableCheckboxes = dialog1.locator('input[type="checkbox"]:not([disabled])');
   const checkboxCount = await availableCheckboxes.count();
 
@@ -1341,7 +1342,7 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
   await availableCheckboxes.nth(0).check();
   await page.getByRole("button", { name: /Proceed to vote entry/ }).click();
 
-  const voteGrid = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const voteGrid = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   await expect(voteGrid).toBeVisible({ timeout: 15000 });
 
   const allForButtons = voteGrid.getByRole("button", { name: /^yes for lot/ });
@@ -1354,9 +1355,9 @@ test("33M.21: admin makes M11/M12 visible, closes M11 voting, enters votes for M
   }
 
   await voteGrid.getByRole("button", { name: "Submit votes" }).click();
-  await expect(page.getByRole("dialog", { name: /Submit in-person votes/ })).toBeVisible({ timeout: 10000 });
+  await expect(page.getByRole("dialog", { name: /Submit floor votes/ })).toBeVisible({ timeout: 10000 });
   await page.getByRole("button", { name: "Confirm" }).click();
-  const vgDialog21 = page.getByRole("dialog", { name: "Enter In-Person Votes — Vote Grid" });
+  const vgDialog21 = page.getByRole("dialog", { name: "Enter Floor Votes — Vote Grid" });
   const doneBtn21 = page.getByRole("button", { name: "Done" });
   if (await doneBtn21.isVisible().catch(() => false)) { await doneBtn21.click(); }
   await expect(vgDialog21).not.toBeVisible({ timeout: 15000 });
@@ -1453,4 +1454,28 @@ test("33M.22: close meeting and verify final tally integrity", async () => {
   } finally {
     await api.dispose();
   }
+});
+
+// ===========================================================================
+// Step 23: Download the detailed meeting-results PDF
+// ===========================================================================
+test("33M.23: closed meeting downloads a detailed PDF without navigation", async ({ page }) => {
+  test.skip(!meetingId, "Skipping: meeting creation (33M.1) did not complete");
+  test.setTimeout(120000);
+
+  const detailUrl = `/admin/general-meetings/${meetingId}`;
+  await page.goto(detailUrl);
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("button", { name: "Download Summary PDF" })).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download Summary PDF" }).click();
+  const download = await downloadPromise;
+
+  expect(download.suggestedFilename()).toMatch(/^results-.*\.pdf$/);
+  const downloadedPath = await download.path();
+  expect(downloadedPath).toBeTruthy();
+  const header = await readFile(downloadedPath!, { encoding: "latin1" });
+  expect(header.startsWith("%PDF-")).toBe(true);
+  await expect(page).toHaveURL(new RegExp(`${detailUrl}$`));
 });

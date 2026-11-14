@@ -10,6 +10,7 @@ import {
   updateMotion,
   deleteMotion,
   resendReport,
+  downloadMeetingResultsPdf,
   closeMotion,
   reopenMotion,
   reopenGeneralMeeting,
@@ -173,7 +174,7 @@ function DeleteMeetingConfirmModal({ meetingTitle, deleting, error, onConfirm, o
   );
 }
 
-// Fix 9: modal dialog to replace the green banner after in-person vote submission
+// Fix 9: modal dialog to replace the green banner after floor vote submission
 function VoteEntrySuccessModal({ onClose }: { onClose: () => void }) {
   const handleClose = useCallback(() => onClose(), [onClose]);
 
@@ -216,7 +217,7 @@ function VoteEntrySuccessModal({ onClose }: { onClose: () => void }) {
           Votes submitted
         </h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
-          In-person votes have been recorded successfully.
+          Floor votes have been recorded successfully.
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button type="button" className="btn btn--primary" onClick={handleClose}>
@@ -347,6 +348,30 @@ export default function GeneralMeetingDetailPage() {
     onError: (err: Error) => {
       setResendError(err.message || "Failed to resend summary email");
       setResendSuccess(false);
+    },
+  });
+
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadMutation = useMutation({
+    mutationFn: () => downloadMeetingResultsPdf(meetingId!),
+    onSuccess: (blob) => {
+      setDownloadError(null);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const titleSlug = (meeting?.title || "general-meeting")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 60) || "general-meeting";
+      anchor.href = url;
+      anchor.download = `results-${titleSlug}-${meetingId}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    },
+    onError: (err: Error) => {
+      setDownloadError(err.message || "Failed to download summary PDF");
     },
   });
 
@@ -1000,15 +1025,25 @@ export default function GeneralMeetingDetailPage() {
         />
       )}
 
-      {meeting.status === "closed" && !showEmailBanner && (
+      {meeting.status === "closed" && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          {!showEmailBanner && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => { setResendSuccess(false); setResendError(null); resendMutation.mutate(); }}
+              disabled={resendMutation.isPending}
+            >
+              {resendMutation.isPending ? "Sending..." : meeting.email_delivery ? "Resend Summary Email" : "Send Summary Email"}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--secondary"
-            onClick={() => { setResendSuccess(false); setResendError(null); resendMutation.mutate(); }}
-            disabled={resendMutation.isPending}
+            onClick={() => { setDownloadError(null); downloadMutation.mutate(); }}
+            disabled={downloadMutation.isPending}
           >
-            {resendMutation.isPending ? "Sending..." : meeting.email_delivery ? "Resend Summary Email" : "Send Summary Email"}
+            {downloadMutation.isPending ? "Downloading…" : "Download Summary PDF"}
           </button>
           {resendSuccess && (
             <span style={{ color: "var(--green)", fontSize: "0.875rem", fontWeight: 600 }}>
@@ -1018,10 +1053,12 @@ export default function GeneralMeetingDetailPage() {
           {resendError && (
             <span role="alert" style={{ color: "var(--red)", fontSize: "0.875rem" }}>{resendError}</span>
           )}
+          {downloadError && (
+            <span role="alert" style={{ color: "var(--red)", fontSize: "0.875rem" }}>{downloadError}</span>
+          )}
         </div>
       )}
 
-      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
       {meeting.status !== "closed" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -1038,7 +1075,7 @@ export default function GeneralMeetingDetailPage() {
                 className="btn btn--secondary"
                 onClick={() => setShowVoteEntryPanel(true)}
               >
-                Enter In-Person Votes
+                Enter Floor Votes
               </button>
             )}
           </div>
@@ -1062,6 +1099,7 @@ export default function GeneralMeetingDetailPage() {
           </div>
         </div>
       )}
+      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
       {displayMotions.length === 0 ? (
         <p className="state-message">No motions.</p>
       ) : (

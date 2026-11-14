@@ -140,6 +140,7 @@ describe("BuildingsPage", () => {
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByRole("dialog", { name: "New OC Plan" })).toBeInTheDocument();
+    expect(screen.getByLabelText("OC Plan Number")).toBeInTheDocument();
     expect(screen.getByLabelText("Building Name")).toBeInTheDocument();
     expect(screen.getByLabelText("Manager Email")).toBeInTheDocument();
   });
@@ -186,6 +187,17 @@ describe("BuildingsPage", () => {
 
   // --- Input validation ---
 
+  it("shows error when OC Plan number is empty on submit", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
+    expect(screen.getByText("OC Plan number is required.")).toBeInTheDocument();
+  });
+
   it("shows error when building name is empty on submit", async () => {
     const user = userEvent.setup();
     renderPage();
@@ -193,6 +205,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     expect(screen.getByText("Building name is required.")).toBeInTheDocument();
   });
@@ -204,6 +217,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Test Tower");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     expect(screen.getByText("Manager email is required.")).toBeInTheDocument();
@@ -216,6 +230,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Test Tower");
     await user.type(screen.getByLabelText("Manager Email"), "notanemail");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
@@ -239,6 +254,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "New Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
@@ -268,9 +284,9 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "OC98765");
     await user.type(screen.getByLabelText("Building Name"), "OC Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.type(screen.getByLabelText("OC Plan Number"), "OC98765");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
@@ -292,6 +308,7 @@ describe("BuildingsPage", () => {
       expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Existing Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
@@ -310,6 +327,7 @@ describe("BuildingsPage", () => {
     });
     // Open modal and type something
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Typed Name");
     await user.type(screen.getByLabelText("Manager Email"), "typed@example.com");
     // Close
@@ -317,6 +335,7 @@ describe("BuildingsPage", () => {
     expect(screen.queryByRole("dialog", { name: "New OC Plan" })).not.toBeInTheDocument();
     // Reopen — fields should be empty
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByLabelText("OC Plan Number")).toHaveValue("");
     expect(screen.getByLabelText("Building Name")).toHaveValue("");
     expect(screen.getByLabelText("Manager Email")).toHaveValue("");
   });
@@ -561,8 +580,8 @@ describe("BuildingsPage", () => {
     // Tab past last focusable (Cancel) should wrap to first
     cancelBtn.focus();
     await user.tab();
-    // First focusable is Building Name input
-    expect(screen.getByLabelText("Building Name")).toHaveFocus();
+    // First focusable is OC Plan Number input
+    expect(screen.getByLabelText("OC Plan Number")).toHaveFocus();
     // Tab past Create Building (last before Cancel) wraps
     createBtn.focus();
     await user.tab();
@@ -577,8 +596,8 @@ describe("BuildingsPage", () => {
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
-    const nameInput = screen.getByLabelText("Building Name");
-    nameInput.focus();
+    const planInput = screen.getByLabelText("OC Plan Number");
+    planInput.focus();
     await user.tab({ shift: true });
     expect(cancelBtn).toHaveFocus();
   });
@@ -619,6 +638,16 @@ describe("BuildingsPage", () => {
     });
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
     expect(screen.getByLabelText("Building Name")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("OC Plan number input in modal has aria-required=true", async () => {
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    expect(screen.getByLabelText("OC Plan Number")).toHaveAttribute("aria-required", "true");
   });
 
   it("manager email input in modal has aria-required=true", async () => {
@@ -890,6 +919,7 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
@@ -921,6 +951,7 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));
@@ -943,6 +974,7 @@ describe("BuildingsPage — name filter (Fix 4)", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("button", { name: "+ New OC Plan" })).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "+ New OC Plan" }));
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Overflow Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create OC Plan" }));

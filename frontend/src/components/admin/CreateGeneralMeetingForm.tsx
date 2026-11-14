@@ -127,11 +127,7 @@ export default function CreateGeneralMeetingForm() {
           value={buildingId}
           onChange={(id) => setBuildingId(id)}
           placeholder="Search OC Plans"
-          displayLabel={(building) =>
-            building.oc_plan_number
-              ? `${building.oc_plan_number} — ${building.name}`
-              : building.name
-          }
+          displayLabel={(building) => building.oc_plan_number?.trim() || building.name}
           listboxLabel="OC Plans"
           clearLabel="Clear selection"
           emptyLabel="No OC Plans found"

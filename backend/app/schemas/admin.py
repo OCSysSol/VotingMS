@@ -55,7 +55,7 @@ class BuildingOut(BaseModel):
 class BuildingCreate(BaseModel):
     name: str = Field(..., max_length=255)
     manager_email: str = Field(..., max_length=254)
-    oc_plan_number: str | None = Field(default=None, max_length=100)
+    oc_plan_number: str = Field(..., max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -73,11 +73,11 @@ class BuildingCreate(BaseModel):
 
     @field_validator("oc_plan_number")
     @classmethod
-    def oc_plan_number_strip(cls, v: str | None) -> str | None:
-        if v is not None:
-            stripped = v.strip()
-            return stripped if stripped else None
-        return None
+    def oc_plan_number_strip(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("oc_plan_number must not be empty")
+        return stripped
 
 
 class BuildingUpdate(BaseModel):
