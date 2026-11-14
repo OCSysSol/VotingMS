@@ -6926,7 +6926,7 @@ class TestListGeneralMeetingsSort:
         # Need a second building for second meeting (AGM already exists for building)
         b2_resp = await client.post(
             "/api/admin/buildings",
-            json={"name": "Sort Test Building 2", "manager_email": "s2@test.com"},
+            json={"name": "Sort Test Building 2", "manager_email": "s2@test.com", "oc_plan_number": "PLAN-ST2"},
         )
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Alpha Meeting 2"))
@@ -6943,7 +6943,7 @@ class TestListGeneralMeetingsSort:
         await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "Zeta Meeting"))
         b2_resp = await client.post(
             "/api/admin/buildings",
-            json={"name": "Sort Test Building 3", "manager_email": "s3@test.com"},
+            json={"name": "Sort Test Building 3", "manager_email": "s3@test.com", "oc_plan_number": "PLAN-ST3"},
         )
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Alpha Meeting"))
@@ -6960,7 +6960,7 @@ class TestListGeneralMeetingsSort:
         await client.post("/api/admin/general-meetings", json=self._agm_payload(building.id, "First Meeting"))
         b2_resp = await client.post(
             "/api/admin/buildings",
-            json={"name": "Sort Test Building 4", "manager_email": "s4@test.com"},
+            json={"name": "Sort Test Building 4", "manager_email": "s4@test.com", "oc_plan_number": "PLAN-ST4"},
         )
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Second Meeting"))
@@ -7027,9 +7027,9 @@ class TestListGeneralMeetingsSort:
     ):
         """Meetings sorted by meeting_at ascending should be oldest meeting first."""
         # Use different buildings so the "one open AGM per building" constraint isn't hit
-        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortMeetingAtB1", "manager_email": "b1@test.com"})
+        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortMeetingAtB1", "manager_email": "b1@test.com", "oc_plan_number": "PLAN-SM1"})
         b1_id = b1_resp.json()["id"]
-        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortMeetingAtB2", "manager_email": "b2@test.com"})
+        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortMeetingAtB2", "manager_email": "b2@test.com", "oc_plan_number": "PLAN-SM2"})
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b1_id, "SortMeetingAt Later"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "SortMeetingAt Earlier"))
@@ -7044,9 +7044,9 @@ class TestListGeneralMeetingsSort:
         self, client: AsyncClient, db_session: AsyncSession, building
     ):
         """Meetings sorted by voting_closes_at ascending should be earliest close first."""
-        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortVotingCloseB1", "manager_email": "vc1@test.com"})
+        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortVotingCloseB1", "manager_email": "vc1@test.com", "oc_plan_number": "PLAN-VC1"})
         b1_id = b1_resp.json()["id"]
-        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortVotingCloseB2", "manager_email": "vc2@test.com"})
+        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortVotingCloseB2", "manager_email": "vc2@test.com", "oc_plan_number": "PLAN-VC2"})
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b1_id, "SortVotingClose A"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "SortVotingClose B"))
@@ -7070,11 +7070,11 @@ class TestListGeneralMeetingsSort:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """Title sort is case-insensitive: 'zebra' and 'Apple' and 'MANGO' sort alphabetically."""
-        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB1", "manager_email": "tc1@test.com"})
+        b1_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB1", "manager_email": "tc1@test.com", "oc_plan_number": "PLAN-TC1"})
         b1_id = b1_resp.json()["id"]
-        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB2", "manager_email": "tc2@test.com"})
+        b2_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB2", "manager_email": "tc2@test.com", "oc_plan_number": "PLAN-TC2"})
         b2_id = b2_resp.json()["id"]
-        b3_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB3", "manager_email": "tc3@test.com"})
+        b3_resp = await client.post("/api/admin/buildings", json={"name": "SortTitleCaseB3", "manager_email": "tc3@test.com", "oc_plan_number": "PLAN-TC3"})
         b3_id = b3_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b1_id, "zebra meeting"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "Apple Meeting"))
@@ -7092,11 +7092,11 @@ class TestListGeneralMeetingsSort:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """sort_by=building_name&sort_dir=asc returns meetings in A→Z building name order."""
-        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraTower Sort", "manager_email": "zbsort@test.com"})
+        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraTower Sort", "manager_email": "zbsort@test.com", "oc_plan_number": "PLAN-ZB"})
         b_z_id = b_z_resp.json()["id"]
-        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaTower Sort", "manager_email": "absort@test.com"})
+        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaTower Sort", "manager_email": "absort@test.com", "oc_plan_number": "PLAN-AB"})
         b_a_id = b_a_resp.json()["id"]
-        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoTower Sort", "manager_email": "mgsort@test.com"})
+        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoTower Sort", "manager_email": "mgsort@test.com", "oc_plan_number": "PLAN-MG"})
         b_m_id = b_m_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b_z_id, "Meeting Z-tower"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b_a_id, "Meeting A-tower"))
@@ -7112,11 +7112,11 @@ class TestListGeneralMeetingsSort:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """sort_by=building_name&sort_dir=desc returns meetings in Z→A building name order."""
-        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraDesc Sort", "manager_email": "zds@test.com"})
+        b_z_resp = await client.post("/api/admin/buildings", json={"name": "ZebraDesc Sort", "manager_email": "zds@test.com", "oc_plan_number": "PLAN-ZD"})
         b_z_id = b_z_resp.json()["id"]
-        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaDesc Sort", "manager_email": "ads@test.com"})
+        b_a_resp = await client.post("/api/admin/buildings", json={"name": "AlphaDesc Sort", "manager_email": "ads@test.com", "oc_plan_number": "PLAN-AD"})
         b_a_id = b_a_resp.json()["id"]
-        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoDesc Sort", "manager_email": "mds@test.com"})
+        b_m_resp = await client.post("/api/admin/buildings", json={"name": "MangoDesc Sort", "manager_email": "mds@test.com", "oc_plan_number": "PLAN-MD"})
         b_m_id = b_m_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b_z_id, "MeetingZDesc"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b_a_id, "MeetingADesc"))
@@ -7132,9 +7132,9 @@ class TestListGeneralMeetingsSort:
         self, client: AsyncClient, db_session: AsyncSession
     ):
         """building_name sort is case-insensitive."""
-        b1_resp = await client.post("/api/admin/buildings", json={"name": "zebra ci sort", "manager_email": "zci@test.com"})
+        b1_resp = await client.post("/api/admin/buildings", json={"name": "zebra ci sort", "manager_email": "zci@test.com", "oc_plan_number": "PLAN-ZCI"})
         b1_id = b1_resp.json()["id"]
-        b2_resp = await client.post("/api/admin/buildings", json={"name": "APPLE CI SORT", "manager_email": "aci@test.com"})
+        b2_resp = await client.post("/api/admin/buildings", json={"name": "APPLE CI SORT", "manager_email": "aci@test.com", "oc_plan_number": "PLAN-ACI"})
         b2_id = b2_resp.json()["id"]
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b1_id, "CISortZebraMeeting"))
         await client.post("/api/admin/general-meetings", json=self._agm_payload(b2_id, "CISortAppleMeeting"))
@@ -8555,3 +8555,114 @@ class TestUpdateGeneralMeeting:
             json={"voting_closes_at": one_second_after.isoformat()},
         )
         assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# GET /api/admin/general-meetings/{id}/results.pdf
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadMeetingResultsPdf:
+    async def _create_meeting(
+        self,
+        db_session: AsyncSession,
+        name: str,
+        status: GeneralMeetingStatus = GeneralMeetingStatus.closed,
+    ) -> GeneralMeeting:
+        building = Building(
+            name=f"{name} Building",
+            manager_email=f"{name.lower()}@example.com",
+            oc_plan_number=f"{name}-PLAN",
+        )
+        db_session.add(building)
+        await db_session.flush()
+        meeting = GeneralMeeting(
+            building_id=building.id,
+            title=f"{name} Results",
+            status=status,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+            closed_at=datetime.now(UTC) if status == GeneralMeetingStatus.closed else None,
+        )
+        db_session.add(meeting)
+        await db_session.flush()
+        db_session.add(
+            Motion(
+                general_meeting_id=meeting.id,
+                title="Adopt budget",
+                description="Detailed budget motion",
+                display_order=1,
+                motion_number="1",
+            )
+        )
+        await db_session.commit()
+        return meeting
+
+    async def test_closed_meeting_returns_private_pdf(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        meeting = await self._create_meeting(db_session, "ClosedDownload")
+
+        response = await client.get(
+            f"/api/admin/general-meetings/{meeting.id}/results.pdf"
+        )
+
+        assert response.status_code == 200
+        assert response.content.startswith(b"%PDF-")
+        assert response.headers["content-type"] == "application/pdf"
+        assert response.headers["cache-control"] == "no-store"
+        assert response.headers["x-content-type-options"] == "nosniff"
+        assert (
+            response.headers["content-disposition"]
+            == f'attachment; filename="results-closeddownload-results-{meeting.id}.pdf"'
+        )
+
+    async def test_open_meeting_returns_409(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        meeting = await self._create_meeting(
+            db_session, "OpenDownload", status=GeneralMeetingStatus.open
+        )
+
+        response = await client.get(
+            f"/api/admin/general-meetings/{meeting.id}/results.pdf"
+        )
+
+        assert response.status_code == 409
+        assert "after the meeting is closed" in response.json()["detail"]
+
+    async def test_missing_meeting_returns_404(self, client: AsyncClient):
+        response = await client.get(
+            f"/api/admin/general-meetings/{uuid.uuid4()}/results.pdf"
+        )
+        assert response.status_code == 404
+
+    async def test_unauthenticated_returns_401(
+        self, db_session: AsyncSession
+    ):
+        from app.main import app as fastapi_app
+
+        meeting = await self._create_meeting(db_session, "UnauthDownload")
+        async with AsyncClient(
+            transport=ASGITransport(app=fastapi_app),
+            base_url="http://test",
+            headers={"X-Requested-With": "XMLHttpRequest"},
+        ) as unauthenticated_client:
+            response = await unauthenticated_client.get(
+                f"/api/admin/general-meetings/{meeting.id}/results.pdf"
+            )
+        assert response.status_code == 401
+
+    async def test_rate_limit_returns_429_after_ten_requests(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        meeting = await self._create_meeting(db_session, "RateLimitedDownload")
+        path = f"/api/admin/general-meetings/{meeting.id}/results.pdf"
+
+        for _ in range(10):
+            response = await client.get(path)
+            assert response.status_code == 200
+        response = await client.get(path)
+
+        assert response.status_code == 429
+        assert response.headers["x-ratelimit-limit"] == "10"

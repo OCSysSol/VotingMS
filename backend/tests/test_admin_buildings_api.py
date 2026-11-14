@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import openpyxl
 
+from app.services import admin_service
 from app.models import Building, LotOwner
 from app.models.lot import Lot
 from app.models.lot_person import lot_persons
@@ -617,7 +618,7 @@ class TestCreateBuildingEndpoint:
     ):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "New Form Building", "manager_email": "form@test.com"},
+            json={"name": "New Form Building", "manager_email": "form@test.com", "oc_plan_number": "PLAN-FORM"},
         )
         assert response.status_code == 201
         data = response.json()
@@ -631,14 +632,14 @@ class TestCreateBuildingEndpoint:
     async def test_empty_name_returns_422(self, client: AsyncClient):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "  ", "manager_email": "mgr@test.com"},
+            json={"name": "  ", "manager_email": "mgr@test.com", "oc_plan_number": "PLAN-EMPTY-NAME"},
         )
         assert response.status_code == 422
 
     async def test_empty_email_returns_422(self, client: AsyncClient):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "Valid Building", "manager_email": "  "},
+            json={"name": "Valid Building", "manager_email": "  ", "oc_plan_number": "PLAN-EMPTY-MAIL"},
         )
         assert response.status_code == 422
 
@@ -1591,11 +1592,11 @@ class TestListBuildingsSort:
         # Create two buildings with known names
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Zephyr Tower", "manager_email": "z@test.com"},
+            json={"name": "Zephyr Tower", "manager_email": "z@test.com", "oc_plan_number": "PLAN-Z"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Alpha Court", "manager_email": "a@test.com"},
+            json={"name": "Alpha Court", "manager_email": "a@test.com", "oc_plan_number": "PLAN-A"},
         )
         response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=asc&is_archived=false")
         assert response.status_code == 200
@@ -1608,11 +1609,11 @@ class TestListBuildingsSort:
         """Buildings sorted by name descending should be in Z→A order."""
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Zephyr Tower", "manager_email": "z@test.com"},
+            json={"name": "Zephyr Tower", "manager_email": "z@test.com", "oc_plan_number": "PLAN-Z"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Alpha Court", "manager_email": "a@test.com"},
+            json={"name": "Alpha Court", "manager_email": "a@test.com", "oc_plan_number": "PLAN-A"},
         )
         response = await client.get("/api/admin/buildings?sort_by=name&sort_dir=desc&is_archived=false")
         assert response.status_code == 200
@@ -1625,11 +1626,11 @@ class TestListBuildingsSort:
         """Buildings sorted by created_at ascending should be oldest first."""
         await client.post(
             "/api/admin/buildings",
-            json={"name": "First Building", "manager_email": "f@test.com"},
+            json={"name": "First Building", "manager_email": "f@test.com", "oc_plan_number": "PLAN-F"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Second Building", "manager_email": "s@test.com"},
+            json={"name": "Second Building", "manager_email": "s@test.com", "oc_plan_number": "PLAN-S"},
         )
         response = await client.get("/api/admin/buildings?sort_by=created_at&sort_dir=asc&is_archived=false")
         assert response.status_code == 200
@@ -1645,11 +1646,11 @@ class TestListBuildingsSort:
         """Without sort params, buildings should be returned newest first (default)."""
         await client.post(
             "/api/admin/buildings",
-            json={"name": "BuildingA", "manager_email": "ba@test.com"},
+            json={"name": "BuildingA", "manager_email": "ba@test.com", "oc_plan_number": "PLAN-BA"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": "BuildingB", "manager_email": "bb@test.com"},
+            json={"name": "BuildingB", "manager_email": "bb@test.com", "oc_plan_number": "PLAN-BB"},
         )
         response = await client.get("/api/admin/buildings?is_archived=false")
         assert response.status_code == 200
@@ -1664,11 +1665,11 @@ class TestListBuildingsSort:
         """sort_by=name without sort_dir should use desc (the global default)."""
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Zephyr", "manager_email": "z@test.com"},
+            json={"name": "Zephyr", "manager_email": "z@test.com", "oc_plan_number": "PLAN-Z2"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": "Alpha", "manager_email": "a@test.com"},
+            json={"name": "Alpha", "manager_email": "a@test.com", "oc_plan_number": "PLAN-A2"},
         )
         response = await client.get("/api/admin/buildings?sort_by=name&is_archived=false")
         assert response.status_code == 200
@@ -1710,7 +1711,7 @@ class TestListBuildingsSort:
         unique_prefix = "SortBoundaryUniq"
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique_prefix} Solo Building", "manager_email": "solo@test.com"},
+            json={"name": f"{unique_prefix} Solo Building", "manager_email": "solo@test.com", "oc_plan_number": "PLAN-SOLO"},
         )
         response = await client.get(f"/api/admin/buildings?sort_by=name&sort_dir=asc&name={unique_prefix}")
         assert response.status_code == 200
@@ -1725,11 +1726,11 @@ class TestListBuildingsSort:
         unique = "SortEmailTest"
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} Z Building", "manager_email": "zzz@test.com"},
+            json={"name": f"{unique} Z Building", "manager_email": "zzz@test.com", "oc_plan_number": "PLAN-ZF"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} A Building", "manager_email": "aaa@test.com"},
+            json={"name": f"{unique} A Building", "manager_email": "aaa@test.com", "oc_plan_number": "PLAN-AF"},
         )
         response = await client.get(f"/api/admin/buildings?sort_by=manager_email&sort_dir=asc&name={unique}")
         assert response.status_code == 200
@@ -1743,11 +1744,11 @@ class TestListBuildingsSort:
         unique = "SortEmailDescTest"
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} Z Building", "manager_email": "zzz@test.com"},
+            json={"name": f"{unique} Z Building", "manager_email": "zzz@test.com", "oc_plan_number": "PLAN-ZF"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} A Building", "manager_email": "aaa@test.com"},
+            json={"name": f"{unique} A Building", "manager_email": "aaa@test.com", "oc_plan_number": "PLAN-AF"},
         )
         response = await client.get(f"/api/admin/buildings?sort_by=manager_email&sort_dir=desc&name={unique}")
         assert response.status_code == 200
@@ -1763,15 +1764,15 @@ class TestListBuildingsSort:
         unique = "SortCaseTest"
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} zebra tower", "manager_email": "z@test.com"},
+            json={"name": f"{unique} zebra tower", "manager_email": "z@test.com", "oc_plan_number": "PLAN-ZEBRA"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} Apple Court", "manager_email": "a@test.com"},
+            json={"name": f"{unique} Apple Court", "manager_email": "a@test.com", "oc_plan_number": "PLAN-APPLE"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} MANGO House", "manager_email": "m@test.com"},
+            json={"name": f"{unique} MANGO House", "manager_email": "m@test.com", "oc_plan_number": "PLAN-MANGO"},
         )
         response = await client.get(f"/api/admin/buildings?sort_by=name&sort_dir=asc&name={unique}")
         assert response.status_code == 200
@@ -1786,11 +1787,11 @@ class TestListBuildingsSort:
         unique = "SortEmailCase"
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} B", "manager_email": "ZZZ@test.com"},
+            json={"name": f"{unique} B", "manager_email": "ZZZ@test.com", "oc_plan_number": "PLAN-MAIL-Z"},
         )
         await client.post(
             "/api/admin/buildings",
-            json={"name": f"{unique} A", "manager_email": "aaa@test.com"},
+            json={"name": f"{unique} A", "manager_email": "aaa@test.com", "oc_plan_number": "PLAN-MAIL-A"},
         )
         response = await client.get(f"/api/admin/buildings?sort_by=manager_email&sort_dir=asc&name={unique}")
         assert response.status_code == 200
@@ -1901,7 +1902,7 @@ class TestOcPlanAttributeAndNonUniqueBuildings:
         assert r1.status_code == 201
         assert r1.json()["oc_plan_number"] == "OC999"
 
-        # Whitespace-only becomes None
+        # Whitespace-only is rejected
         r2 = await client.post(
             "/api/admin/buildings",
             json={
@@ -1910,8 +1911,35 @@ class TestOcPlanAttributeAndNonUniqueBuildings:
                 "oc_plan_number": "   ",
             },
         )
-        assert r2.status_code == 201
-        assert r2.json()["oc_plan_number"] is None
+        assert r2.status_code == 422
+
+    async def test_create_building_requires_oc_plan_number(self, client: AsyncClient):
+        missing = await client.post(
+            "/api/admin/buildings",
+            json={"name": "Missing Plan", "manager_email": "missing@test.com"},
+        )
+        null = await client.post(
+            "/api/admin/buildings",
+            json={
+                "name": "Null Plan",
+                "manager_email": "null@test.com",
+                "oc_plan_number": None,
+            },
+        )
+
+        assert missing.status_code == 422
+        assert null.status_code == 422
+
+    async def test_service_rejects_blank_oc_plan_number(
+        self, db_session: AsyncSession
+    ):
+        with pytest.raises(ValueError, match="must not be empty"):
+            await admin_service.create_building(
+                "Defensive Building",
+                "defensive@example.com",
+                db_session,
+                oc_plan_number="   ",
+            )
 
     async def test_duplicate_building_name_allowed(self, client: AsyncClient):
         r1 = await client.post(
@@ -2003,17 +2031,23 @@ class TestOcPlanAttributeAndNonUniqueBuildings:
         plans_desc = [b["oc_plan_number"] for b in r_desc.json() if b["oc_plan_number"] in ("AAA-Plan", "ZZZ-Plan")]
         assert plans_desc == ["ZZZ-Plan", "AAA-Plan"]
 
-    async def test_csv_import_with_oc_plan_number_rules(self, client: AsyncClient):
+    async def test_csv_import_with_oc_plan_number_rules(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
         # 1. Existing building with name and oc_plan_number
         await client.post(
             "/api/admin/buildings",
             json={"name": "Import Test Bldg", "manager_email": "old@test.com", "oc_plan_number": "PLAN-101"},
         )
-        # 2. Existing building with name and NULL oc_plan_number
-        await client.post(
-            "/api/admin/buildings",
-            json={"name": "Null Plan Bldg", "manager_email": "null@test.com", "oc_plan_number": None},
+        # 2. Legacy building with NULL oc_plan_number (allowed outside create API)
+        db_session.add(
+            Building(
+                name="Null Plan Bldg",
+                manager_email="null@test.com",
+                oc_plan_number=None,
+            )
         )
+        await db_session.commit()
 
         # CSV row 1: matches by oc_plan_number first (even if name differs slightly)
         # CSV row 2: matches by building_name where oc_plan is blank/absent

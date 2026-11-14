@@ -44,6 +44,7 @@ test.describe("Admin Buildings", () => {
 
   test("create building via modal dialog", async ({ page }) => {
     const buildingName = `E2E Modal Building ${Date.now()}`;
+    const ocPlanNumber = `E2E-PLAN-${Date.now()}`;
     await page.goto("/admin/buildings");
     await expect(page.getByRole("heading", { name: "OC Plans", exact: true })).toBeVisible();
 
@@ -51,7 +52,9 @@ test.describe("Admin Buildings", () => {
     await page.getByRole("button", { name: "+ New OC Plan" }).click();
     await expect(page.getByRole("dialog", { name: "New OC Plan" })).toBeVisible();
 
-    // Fill in the form
+    // OC Plan number is the first and mandatory field.
+    await expect(page.getByLabel("OC Plan Number")).toBeVisible();
+    await page.getByLabel("OC Plan Number").fill(ocPlanNumber);
     await page.getByLabel("Building Name").fill(buildingName);
     await page.getByLabel("Manager Email").fill("e2e-modal@test.com");
 
@@ -63,5 +66,16 @@ test.describe("Admin Buildings", () => {
 
     // New building appears in the table
     await expect(page.getByRole("button", { name: buildingName })).toBeVisible();
+  });
+
+  test("new OC Plan requires the OC Plan number", async ({ page }) => {
+    await page.goto("/admin/buildings");
+    await page.getByRole("button", { name: "+ New OC Plan" }).click();
+    await page.getByLabel("Building Name").fill(`E2E Required Plan ${Date.now()}`);
+    await page.getByLabel("Manager Email").fill("e2e-required-plan@test.com");
+    await page.getByRole("button", { name: "Create OC Plan" }).click();
+
+    await expect(page.getByText("OC Plan number is required.")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).toBeVisible();
   });
 });

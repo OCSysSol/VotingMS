@@ -25,15 +25,24 @@ describe("BuildingForm", () => {
   it("renders the form heading, fields, and buttons", () => {
     renderComponent();
     expect(screen.getByRole("heading", { name: "Create Building" })).toBeInTheDocument();
+    expect(screen.getByLabelText("OC Plan Number")).toBeInTheDocument();
     expect(screen.getByLabelText("Building Name")).toBeInTheDocument();
     expect(screen.getByLabelText("Manager Email")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Create Building" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
+  it("shows error when OC Plan number is empty", async () => {
+    const user = userEvent.setup();
+    renderComponent();
+    await user.click(screen.getByRole("button", { name: "Create Building" }));
+    expect(screen.getByText("OC Plan number is required.")).toBeInTheDocument();
+  });
+
   it("shows error when building name is empty", async () => {
     const user = userEvent.setup();
     renderComponent();
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.click(screen.getByRole("button", { name: "Create Building" }));
     expect(screen.getByText("Building name is required.")).toBeInTheDocument();
   });
@@ -41,6 +50,7 @@ describe("BuildingForm", () => {
   it("shows error when manager email is empty", async () => {
     const user = userEvent.setup();
     renderComponent();
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Test Tower");
     await user.click(screen.getByRole("button", { name: "Create Building" }));
     expect(screen.getByText("Manager email is required.")).toBeInTheDocument();
@@ -56,6 +66,7 @@ describe("BuildingForm", () => {
   it("calls onSuccess after successful creation", async () => {
     const user = userEvent.setup();
     const { onSuccess } = renderComponent();
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "New Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create Building" }));
@@ -81,9 +92,9 @@ describe("BuildingForm", () => {
     );
     const user = userEvent.setup();
     const { onSuccess } = renderComponent();
+    await user.type(screen.getByLabelText("OC Plan Number"), "OC1234");
     await user.type(screen.getByLabelText("Building Name"), "New Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
-    await user.type(screen.getByLabelText("OC Plan Number"), "OC1234");
     await user.click(screen.getByRole("button", { name: "Create Building" }));
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled();
@@ -99,6 +110,7 @@ describe("BuildingForm", () => {
     );
     const user = userEvent.setup();
     renderComponent();
+    await user.type(screen.getByLabelText("OC Plan Number"), "PS-123");
     await user.type(screen.getByLabelText("Building Name"), "Existing Tower");
     await user.type(screen.getByLabelText("Manager Email"), "mgr@example.com");
     await user.click(screen.getByRole("button", { name: "Create Building" }));
@@ -112,6 +124,11 @@ describe("BuildingForm", () => {
   it("Building Name input has aria-required='true'", () => {
     renderComponent();
     expect(screen.getByLabelText("Building Name")).toHaveAttribute("aria-required", "true");
+  });
+
+  it("OC Plan Number input has aria-required='true'", () => {
+    renderComponent();
+    expect(screen.getByLabelText("OC Plan Number")).toHaveAttribute("aria-required", "true");
   });
 
   it("Manager Email input has aria-required='true'", () => {

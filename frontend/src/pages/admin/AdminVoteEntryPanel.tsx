@@ -133,7 +133,7 @@ function ConfirmDialog({ lotCount, motionCount, onConfirm, onCancel }: ConfirmDi
         }}
       >
         <h2 id="confirm-dialog-title" style={{ marginTop: 0, marginBottom: 12 }}>
-          Submit in-person votes?
+          Submit floor votes?
         </h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
           Submitting votes for {lotCount} lot(s) across {motionCount} motion(s). This cannot be undone.
@@ -296,7 +296,7 @@ const LotBinaryVoteCell = memo(function LotBinaryVoteCell({
     >
       {priorSource && (
         <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
-          {priorSource === "user" ? "User voted" : "Admin voted"}
+          {priorSource === "user" ? "User voted" : "Floor vote recorded"}
         </span>
       )}
       <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
@@ -595,7 +595,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Enter In-Person Votes — Select Lots"
+          aria-label="Enter Floor Votes — Select Lots"
           style={{
             position: "fixed",
             inset: 0,
@@ -621,7 +621,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-              <h2 style={{ margin: 0 }}>Enter In-Person Votes</h2>
+              <h2 style={{ margin: 0 }}>Enter Floor Votes</h2>
               <button
                 type="button"
                 className="btn btn--ghost"
@@ -632,7 +632,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
               </button>
             </div>
             <p style={{ color: "var(--text-secondary)", marginBottom: 20 }}>
-              Select lot owners whose in-person votes you want to enter. Existing votes are preserved, and you can enter votes for their remaining motions.
+              Select lot owners whose floor votes you want to enter. Existing votes are preserved, and you can enter votes for their remaining motions.
             </p>
 
             {lotsLoading ? (
@@ -693,10 +693,10 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                       {sourceSummary && (
                         <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
                           {sourceSummary === "mixed"
-                            ? "Mixed user/admin votes"
+                          ? "Mixed user/floor votes"
                             : sourceSummary === "user"
                             ? "User votes recorded"
-                            : "Admin votes recorded"}
+                            : "Floor votes recorded"}
                         </span>
                       )}
                     </li>
@@ -762,7 +762,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Enter In-Person Votes — Vote Grid"
+        aria-label="Enter Floor Votes — Vote Grid"
         style={{
           position: "fixed",
           inset: 0,
@@ -924,10 +924,10 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                         {sourceSummary && (
                           <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
                             {sourceSummary === "mixed"
-                              ? "Mixed user/admin votes"
+                            ? "Mixed user/floor votes"
                               : sourceSummary === "user"
                               ? "User votes recorded"
-                              : "Admin votes recorded"}
+                              : "Floor votes recorded"}
                           </span>
                         )}
                       </th>
@@ -990,7 +990,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                           >
                             {priorSource && (
                               <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
-                                {priorSource === "user" ? "User voted" : "Admin voted"}
+                                {priorSource === "user" ? "User voted" : "Floor vote recorded"}
                               </span>
                             )}
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

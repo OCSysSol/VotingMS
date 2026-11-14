@@ -430,6 +430,21 @@ test.describe("Admin General Meetings — motion number workflows", () => {
     await api.dispose();
   }, { timeout: 60000 });
 
+  test("motion and floor-vote actions appear above the Motions heading", async ({ page }) => {
+    await page.goto(`/admin/general-meetings/${meetingId}`);
+    await expect(page.getByRole("heading", { level: 1 })).toBeVisible({ timeout: 15000 });
+
+    const addMotionBox = await page.getByRole("button", { name: "Add Motion" }).boundingBox();
+    const floorVotesBox = await page.getByRole("button", { name: "Enter Floor Votes" }).boundingBox();
+    const headingBox = await page.getByRole("heading", { name: "Motions", exact: true }).boundingBox();
+
+    expect(addMotionBox).not.toBeNull();
+    expect(floorVotesBox).not.toBeNull();
+    expect(headingBox).not.toBeNull();
+    expect(addMotionBox!.y).toBeLessThan(headingBox!.y);
+    expect(floorVotesBox!.y).toBeLessThan(headingBox!.y);
+  });
+
   // Scenario A — Edit motion number persists
   test("Scenario A: editing motion number to SR-1 persists after page refresh", async ({ page }) => {
     test.setTimeout(120000);

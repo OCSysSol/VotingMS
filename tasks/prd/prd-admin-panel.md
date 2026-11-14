@@ -627,7 +627,7 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [ ] The table has 5 columns: "Lot #" (monospace), "Email", "UOE" (monospace, right-aligned), "Submitted By", "Choice"
 - [ ] Voters from all categories (For, Against, Abstained, Absent, Not eligible) appear in the same table, each row labelled with a coloured choice badge in the Choice column
 - [ ] Proxy voters show "(proxy)" next to their email address
-- [ ] Admin-submitted ballots show "Admin" in the Submitted By column; voter-submitted ballots show "Voter"
+- [ ] Admin-submitted floor ballots show "Floor vote" in the user-facing email/source cell; voter-submitted ballots show their voter email
 - [ ] If no voters exist across all categories, a "No voter records." message is shown instead of an empty table
 - [ ] Typecheck/lint passes; all tests pass at 100% coverage
 
@@ -651,11 +651,55 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [x] For multi-choice motions, the CSV contains one row per voter per option-vote with columns: `Lot Number`, `Owner Name`, `Voter Email`, `Option`, `Vote Choice`, `Entitlement (UOE)`, `Submitted By`, `Submitted At`
 - [x] `Owner Name` is the display name from `voter_name` if available, empty string otherwise
 - [x] `Vote Choice` values are human-readable: `For`, `Against`, `Abstained`, `Absent`, `Not eligible`
-- [x] `Submitted By` is `Admin` when `submitted_by_admin = true`, `Voter` otherwise
+- [x] User-facing choice/source text is `Floor vote` when `submitted_by_admin = true`, `Voter` otherwise
 - [x] `Submitted At` is the ballot submission timestamp in ISO 8601 format (UTC)
 - [x] The button uses `.btn.btn--admin` style with a download icon (`↓`) prefix
 - [x] All tests pass at 100% coverage
 - [x] Typecheck/lint passes
+
+---
+
+### US-PDF-DL-01: Download the complete meeting results PDF
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting admin, I want to download the same complete voting-results PDF that is attached to the summary email so I can inspect, store, or share an offline record without sending an email.
+
+**Acceptance Criteria:**
+
+- [x] A `Download Summary PDF` button is shown next to the summary-email action for closed meetings.
+- [x] The download remains available when email delivery is disabled or the email delivery banner is visible.
+- [x] Clicking the button calls an authenticated admin endpoint and downloads an `application/pdf` attachment without navigating away from the meeting detail page.
+- [x] The endpoint returns 404 for an unknown meeting, 409 for a meeting that is not closed, and 401/403 without an authenticated admin session.
+- [x] The button shows a loading state while the PDF is generated and an inline accessible error if generation/download fails.
+- [x] The download and email attachment are produced by the same backend PDF renderer and contain the same substantive voting data.
+- [x] The PDF includes meeting/OC Plan metadata, participation totals, every motion and resolution type, weighted/voter tallies, and voter-level details for binary and multi-choice motions.
+- [x] Admin-entered ballots display `Floor vote` in the user-facing email/source cell; the internal `admin` source sentinel is not shown.
+- [x] The PDF handles empty categories, long motion/option text, and multi-page meetings without clipped or overlapping content.
+- [x] Admin PDF generation is rate-limited to prevent repeated CPU-intensive requests.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
+
+---
+
+### US-UI-FLOOR-01: Use floor-vote terminology and place meeting actions above Motions
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting admin, I want floor-vote terminology and meeting actions arranged in the order I use them so the page is clear during an in-person meeting.
+
+**Acceptance Criteria:**
+
+- [x] The meeting detail action reads `Enter Floor Votes` instead of `Enter In-Person Votes`.
+- [x] The floor-vote selection and vote-grid dialogs use `Floor Votes` in their accessible names and headings.
+- [x] `Add Motion` and `Enter Floor Votes` appear above the `Motions` heading.
+- [x] The existing Show All / Hide All controls remain in the same action row without obscuring the motion controls on narrow screens.
+- [x] In binary and multi-choice voting-detail tables, a ballot entered on behalf of a lot by an admin shows `Floor vote` in the Email/source cell instead of `admin`.
+- [x] Voter-submitted ballots continue to show the actual voter email (with proxy/owner context where available).
+- [x] `submitted_by_admin` remains the authoritative internal source field; no persisted vote data or backend contract is renamed.
+- [x] Component and E2E tests update all affected labels and assert the required visual order.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
 
 ---
 

@@ -3507,7 +3507,7 @@ class TestCreateBuildingEndpoint:
     ):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "New Form Building", "manager_email": "form@test.com"},
+            json={"name": "New Form Building", "manager_email": "form@test.com", "oc_plan_number": "PLAN-FORM"},
         )
         assert response.status_code == 201
         data = response.json()
@@ -3521,14 +3521,14 @@ class TestCreateBuildingEndpoint:
     async def test_empty_name_returns_422(self, client: AsyncClient):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "  ", "manager_email": "mgr@test.com"},
+            json={"name": "  ", "manager_email": "mgr@test.com", "oc_plan_number": "PLAN-EMPTY-NAME"},
         )
         assert response.status_code == 422
 
     async def test_empty_email_returns_422(self, client: AsyncClient):
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "Valid Building", "manager_email": "  "},
+            json={"name": "Valid Building", "manager_email": "  ", "oc_plan_number": "PLAN-EMPTY-MAIL"},
         )
         assert response.status_code == 422
 
@@ -3539,12 +3539,12 @@ class TestCreateBuildingEndpoint:
     ):
         r1 = await client.post(
             "/api/admin/buildings",
-            json={"name": "Dup Form Building", "manager_email": "dup@test.com"},
+            json={"name": "Dup Form Building", "manager_email": "dup@test.com", "oc_plan_number": "PLAN-DUP-1"},
         )
         assert r1.status_code == 201
         response = await client.post(
             "/api/admin/buildings",
-            json={"name": "Dup Form Building", "manager_email": "other@test.com"},
+            json={"name": "Dup Form Building", "manager_email": "other@test.com", "oc_plan_number": "PLAN-DUP-2"},
         )
         assert response.status_code == 201
 

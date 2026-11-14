@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import aiosmtplib
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +92,10 @@ from app.services import config_service
 from app.services import smtp_config_service
 from app.services import blob_service
 from app.services import neon_auth_service
+from app.services.report_pdf_service import (
+    generate_meeting_results_pdf,
+    report_pdf_filename,
+)
 from app.services.neon_auth_service import (
     NeonAuthDuplicateUserError,
     NeonAuthNotConfiguredError,
@@ -102,6 +106,7 @@ from app.rate_limiter import (
     admin_import_limiter,
     admin_close_limiter,
     admin_invite_limiter,
+    admin_report_limiter,
     get_client_ip,
     provision_limiter,
     sms_test_rate_limiter,
@@ -1049,6 +1054,33 @@ async def get_general_meeting_detail(
 ) -> GeneralMeetingDetail:
     detail = await admin_service.get_general_meeting_detail(general_meeting_id, db)
     return GeneralMeetingDetail(**detail)
+
+
+@router.get("/general-meetings/{general_meeting_id}/results.pdf")
+async def download_general_meeting_results_pdf(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> Response:
+    """Download the closed meeting's detailed voter and tally report."""
+    admin_report_limiter.check(current_user.user_id)
+    detail = await admin_service.get_general_meeting_detail(general_meeting_id, db)
+    if detail["status"] != "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Meeting results are only available after the meeting is closed",
+        )
+
+    filename = report_pdf_filename(detail)
+    return Response(
+        content=generate_meeting_results_pdf(detail),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.patch(

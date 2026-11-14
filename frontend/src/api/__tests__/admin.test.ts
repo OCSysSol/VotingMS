@@ -9,6 +9,7 @@ import {
   listLotOwners,
   countLotOwners,
   deleteGeneralMeeting,
+  downloadMeetingResultsPdf,
   deleteBuilding,
   deleteMotion,
   importBuildings,
@@ -1123,5 +1124,25 @@ describe("getGeneralMeetingsCount is_archived param", () => {
     const res = await getGeneralMeetingsCount({ is_archived: true });
     expect(res).toEqual({ count: 7 });
     expect(capturedUrl).toContain("is_archived=true");
+  });
+});
+
+describe("downloadMeetingResultsPdf", () => {
+  it("requests the authenticated PDF endpoint and returns a blob", async () => {
+    let requestedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings/meeting-1/results.pdf`, ({ request }) => {
+        requestedUrl = request.url;
+        return new HttpResponse(new Blob(["%PDF-1.4"]), {
+          headers: { "Content-Type": "application/pdf" },
+        });
+      })
+    );
+
+    const result = await downloadMeetingResultsPdf("meeting-1");
+
+    expect(requestedUrl).toBe(`${BASE}/api/admin/general-meetings/meeting-1/results.pdf`);
+    expect(result.type).toBe("application/pdf");
+    expect(result.size).toBeGreaterThan(0);
   });
 });

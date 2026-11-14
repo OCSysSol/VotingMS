@@ -56,6 +56,12 @@ from app.services.email_service import (
     _send_with_limit,
     _try_acquire_email_lock,
 )
+
+
+def _report_html(msg) -> str:
+    alternative = msg.get_payload()[0]
+    html_part = alternative.get_payload()[0]
+    return html_part.get_payload(decode=True).decode("utf-8")
 from app.services.smtp_config_service import get_smtp_config
 
 
@@ -502,9 +508,13 @@ class TestSendReport:
         msg = mock_send.call_args[0][0]
         assert msg["To"] == "mgr@example.com"
         assert "General Meeting Results Report" in msg["Subject"]
-        # The HTML part content
-        html_part = msg.get_payload()[0].get_payload()
+        # The nested multipart/alternative HTML content
+        html_part = _report_html(msg)
         assert "<html" in html_part.lower()
+        pdf_part = msg.get_payload()[1]
+        assert pdf_part.get_content_type() == "application/pdf"
+        assert pdf_part.get_filename() == f"results-test-generalmeeting-{agm.id}.pdf"
+        assert pdf_part.get_payload(decode=True).startswith(b"%PDF-")
 
     async def test_send_report_uses_smtp_settings(self, db_session: AsyncSession, mocker):
         """send_report passes SMTP settings from DB config to aiosmtplib.send."""
@@ -539,6 +549,40 @@ class TestSendReport:
         assert call_kwargs["username"] == "testuser"
         assert call_kwargs["password"] == "testpass"
         assert call_kwargs["start_tls"] is True
+
+    async def test_pdf_generation_failure_prevents_smtp_send(
+        self, db_session: AsyncSession, mocker
+    ):
+        """A report rendering failure is retryable and never sends an HTML-only email."""
+        building = await _create_building(db_session, manager_email="mgr@example.com")
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch(
+            "app.services.email_service.get_smtp_config",
+            AsyncMock(return_value=mock_smtp_config),
+        )
+        mocker.patch(
+            "app.services.email_service.get_decrypted_password",
+            return_value="pass",
+        )
+        mocker.patch(
+            "app.services.email_service.generate_meeting_results_pdf",
+            side_effect=RuntimeError("PDF render failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="PDF render failed"):
+            await EmailService().send_report(agm.id, db_session, "https://example.com")
+
+        mock_send.assert_not_awaited()
 
     # --- Error cases ---
 
@@ -639,7 +683,7 @@ class TestSendReport:
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        html_part = msg.get_payload()[0].get_payload()
+        html_part = _report_html(msg)
         expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
         assert expected_url in html_part
 
@@ -666,7 +710,7 @@ class TestSendReport:
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        html_part = msg.get_payload()[0].get_payload()
+        html_part = _report_html(msg)
         expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
         assert expected_url in html_part
         # Confirm there is no double-slash in the path

@@ -494,8 +494,12 @@ async def create_building(
     name: str,
     manager_email: str,
     db: AsyncSession,
-    oc_plan_number: str | None = None,
+    oc_plan_number: str,
 ) -> Building:
+    normalized_plan_number = oc_plan_number.strip()
+    if not normalized_plan_number:
+        raise ValueError("oc_plan_number must not be empty")
+
     # Enforce subscription building limit (if set).
     sub_result = await db.execute(select(TenantSettings).where(TenantSettings.id == 1))
     settings = sub_result.scalar_one_or_none()
@@ -515,7 +519,7 @@ async def create_building(
     building = Building(
         name=name,
         manager_email=manager_email,
-        oc_plan_number=oc_plan_number.strip() if oc_plan_number and oc_plan_number.strip() else None,
+        oc_plan_number=normalized_plan_number,
     )
     db.add(building)
     await db.commit()

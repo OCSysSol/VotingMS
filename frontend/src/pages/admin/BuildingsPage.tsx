@@ -123,7 +123,7 @@ export default function BuildingsPage() {
     }
   }, [safePage, showArchived, totalCount, queryClient, sortBy, sortDir, nameFilterParam]);
 
-  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number?: string | null }>({
+  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number: string }>({
     mutationFn: (data) => createBuilding(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin", "buildings"] });
@@ -208,13 +208,14 @@ export default function BuildingsPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (!ocPlanNumber.trim()) { setFormError("OC Plan number is required."); return; }
     if (!name.trim()) { setFormError("Building name is required."); return; }
     if (!managerEmail.trim()) { setFormError("Manager email is required."); return; }
     if (!isValidEmail(managerEmail)) { setFormError("Please enter a valid email address."); return; }
     mutation.mutate({
       name: name.trim(),
       manager_email: managerEmail.trim(),
-      oc_plan_number: ocPlanNumber.trim() || null,
+      oc_plan_number: ocPlanNumber.trim(),
     });
   }
 
@@ -286,6 +287,19 @@ export default function BuildingsPage() {
             </p>
             <form onSubmit={handleSubmit} noValidate>
               <div className="field">
+                <label className="field__label field__label--required" htmlFor="building-oc-plan-number">OC Plan Number</label>
+                <input
+                  id="building-oc-plan-number"
+                  className="field__input"
+                  type="text"
+                  value={ocPlanNumber}
+                  onChange={(e) => setOcPlanNumber(e.target.value)}
+                  aria-required="true"
+                  required
+                  placeholder="e.g. PS345123A"
+                />
+              </div>
+              <div className="field">
                 <label className="field__label field__label--required" htmlFor="building-name">Building Name</label>
                 <input
                   id="building-name"
@@ -309,17 +323,6 @@ export default function BuildingsPage() {
                   aria-required="true"
                   required
                   placeholder="e.g. manager@example.com"
-                />
-              </div>
-              <div className="field">
-                <label className="field__label" htmlFor="building-oc-plan-number">OC Plan Number</label>
-                <input
-                  id="building-oc-plan-number"
-                  className="field__input"
-                  type="text"
-                  value={ocPlanNumber}
-                  onChange={(e) => setOcPlanNumber(e.target.value)}
-                  placeholder="e.g. OC123456"
                 />
               </div>
               {formError && (
