@@ -671,7 +671,9 @@ test.describe("Admin General Meetings — archive lifecycle", () => {
     await expect(page.getByRole("heading", { name: "General Meetings" })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText(MEETING_TITLE)).not.toBeVisible();
 
-    await page.getByLabel("Show archived meetings").check();
+    const archivedToggle = page.getByLabel("Show archived meetings");
+    await page.getByText("Show archived meetings", { exact: true }).click();
+    await expect(archivedToggle).toBeChecked();
     await expect(page.getByText(MEETING_TITLE)).toBeVisible({ timeout: 15000 });
     await page.getByText(MEETING_TITLE).click();
     await expect(page.getByText("Archived", { exact: true })).toBeVisible({ timeout: 15000 });

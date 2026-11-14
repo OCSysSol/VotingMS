@@ -503,6 +503,32 @@ describe("BuildingDetailPage", () => {
   });
 
   it("submits with updated manager email only and closes modal", async () => {
+    let managerEmail = "alpha@example.com";
+    let patchBody: { manager_email?: string } | null = null;
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId", () => {
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          oc_plan_number: "OC-1001",
+          manager_email: managerEmail,
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      }),
+      http.patch("http://localhost/api/admin/buildings/:buildingId", async ({ request }) => {
+        patchBody = await request.json() as { manager_email?: string };
+        managerEmail = patchBody.manager_email ?? managerEmail;
+        return HttpResponse.json({
+          id: "b1",
+          name: "Alpha Tower",
+          oc_plan_number: "OC-1001",
+          manager_email: managerEmail,
+          is_archived: false,
+          created_at: "2024-01-01T00:00:00Z",
+        });
+      })
+    );
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => {
@@ -516,6 +542,12 @@ describe("BuildingDetailPage", () => {
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: "Edit Building" })).not.toBeInTheDocument();
     });
+
+    // Reopening immediately must use the PATCH response rather than a stale
+    // building query cache while invalidation is still in flight.
+    await user.click(screen.getByRole("button", { name: "Edit Building" }));
+    expect(screen.getByLabelText("Manager Email")).toHaveValue("new@example.com");
+    expect(patchBody).toEqual({ manager_email: "new@example.com" });
   });
 
   it("submits with updated oc_plan_number only and closes modal", async () => {

@@ -188,7 +188,7 @@ function ArchiveConfirmModal({ buildingName, archiving, onConfirm, onCancel }: A
 
 interface BuildingEditModalProps {
   building: Building;
-  onSuccess: () => void;
+  onSuccess: (updatedBuilding: Building) => void;
   onCancel: () => void;
 }
 
@@ -248,8 +248,8 @@ function BuildingEditModal({ building, onSuccess, onCancel }: BuildingEditModalP
     setSaving(true);
     setError(null);
     try {
-      await updateBuilding(building.id, payload);
-      onSuccess();
+      const updatedBuilding = await updateBuilding(building.id, payload);
+      onSuccess(updatedBuilding);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update building.");
     } finally {
@@ -486,7 +486,8 @@ export default function BuildingDetailPage() {
     void queryClient.invalidateQueries({ queryKey: ["admin", "lot-owners", buildingId] });
   }
 
-  function handleEditBuildingSuccess() {
+  function handleEditBuildingSuccess(updatedBuilding: Building) {
+    queryClient.setQueryData(["admin", "buildings", buildingId], updatedBuilding);
     void queryClient.invalidateQueries({ queryKey: ["admin", "buildings", buildingId] });
     setShowEditModal(false);
   }

@@ -32,13 +32,17 @@ test.describe("Admin Buildings", () => {
 
   test("clicking an OC Plan row navigates to its detail page", async ({ page }) => {
     await page.goto("/admin/buildings");
-    const firstBuildingRow = page.getByRole("row").nth(1);
-    const buildingName = (await firstBuildingRow.getByRole("cell").nth(1).textContent())?.trim();
+    const firstBuildingRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name: /^Open OC Plan / }) })
+      .first();
+    const ocPlanNumber = (
+      await firstBuildingRow.getByRole("button", { name: /^Open OC Plan / }).textContent()
+    )?.trim();
+    expect(ocPlanNumber).toBeTruthy();
     await firstBuildingRow.getByRole("cell").nth(1).click();
     await expect(page).toHaveURL(/\/admin\/buildings\//);
-    if (buildingName) {
-      await expect(page.getByRole("heading", { name: buildingName })).toBeVisible();
-    }
+    await expect(page.getByRole("heading", { name: ocPlanNumber!, exact: true })).toBeVisible();
   });
 
   test("create building via modal dialog", async ({ page }) => {
