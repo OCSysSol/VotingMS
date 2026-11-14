@@ -72,7 +72,8 @@ test.describe("Admin Buildings", () => {
     await expect(newBuildingRow).toBeVisible();
     await newBuildingRow.getByRole("cell").nth(1).click();
     await expect(page).toHaveURL(/\/admin\/buildings\//);
-    await expect(page.getByRole("heading", { name: buildingName })).toBeVisible();
+    await expect(page.getByRole("heading", { name: ocPlanNumber, exact: true })).toBeVisible();
+    await expect(page.locator("p", { hasText: buildingName })).toBeVisible();
   });
 
   test("new OC Plan requires the OC Plan number", async ({ page }) => {
