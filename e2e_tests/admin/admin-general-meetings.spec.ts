@@ -658,14 +658,14 @@ test.describe("Admin General Meetings — archive lifecycle", () => {
     await page.goto(`/admin/general-meetings/${meetingId}`);
     await expect(page.getByRole("heading", { name: MEETING_TITLE })).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: "Archive Meeting" }).click();
+    await page.getByRole("button", { name: "Archive Meeting", exact: true }).click();
     const archiveDialog = page.getByRole("dialog", { name: "Archive General Meeting" });
     await expect(archiveDialog).toContainText("retained for audit compliance");
     await archiveDialog.getByRole("button", { name: "Archive", exact: true }).click();
 
     await expect(page.getByText("Archived", { exact: true })).toBeVisible({ timeout: 15000 });
-    await expect(page.getByRole("button", { name: "Unarchive Meeting" })).toBeVisible();
-    await expect(page.getByRole("button", { name: "Archive Meeting" })).not.toBeVisible();
+    await expect(page.getByRole("button", { name: "Unarchive Meeting", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Archive Meeting", exact: true })).not.toBeVisible();
 
     await page.goto("/admin/general-meetings");
     await expect(page.getByRole("heading", { name: "General Meetings" })).toBeVisible({ timeout: 15000 });
@@ -676,8 +676,8 @@ test.describe("Admin General Meetings — archive lifecycle", () => {
     await page.getByText(MEETING_TITLE).click();
     await expect(page.getByText("Archived", { exact: true })).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: "Unarchive Meeting" }).click();
-    await expect(page.getByRole("button", { name: "Archive Meeting" })).toBeVisible({ timeout: 15000 });
+    await page.getByRole("button", { name: "Unarchive Meeting", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Archive Meeting", exact: true })).toBeVisible({ timeout: 15000 });
     await expect(page.getByText("Archived", { exact: true })).not.toBeVisible();
   });
 
