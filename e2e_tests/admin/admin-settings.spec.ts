@@ -144,56 +144,32 @@ test.describe("Admin Settings — tenant branding", () => {
 
   test("sidebar app name updates after save (live branding re-fetch)", async ({ page }) => {
     const testAppName = `E2E Branding ${Date.now()}`;
-    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
 
     await page.goto("/admin/settings");
     await clickUiThemeTab(page);
     await expect(page.getByLabel("App name")).toBeVisible();
-
-    // Fetch the current logo_url from the API so we can restore it at the end.
-    // The logo URL text input has been removed (upload-only UX), so we read it
-    // directly from the config endpoint rather than from a form field.
-    const originalConfig = await fetchAdminConfig(baseURL);
-    const originalLogoUrl = originalConfig.logo_url;
-
-    // If a logo URL is set, clear it via the API so the sidebar renders the text
-    // span (.admin-sidebar__app-name) rather than the <img> element — the span
-    // is only shown when logo_url is empty.
-    if (originalLogoUrl) {
-      await patchAdminConfig(baseURL, { logo_url: "" });
-      // Reload so the page picks up the cleared logo
-      await page.reload();
-      await clickUiThemeTab(page);
-      await expect(page.getByLabel("App name")).toBeVisible();
-    }
 
     // Update app name and save
     await page.getByLabel("App name").fill(testAppName);
     await page.getByTestId("branding-save-btn").click();
     await expect(page.getByText("Settings saved.")).toBeVisible();
 
-    // Wait until the sidebar span reflects the new app_name. The sidebar re-renders
-    // after React Query invalidates the public-config cache following the save. Use
-    // an explicit toHaveText assertion with a generous timeout instead of polling
-    // with hardcoded sleeps — this resolves as soon as the DOM updates.
-    await expect(page.locator(".admin-sidebar__app-name").first()).toHaveText(testAppName, {
+    // The sidebar logo's alt text is the app name whether or not a logo is
+    // configured, so this verifies live branding without mutating logo_url.
+    const sidebar = page.locator(".admin-sidebar").first();
+    await expect(sidebar.locator(".admin-sidebar__logo")).toHaveAttribute("alt", testAppName, {
       timeout: 15000,
     });
+    await expect(page).toHaveTitle(testAppName, { timeout: 15000 });
 
     // Restore original app name via the form
     await page.getByLabel("App name").fill(ORIGINAL_APP_NAME);
     await page.getByTestId("branding-save-btn").click();
     await expect(page.getByText("Settings saved.")).toBeVisible();
 
-    // Restore original logo URL via the API (no text input available)
-    if (originalLogoUrl) {
-      await patchAdminConfig(baseURL, { logo_url: originalLogoUrl });
-    } else {
-      // Only assert the sidebar text when no logo is set (otherwise the img is shown)
-      await expect(page.locator(".admin-sidebar__app-name").first()).toHaveText(ORIGINAL_APP_NAME, {
-        timeout: 15000,
-      });
-    }
+    await expect(sidebar.locator(".admin-sidebar__logo")).toHaveAttribute("alt", ORIGINAL_APP_NAME, {
+      timeout: 15000,
+    });
   });
 
   test("success message disappears after a few seconds", async ({ page }) => {
