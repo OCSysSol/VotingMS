@@ -63,7 +63,7 @@ None. PDFs are render artifacts, not domain records. `buildings.oc_plan_number` 
 
 #### PDF dependency
 
-Add `reportlab` to `backend/pyproject.toml` and update `backend/uv.lock`. ReportLab is preferable to launching a headless browser and is compatible with the Vercel Python runtime. Use its Platypus layout primitives (`SimpleDocTemplate`, `Paragraph`, `Table`, `PageBreak`) so long tables split across A4 pages with repeated headers.
+Add `reportlab` to `backend/pyproject.toml`, update `backend/uv.lock`, and add the same production dependency to the repository-root `requirements.txt` installed by Vercel. Add a consistency test so runtime-only dependency omissions fail locally before deployment. ReportLab is preferable to launching a headless browser and is compatible with the Vercel Python runtime. Use its Platypus layout primitives (`SimpleDocTemplate`, `Paragraph`, `Table`, `PageBreak`) so long tables split across A4 pages with repeated headers.
 
 Add `pypdf` only to the dev dependency group if integration tests need to extract text from generated PDFs.
 
@@ -207,7 +207,7 @@ Admin opens a closed meeting -> clicks `Download Summary PDF` -> authenticated e
 
 | File | Change |
 |---|---|
-| `backend/pyproject.toml`, `backend/uv.lock` | Add ReportLab; optionally add `pypdf` to dev tests |
+| `backend/pyproject.toml`, `backend/uv.lock`, `requirements.txt` | Add ReportLab to both runtime manifests; optionally add `pypdf` to dev tests |
 | `backend/app/services/report_pdf_service.py` | Shared PDF layout, voter formatting, safe filename |
 | `backend/app/services/email_service.py` | Generate and attach PDF in mixed/alternative MIME message |
 | `backend/app/routers/admin.py` | Authenticated closed-meeting PDF download endpoint |
