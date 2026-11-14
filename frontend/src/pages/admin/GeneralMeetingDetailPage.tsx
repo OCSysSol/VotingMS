@@ -13,6 +13,8 @@ import {
   closeMotion,
   reopenMotion,
   reopenGeneralMeeting,
+  archiveGeneralMeeting,
+  unarchiveGeneralMeeting,
   updateGeneralMeeting,
 } from "../../api/admin";
 import type { GeneralMeetingDetail, AddMotionRequest, UpdateMotionRequest, MotionDetail } from "../../api/admin";
@@ -21,6 +23,7 @@ import StatusBadge from "../../components/admin/StatusBadge";
 import CloseGeneralMeetingButton from "../../components/admin/CloseGeneralMeetingButton";
 import ReopenGeneralMeetingDialog from "../../components/admin/ReopenGeneralMeetingDialog";
 import StartGeneralMeetingButton from "../../components/admin/StartGeneralMeetingButton";
+import ConfirmDialog from "../../components/admin/ConfirmDialog";
 import EmailStatusBanner from "../../components/admin/EmailStatusBanner";
 import AGMReportView from "../../components/admin/AGMReportView";
 import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
@@ -235,6 +238,8 @@ export default function GeneralMeetingDetailPage() {
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
   const [showReopenMeetingDialog, setShowReopenMeetingDialog] = useState(false);
+  const [showArchiveMeetingDialog, setShowArchiveMeetingDialog] = useState(false);
+  const [archiveMeetingError, setArchiveMeetingError] = useState<string | null>(null);
   const [reopenMeetingError, setReopenMeetingError] = useState<string | null>(null);
   const [deleteMeetingError, setDeleteMeetingError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
@@ -354,6 +359,35 @@ export default function GeneralMeetingDetailPage() {
     },
     onError: (error: Error) => {
       setReopenMeetingError(formatApiErrorMessage(error) || "Failed to reopen meeting");
+    },
+  });
+
+  const archiveMeetingMutation = useMutation({
+    mutationFn: () => archiveGeneralMeeting(meetingId!),
+    onSuccess: async () => {
+      setShowArchiveMeetingDialog(false);
+      setArchiveMeetingError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      setArchiveMeetingError(formatApiErrorMessage(error) || "Failed to archive General Meeting");
+    },
+  });
+
+  const unarchiveMeetingMutation = useMutation({
+    mutationFn: () => unarchiveGeneralMeeting(meetingId!),
+    onSuccess: async () => {
+      setArchiveMeetingError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      setArchiveMeetingError(formatApiErrorMessage(error) || "Failed to unarchive General Meeting");
     },
   });
 
@@ -759,6 +793,14 @@ export default function GeneralMeetingDetailPage() {
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <h1 style={{ margin: 0 }}>{meeting.title}</h1>
             <StatusBadge status={meeting.status} />
+            {meeting.is_archived && (
+              <span
+                className="status-badge status-badge--closed"
+                style={{ background: "var(--surface-muted, #f1f5f9)", color: "var(--text-muted, #475569)" }}
+              >
+                Archived
+              </span>
+            )}
           </div>
           <p className="meeting-detail__subtitle">
             <span>{meeting.building_name}</span>
@@ -789,7 +831,7 @@ export default function GeneralMeetingDetailPage() {
               onSuccess={handleCloseSuccess}
             />
           )}
-          {meeting.status === "closed" && meeting.closed_at && (
+          {meeting.status === "closed" && !meeting.is_archived && meeting.closed_at && (
             <button
               type="button"
               className="btn btn--primary"
@@ -801,7 +843,7 @@ export default function GeneralMeetingDetailPage() {
               Reopen Meeting
             </button>
           )}
-          {(meeting.status === "closed" || meeting.status === "pending") && (
+          {(meeting.status === "closed" || meeting.status === "pending") && !meeting.is_archived && (
             <button
               type="button"
               className="btn btn--danger"
@@ -811,16 +853,44 @@ export default function GeneralMeetingDetailPage() {
               Delete Meeting
             </button>
           )}
+          {meeting.status === "closed" && !meeting.is_archived && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                setArchiveMeetingError(null);
+                setShowArchiveMeetingDialog(true);
+              }}
+              disabled={archiveMeetingMutation.isPending}
+            >
+              {archiveMeetingMutation.isPending ? "Archiving…" : "Archive Meeting"}
+            </button>
+          )}
+          {meeting.is_archived && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                setArchiveMeetingError(null);
+                unarchiveMeetingMutation.mutate();
+              }}
+              disabled={unarchiveMeetingMutation.isPending}
+            >
+              {unarchiveMeetingMutation.isPending ? "Unarchiving…" : "Unarchive Meeting"}
+            </button>
+          )}
         </div>
       </div>
+
+      {archiveMeetingError && !showArchiveMeetingDialog && (
+        <p className="state-message state-message--error" role="alert">
+          {archiveMeetingError}
+        </p>
+      )}
 
       <div className="meeting-detail-layout">
         <div className="meeting-detail-layout__info">
           <div className="admin-meta">
-            <span className="admin-meta__item">
-              <span className="admin-meta__label">Building</span>
-              {meeting.building_name}
-            </span>
             <span className="admin-meta__item">
               <span className="admin-meta__label">Meeting</span>
               {formatLocalDateTime(meeting.meeting_at)}
@@ -1480,6 +1550,23 @@ export default function GeneralMeetingDetailPage() {
           />
         </Suspense>
       )}
+
+      <ConfirmDialog
+        isOpen={showArchiveMeetingDialog}
+        onClose={() => {
+          if (archiveMeetingMutation.isPending) return;
+          setShowArchiveMeetingDialog(false);
+          setArchiveMeetingError(null);
+        }}
+        onConfirm={() => archiveMeetingMutation.mutate()}
+        isPending={archiveMeetingMutation.isPending}
+        error={archiveMeetingError}
+        title="Archive General Meeting"
+        titleId="archive-meeting-detail-title"
+        message={`Are you sure you want to archive "${meeting.title}"? The meeting will be retained for audit compliance and hidden from the active meetings list.`}
+        confirmLabel={archiveMeetingMutation.isPending ? "Archiving…" : "Archive"}
+        confirmClassName="btn btn--secondary"
+      />
 
       {/* Edit Motion Modal */}
       {editingMotion && (

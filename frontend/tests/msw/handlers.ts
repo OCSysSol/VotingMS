@@ -260,6 +260,7 @@ export const ADMIN_MEETING_DETAIL: GeneralMeetingDetail = {
   meeting_at: "2024-06-01T10:00:00Z",
   voting_closes_at: "2024-06-01T12:00:00Z",
   closed_at: null,
+  is_archived: false,
   total_eligible_voters: 5,
   total_submitted: 3,
   total_entitlement: 450,

@@ -1783,6 +1783,7 @@ oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, i
 ### 2.3 Frontend Changes
 - Add \`oc_plan_number\` to TypeScript types (\`Building\`, \`BuildingOut\`, \`GeneralMeetingWithBuildingOut\`, etc.).
 - Admin \`BuildingTable\`: add "OC Plan" column (renders \`—\` when null/empty).
+- Admin OC Plans rows navigate to the OC Plan detail page when any cell is clicked, matching the Meetings list. The OC Plan value is the keyboard-accessible link target; the Building Name remains plain text and sortable column headers retain sort-only behavior.
 - Admin \`BuildingsPage\`: add OC Plan input in create modal; search bar filters by name or plan.
 - Admin \`BuildingDetailPage\`: edit modal allows updating \`oc_plan_number\`; header shows OC plan.
 - Voter \`VoterBuildingCombobox\`: search both fields and display \`\${oc_plan_number} - \${building_name}\` (or just \`\${building_name}\` if plan is absent). Other voter headers retain their separately specified formatting.

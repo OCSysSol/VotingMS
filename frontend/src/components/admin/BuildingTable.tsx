@@ -98,16 +98,32 @@ export default function BuildingTable({ buildings, isLoading, sortBy, sortDir, o
             </tr>
           ) : (
             visible.map((b) => (
-              <tr key={b.id} style={b.is_archived ? { opacity: 0.6 } : undefined}>
-                <td>{b.oc_plan_number && b.oc_plan_number.trim() ? b.oc_plan_number.trim() : "—"}</td>
+              <tr
+                key={b.id}
+                style={{
+                  cursor: "pointer",
+                  ...(b.is_archived ? { opacity: 0.6 } : undefined),
+                }}
+                onClick={() => navigate(`/admin/buildings/${b.id}`)}
+              >
                 <td>
-                  <button
-                    className="admin-table__link"
-                    onClick={() => navigate(`/admin/buildings/${b.id}`)}
-                  >
-                    {b.name}
-                  </button>
+                  {b.oc_plan_number && b.oc_plan_number.trim() ? (
+                    <button
+                      type="button"
+                      className="admin-table__link"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/admin/buildings/${b.id}`);
+                      }}
+                      aria-label={`Open OC Plan ${b.oc_plan_number.trim()}`}
+                    >
+                      {b.oc_plan_number.trim()}
+                    </button>
+                  ) : (
+                    "—"
+                  )}
                 </td>
+                <td>{b.name}</td>
                 <td>{b.manager_email}</td>
                 <td style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
                   {formatLocalDateTime(b.created_at)}

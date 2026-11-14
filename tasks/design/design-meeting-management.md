@@ -480,6 +480,27 @@ Group the meeting action buttons in one right-aligned flex container with an 8px
 
 The existing admin archive/unarchive lifecycle remains the source of truth. Closed meetings expose `Archive` in the meetings list and archived meetings expose `Unarchive`; the backend archive endpoint remains authenticated by `require_admin` and all regression tests continue to cover the lifecycle.
 
+The capability is also exposed on the individual meeting detail page because that is the primary management surface. The backend detail response already includes `is_archived`; add the missing field to the frontend `GeneralMeetingDetail` TypeScript contract.
+
+### Detail-page action behavior
+
+- Show `Archive Meeting` only when the meeting is closed and not archived.
+- Place it in the existing right-aligned meeting action group, alongside Reopen and Delete, without changing their established adjacency.
+- Use an explicit confirmation dialog. Explain that the meeting is retained for audit and hidden from the active meetings list.
+- On confirm, call the existing `archiveGeneralMeeting(id)` API, invalidate both the detail query and list query namespace, and remain on the detail page.
+- Once refreshed, display an `Archived` indicator beside the meeting status and replace the archive action with `Unarchive Meeting`.
+- `Unarchive Meeting` calls the existing `unarchiveGeneralMeeting(id)` API and invalidates detail/list queries. Follow the existing list-page convention of unarchiving without a second confirmation.
+- Surface server errors in an accessible alert and disable actions while their mutation is pending.
+- Do not add an endpoint, database column, or migration.
+
+### Tests
+
+- Detail component: archive action appears for closed active meetings; it is absent for pending/open meetings and already archived meetings.
+- Confirmation cancel makes no API call; confirm calls the existing endpoint, shows pending state, handles failure, and renders archived state after query refresh.
+- Archived detail renders `Archived` and shows unarchive; success removes the archived state and refreshes list data.
+- Existing backend endpoint tests already cover open/already-archived/not-found conflicts, authorization, list filters, and counts.
+- Extend an admin browser E2E to archive a closed meeting from detail, verify the active list no longer contains it, enable `Show archived meetings`, open the archived row, and unarchive it.
+
 ## Reopen meeting lifecycle
 
 Reopen only a stored `closed` meeting through an authenticated admin endpoint and require a new `voting_closes_at` strictly after now and `meeting_at`. In one transaction: set status to open, clear `closed_at`, set the new close time, delete only `BallotSubmission.is_absent=true` rows created by the close sweep, and reopen motions tagged as closed by the meeting. Preserve all submitted ballots and individually closed motions. Recompute multi-choice outcomes from retained submitted votes.

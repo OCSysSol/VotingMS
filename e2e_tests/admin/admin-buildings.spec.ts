@@ -30,16 +30,19 @@ test.describe("Admin Buildings", () => {
     await expect(page.getByText(/Import complete:/)).toBeVisible();
   });
 
-  test("clicking building name navigates to building detail", async ({ page }) => {
+  test("clicking an OC Plan row navigates to its detail page", async ({ page }) => {
     await page.goto("/admin/buildings");
-    // Click the first building name link
-    const firstBuildingLink = page.getByRole("row").nth(1).getByRole("button").first();
-    const buildingName = await firstBuildingLink.textContent();
-    await firstBuildingLink.click();
+    const firstBuildingRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name: /^Open OC Plan / }) })
+      .first();
+    const ocPlanNumber = (
+      await firstBuildingRow.getByRole("button", { name: /^Open OC Plan / }).textContent()
+    )?.trim();
+    expect(ocPlanNumber).toBeTruthy();
+    await firstBuildingRow.getByRole("cell").nth(1).click();
     await expect(page).toHaveURL(/\/admin\/buildings\//);
-    if (buildingName) {
-      await expect(page.getByText(buildingName)).toBeVisible();
-    }
+    await expect(page.getByRole("heading", { name: ocPlanNumber!, exact: true })).toBeVisible();
   });
 
   test("create building via modal dialog", async ({ page }) => {
@@ -61,7 +64,11 @@ test.describe("Admin Buildings", () => {
     // Modal closes after success
     await expect(page.getByRole("dialog", { name: "New OC Plan" })).not.toBeVisible();
 
-    // New building appears in the table
-    await expect(page.getByRole("button", { name: buildingName })).toBeVisible();
+    // New building appears as plain text in a clickable row.
+    const newBuildingRow = page.getByRole("row").filter({ hasText: buildingName });
+    await expect(newBuildingRow).toBeVisible();
+    await newBuildingRow.getByRole("cell").nth(1).click();
+    await expect(page).toHaveURL(/\/admin\/buildings\//);
+    await expect(page.getByRole("heading", { name: buildingName })).toBeVisible();
   });
 });

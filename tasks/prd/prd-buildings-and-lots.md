@@ -768,6 +768,7 @@ This document covers all building management, lot owner management, CSV/Excel im
 - [x] Admin Buildings table (`BuildingTable`) displays separate columns for "OC Plan" and "Building Name":
   - When `oc_plan_number` is null, empty, or whitespace, renders a dash (`—`).
   - Supports sorting on both OC Plan and Building Name columns.
+  - Clicking anywhere in a row opens that OC Plan's detail page. The OC Plan value is the accessible link; Building Name is plain text; sortable headers only sort.
 - [x] Admin "+ New Building" modal form includes an optional "OC Plan Number" text input alongside "Building Name" and "Manager Email".
 - [x] Admin "Edit Building" modal form includes an "OC Plan Number" text input pre-filled with current value, allowing adding, updating, or clearing the OC plan number.
 - [x] Admin building search bar filters buildings matching either building name or OC plan number.

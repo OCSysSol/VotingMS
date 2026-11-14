@@ -45,12 +45,12 @@ describe("GeneralMeetingDetailPage", () => {
     expect(screen.getByText("Loading General Meeting...")).toBeInTheDocument();
   });
 
-  it("renders meeting title and building name", async () => {
+  it("renders the meeting title and building name once", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("2024 AGM")).toBeInTheDocument();
     });
-    expect(screen.getAllByText("Alpha Tower").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Alpha Tower")).toHaveLength(1);
   });
 
   it("links the OC Plan in the meeting subtitle", async () => {
@@ -202,12 +202,112 @@ describe("GeneralMeetingDetailPage", () => {
     renderPage("agm2");
     const reopen = await screen.findByRole("button", { name: "Reopen Meeting" });
     const remove = screen.getByRole("button", { name: "Delete Meeting" });
+    const archive = screen.getByRole("button", { name: "Archive Meeting" });
     expect(reopen.parentElement).toBe(remove.parentElement);
+    expect(remove.parentElement).toBe(archive.parentElement);
     expect(reopen.parentElement).toHaveStyle({
       display: "flex",
       justifyContent: "flex-end",
       gap: "8px",
     });
+  });
+
+  it("shows Archive Meeting for a closed active meeting but not for open or pending meetings", async () => {
+    const { unmount } = renderPage("agm2");
+    expect(await screen.findByRole("button", { name: "Archive Meeting" })).toBeInTheDocument();
+    unmount();
+
+    const { unmount: unmountOpen } = renderPage();
+    await screen.findByText("2024 AGM");
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+    unmountOpen();
+
+    renderPage("agm-pending");
+    await screen.findByText("2026 AGM");
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+  });
+
+  it("does not archive when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    let archiveCalls = 0;
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () => {
+        archiveCalls += 1;
+        return HttpResponse.json({});
+      })
+    );
+
+    renderPage("agm2");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive General Meeting" });
+    expect(within(dialog).getByText(/retained for audit compliance/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: "Archive General Meeting" })).not.toBeInTheDocument();
+    expect(archiveCalls).toBe(0);
+  });
+
+  it("archives a closed meeting and renders the archived state", async () => {
+    const user = userEvent.setup();
+    let archived = false;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", () =>
+        HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: archived })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () => {
+        archived = true;
+        return HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: true });
+      })
+    );
+
+    renderPage("agm-archive-success");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Archive General Meeting" }))
+        .getByRole("button", { name: "Archive" })
+    );
+
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unarchive Meeting" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+  });
+
+  it("shows an accessible error when archiving fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () =>
+        HttpResponse.json({ detail: "Archive failed" }, { status: 409 })
+      )
+    );
+
+    renderPage("agm2");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive General Meeting" });
+    await user.click(within(dialog).getByRole("button", { name: "Archive" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Archive failed");
+  });
+
+  it("unarchives an archived meeting and restores the closed meeting actions", async () => {
+    const user = userEvent.setup();
+    let archived = true;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", () =>
+        HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: archived })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/unarchive", () => {
+        archived = false;
+        return HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: false });
+      })
+    );
+
+    renderPage("agm-unarchive-success");
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen Meeting" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Unarchive Meeting" }));
+
+    expect(await screen.findByRole("button", { name: "Archive Meeting" })).toBeInTheDocument();
+    expect(screen.queryByText("Archived")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen Meeting" })).toBeInTheDocument();
   });
 
   it("confirms reopening a closed motion and calls the reopen API", async () => {

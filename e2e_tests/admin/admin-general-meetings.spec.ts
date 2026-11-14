@@ -621,3 +621,73 @@ test.describe("US-TCG-01: admin hides motion — voter no longer sees it on voti
     await expect(page.getByText(MOTION2_TITLE)).not.toBeVisible({ timeout: 5000 });
   });
 });
+
+test.describe("Admin General Meetings — archive lifecycle", () => {
+  const BUILDING_NAME = `AGM Archive Test Building-${Date.now()}`;
+  const MEETING_TITLE = `Archive Test AGM-${Date.now()}`;
+  let buildingId = "";
+  let meetingId = "";
+
+  test.beforeAll(async () => {
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await makeAdminApi(baseURL);
+
+    buildingId = await seedBuilding(api, BUILDING_NAME, "archive-mgr@test.com");
+    await seedLotOwner(api, buildingId, {
+      lotNumber: "ARCHIVE-1",
+      emails: ["archive-voter@test.com"],
+      unitEntitlement: 10,
+      financialPosition: "normal",
+    });
+    meetingId = await createOpenMeeting(api, buildingId, MEETING_TITLE, [
+      {
+        title: "Archive Test Motion",
+        description: "A motion for the archive lifecycle test.",
+        orderIndex: 1,
+        motionType: "general",
+      },
+    ]);
+    await clearBallots(api, meetingId);
+    await closeMeeting(api, meetingId);
+    await api.dispose();
+  }, { timeout: 60000 });
+
+  test("closed meeting can be archived and unarchived from its detail page", async ({ page }) => {
+    test.setTimeout(90000);
+
+    await page.goto(`/admin/general-meetings/${meetingId}`);
+    await expect(page.getByRole("heading", { name: MEETING_TITLE })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: "Archive Meeting", exact: true }).click();
+    const archiveDialog = page.getByRole("dialog", { name: "Archive General Meeting" });
+    await expect(archiveDialog).toContainText("retained for audit compliance");
+    await archiveDialog.getByRole("button", { name: "Archive", exact: true }).click();
+
+    await expect(page.getByText("Archived", { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole("button", { name: "Unarchive Meeting", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Archive Meeting", exact: true })).not.toBeVisible();
+
+    await page.goto("/admin/general-meetings");
+    await expect(page.getByRole("heading", { name: "General Meetings" })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(MEETING_TITLE)).not.toBeVisible();
+
+    const archivedToggle = page.getByLabel("Show archived meetings");
+    await page.getByText("Show archived meetings", { exact: true }).click();
+    await expect(archivedToggle).toBeChecked();
+    await expect(page.getByText(MEETING_TITLE)).toBeVisible({ timeout: 15000 });
+    await page.getByText(MEETING_TITLE).click();
+    await expect(page.getByText("Archived", { exact: true })).toBeVisible({ timeout: 15000 });
+
+    await page.getByRole("button", { name: "Unarchive Meeting", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Archive Meeting", exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText("Archived", { exact: true })).not.toBeVisible();
+  });
+
+  test.afterAll(async () => {
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await makeAdminApi(baseURL);
+    await api.post(`/api/admin/general-meetings/${meetingId}/unarchive`);
+    await api.delete(`/api/admin/general-meetings/${meetingId}`);
+    await api.dispose();
+  });
+});
