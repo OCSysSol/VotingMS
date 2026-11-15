@@ -242,3 +242,34 @@ describe("apiFetchBlob", () => {
     );
   });
 });
+
+describe("X-Client-Session-ID correlation header", () => {
+  it("generates and reuses the same client session ID across apiFetch, apiFetchVoid, and apiFetchBlob", async () => {
+    window.sessionStorage.removeItem("agm_client_session_id");
+    const seenIds: Array<string | null> = [];
+
+    server.use(
+      http.get(`${BASE}/api/test-session-1`, ({ request }) => {
+        seenIds.push(request.headers.get("x-client-session-id"));
+        return HttpResponse.json({ ok: true });
+      }),
+      http.post(`${BASE}/api/test-session-2`, ({ request }) => {
+        seenIds.push(request.headers.get("x-client-session-id"));
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.get(`${BASE}/api/test-session-3`, ({ request }) => {
+        seenIds.push(request.headers.get("x-client-session-id"));
+        return new HttpResponse(new Blob(["ok"]));
+      })
+    );
+
+    await apiFetch("/api/test-session-1");
+    await apiFetchVoid("/api/test-session-2", { method: "POST", body: JSON.stringify({}) });
+    await apiFetchBlob("/api/test-session-3");
+
+    expect(seenIds).toHaveLength(3);
+    expect(seenIds[0]).toBeTruthy();
+    expect(seenIds[1]).toBe(seenIds[0]);
+    expect(seenIds[2]).toBe(seenIds[0]);
+  });
+});

@@ -5,6 +5,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import structlog
 from fastapi import Cookie, Header, HTTPException
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from sqlalchemy import delete, select
@@ -299,6 +300,15 @@ async def cleanup_expired_sessions() -> None:
         pass  # Background cleanup — never let failures surface to the caller
 
 
+def _bind_session_context(session: SessionRecord) -> None:
+    """Bind voter session correlation IDs into structlog contextvars."""
+    structlog.contextvars.bind_contextvars(
+        session_id=str(session.id),
+        general_meeting_id=str(session.general_meeting_id),
+        building_id=str(session.building_id),
+    )
+
+
 async def create_session(
     db: AsyncSession,
     voter_email: str,
@@ -321,6 +331,7 @@ async def create_session(
     )
     db.add(session)
     await db.flush()
+    _bind_session_context(session)
     return _sign_token(raw_token)
 
 
@@ -339,6 +350,7 @@ async def extend_session(
     """
     session_record.expires_at = datetime.now(UTC) + SESSION_DURATION
     await db.flush()
+    _bind_session_context(session_record)
     return _sign_token(session_record.session_token)
 
 
@@ -377,5 +389,6 @@ async def get_session(
     if session is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    _bind_session_context(session)
     return session
 #

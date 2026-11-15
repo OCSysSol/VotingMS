@@ -681,6 +681,50 @@ class TestMain:
         import uuid as _uuid
         _uuid.UUID(response.headers["X-Request-ID"])  # raises ValueError if not UUID
 
+    async def test_client_session_id_and_access_log_emitted(self):
+        """X-Client-Session-ID is bound during request, http_request_completed is logged, and context is unbound."""
+        from unittest.mock import patch
+        import structlog
+        import app.main as main_module
+
+        with patch.object(main_module._structlog_logger, "info") as mock_info:
+            async with AsyncClient(
+                transport=ASGITransport(app=main_module.app),
+                base_url="http://test",
+                headers={
+                    "X-Requested-With": "XMLHttpRequest",
+                    "X-Client-Session-ID": "tab-session-123",
+                },
+            ) as client:
+                response = await client.get("/api/nonexistent-xyz-endpoint")
+
+        assert response.status_code == 404
+        mock_info.assert_called_once()
+        call_args, call_kwargs = mock_info.call_args
+        assert call_args[0] == "http_request_completed"
+        assert call_kwargs["method"] == "GET"
+        assert call_kwargs["path"] == "/api/nonexistent-xyz-endpoint"
+        assert call_kwargs["status_code"] == 404
+        assert isinstance(call_kwargs["duration_ms"], float)
+        assert structlog.contextvars.get_contextvars() == {}
+
+    async def test_cors_exposes_x_request_id(self):
+        """CORS responses expose X-Request-ID so frontend clients can read it."""
+        from app.main import app
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            headers={
+                "Origin": "http://localhost:5173",
+                "X-Requested-With": "XMLHttpRequest",
+            },
+        ) as client:
+            response = await client.get("/api/health/live")
+
+        assert response.status_code == 200
+        assert response.headers.get("Access-Control-Expose-Headers") == "X-Request-ID"
+
     async def test_csrf_middleware_blocks_post_without_header(self):
         """US-IAS-05: POST without X-Requested-With returns 403 when testing_mode=False.
 
