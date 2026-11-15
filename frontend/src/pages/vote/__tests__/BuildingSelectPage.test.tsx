@@ -51,7 +51,7 @@ describe("BuildingSelectPage", () => {
   it("does not show pending message banner when no state provided", async () => {
     renderPage("/");
     // Wait for buildings to load so main content is rendered, then assert no status banner
-    await waitFor(() => screen.getByLabelText("Select your building"));
+    await waitFor(() => screen.getByLabelText("Select your OC"));
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
@@ -69,7 +69,10 @@ describe("BuildingSelectPage", () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByRole("combobox")).toBeInTheDocument();
-      expect(screen.getByLabelText("Select your building")).toBeInTheDocument();
+      expect(screen.getByLabelText("Select your OC")).toBeInTheDocument();
+      expect(
+        screen.getByText("Select your OC to find and vote on open General Meeting motions.")
+      ).toBeInTheDocument();
     });
   });
 

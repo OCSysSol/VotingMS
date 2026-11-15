@@ -61,14 +61,14 @@ describe("AdminRoutes", () => {
     await waitFor(() => {
       expect(screen.getAllByText("Admin Portal").length).toBeGreaterThan(0);
     });
-    expect(screen.getAllByRole("link", { name: "Buildings" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "OC Plans" }).length).toBeGreaterThan(0);
     expect(screen.getAllByRole("link", { name: "General Meetings" }).length).toBeGreaterThan(0);
   });
 
   it("renders buildings page on /admin/buildings when authenticated", async () => {
     renderRoutes("/admin/buildings");
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Buildings" })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "OC Plans" })).toBeInTheDocument();
     });
   });
 

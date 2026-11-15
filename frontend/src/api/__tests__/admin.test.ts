@@ -9,6 +9,7 @@ import {
   listLotOwners,
   countLotOwners,
   deleteGeneralMeeting,
+  downloadMeetingResultsPdf,
   deleteBuilding,
   deleteMotion,
   importBuildings,
@@ -454,6 +455,18 @@ describe("listLotOwners", () => {
     expect(capturedUrl).toContain("offset=40");
   });
 
+  it("sends owner search text when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json([]);
+      })
+    );
+    await listLotOwners("b1", { search: "Alice Smith" });
+    expect(capturedUrl).toContain("search=Alice+Smith");
+  });
+
   it("sends only limit when offset is undefined", async () => {
     let capturedUrl = "";
     server.use(
@@ -515,6 +528,18 @@ describe("countLotOwners", () => {
     );
     const result = await countLotOwners("b1");
     expect(result).toBe(42);
+  });
+
+  it("sends owner search text when provided", async () => {
+    let capturedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/buildings/:buildingId/lot-owners/count`, ({ request }) => {
+        capturedUrl = request.url;
+        return HttpResponse.json({ count: 1 });
+      })
+    );
+    await countLotOwners("b1", "Proxy Person");
+    expect(capturedUrl).toContain("search=Proxy+Person");
   });
 
   it("returns 0 for empty building", async () => {
@@ -1099,5 +1124,25 @@ describe("getGeneralMeetingsCount is_archived param", () => {
     const res = await getGeneralMeetingsCount({ is_archived: true });
     expect(res).toEqual({ count: 7 });
     expect(capturedUrl).toContain("is_archived=true");
+  });
+});
+
+describe("downloadMeetingResultsPdf", () => {
+  it("requests the authenticated PDF endpoint and returns a blob", async () => {
+    let requestedUrl = "";
+    server.use(
+      http.get(`${BASE}/api/admin/general-meetings/meeting-1/results.pdf`, ({ request }) => {
+        requestedUrl = request.url;
+        return new HttpResponse(new Blob(["%PDF-1.4"]), {
+          headers: { "Content-Type": "application/pdf" },
+        });
+      })
+    );
+
+    const result = await downloadMeetingResultsPdf("meeting-1");
+
+    expect(requestedUrl).toBe(`${BASE}/api/admin/general-meetings/meeting-1/results.pdf`);
+    expect(result.type).toBe("application/pdf");
+    expect(result.size).toBeGreaterThan(0);
   });
 });

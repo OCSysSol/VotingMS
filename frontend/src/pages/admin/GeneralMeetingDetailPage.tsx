@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, lazy, Suspense } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getGeneralMeetingDetail,
@@ -10,14 +10,21 @@ import {
   updateMotion,
   deleteMotion,
   resendReport,
+  downloadMeetingResultsPdf,
   closeMotion,
+  reopenMotion,
+  reopenGeneralMeeting,
+  archiveGeneralMeeting,
+  unarchiveGeneralMeeting,
   updateGeneralMeeting,
 } from "../../api/admin";
 import type { GeneralMeetingDetail, AddMotionRequest, UpdateMotionRequest, MotionDetail } from "../../api/admin";
 import type { MotionType } from "../../types";
 import StatusBadge from "../../components/admin/StatusBadge";
 import CloseGeneralMeetingButton from "../../components/admin/CloseGeneralMeetingButton";
+import ReopenGeneralMeetingDialog from "../../components/admin/ReopenGeneralMeetingDialog";
 import StartGeneralMeetingButton from "../../components/admin/StartGeneralMeetingButton";
+import ConfirmDialog from "../../components/admin/ConfirmDialog";
 import EmailStatusBanner from "../../components/admin/EmailStatusBanner";
 import AGMReportView from "../../components/admin/AGMReportView";
 import ShareSummaryLink from "../../components/admin/ShareSummaryLink";
@@ -167,7 +174,7 @@ function DeleteMeetingConfirmModal({ meetingTitle, deleting, error, onConfirm, o
   );
 }
 
-// Fix 9: modal dialog to replace the green banner after in-person vote submission
+// Fix 9: modal dialog to replace the green banner after floor vote submission
 function VoteEntrySuccessModal({ onClose }: { onClose: () => void }) {
   const handleClose = useCallback(() => onClose(), [onClose]);
 
@@ -210,7 +217,7 @@ function VoteEntrySuccessModal({ onClose }: { onClose: () => void }) {
           Votes submitted
         </h2>
         <p style={{ color: "var(--text-secondary)", marginBottom: 24 }}>
-          In-person votes have been recorded successfully.
+          Floor votes have been recorded successfully.
         </p>
         <div style={{ display: "flex", justifyContent: "flex-end" }}>
           <button type="button" className="btn btn--primary" onClick={handleClose}>
@@ -231,6 +238,10 @@ export default function GeneralMeetingDetailPage() {
   const [visibilityErrors, setVisibilityErrors] = useState<Record<string, string>>({});
   const [motionsWithVotes, setMotionsWithVotes] = useState<Set<string>>(new Set());
   const [showDeleteMeetingModal, setShowDeleteMeetingModal] = useState(false);
+  const [showReopenMeetingDialog, setShowReopenMeetingDialog] = useState(false);
+  const [showArchiveMeetingDialog, setShowArchiveMeetingDialog] = useState(false);
+  const [archiveMeetingError, setArchiveMeetingError] = useState<string | null>(null);
+  const [reopenMeetingError, setReopenMeetingError] = useState<string | null>(null);
   const [deleteMeetingError, setDeleteMeetingError] = useState<string | null>(null);
   const [showQrModal, setShowQrModal] = useState(false);
 
@@ -337,6 +348,71 @@ export default function GeneralMeetingDetailPage() {
     onError: (err: Error) => {
       setResendError(err.message || "Failed to resend summary email");
       setResendSuccess(false);
+    },
+  });
+
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadMutation = useMutation({
+    mutationFn: () => downloadMeetingResultsPdf(meetingId!),
+    onSuccess: (blob) => {
+      setDownloadError(null);
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      const titleSlug = (meeting?.title || "general-meeting")
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        .slice(0, 60) || "general-meeting";
+      anchor.href = url;
+      anchor.download = `results-${titleSlug}-${meetingId}.pdf`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+    },
+    onError: (err: Error) => {
+      setDownloadError(err.message || "Failed to download summary PDF");
+    },
+  });
+
+  const reopenMeetingMutation = useMutation({
+    mutationFn: (votingClosesAt: string) => reopenGeneralMeeting(meetingId!, votingClosesAt),
+    onSuccess: async () => {
+      setShowReopenMeetingDialog(false);
+      setReopenMeetingError(null);
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (error: Error) => {
+      setReopenMeetingError(formatApiErrorMessage(error) || "Failed to reopen meeting");
+    },
+  });
+
+  const archiveMeetingMutation = useMutation({
+    mutationFn: () => archiveGeneralMeeting(meetingId!),
+    onSuccess: async () => {
+      setShowArchiveMeetingDialog(false);
+      setArchiveMeetingError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      setArchiveMeetingError(formatApiErrorMessage(error) || "Failed to archive General Meeting");
+    },
+  });
+
+  const unarchiveMeetingMutation = useMutation({
+    mutationFn: () => unarchiveGeneralMeeting(meetingId!),
+    onSuccess: async () => {
+      setArchiveMeetingError(null);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] }),
+        queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings"] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      setArchiveMeetingError(formatApiErrorMessage(error) || "Failed to unarchive General Meeting");
     },
   });
 
@@ -477,6 +553,7 @@ export default function GeneralMeetingDetailPage() {
   const [closeMotionErrors, setCloseMotionErrors] = useState<Record<string, string>>({});
   const [pendingCloseMotionId, setPendingCloseMotionId] = useState<string | null>(null);
   const [pendingCloseMotionConfirmId, setPendingCloseMotionConfirmId] = useState<string | null>(null);
+  const [pendingReopenMotionConfirmId, setPendingReopenMotionConfirmId] = useState<string | null>(null);
 
   const closeMotionMutation = useMutation({
     mutationFn: (motionId: string) => {
@@ -495,6 +572,28 @@ export default function GeneralMeetingDetailPage() {
     onError: (error: Error, motionId) => {
       setPendingCloseMotionId(null);
       setCloseMotionErrors((prev) => ({ ...prev, [motionId]: error.message || "Failed to close motion" }));
+    },
+  });
+
+  const [reopenMotionErrors, setReopenMotionErrors] = useState<Record<string, string>>({});
+  const [pendingReopenMotionId, setPendingReopenMotionId] = useState<string | null>(null);
+  const reopenMotionMutation = useMutation({
+    mutationFn: (motionId: string) => {
+      setPendingReopenMotionId(motionId);
+      return reopenMotion(motionId);
+    },
+    onSuccess: async (_data, motionId) => {
+      setPendingReopenMotionId(null);
+      setReopenMotionErrors((previous) => {
+        const next = { ...previous };
+        delete next[motionId];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ["admin", "general-meetings", meetingId] });
+    },
+    onError: (error: Error, motionId) => {
+      setPendingReopenMotionId(null);
+      setReopenMotionErrors((previous) => ({ ...previous, [motionId]: error.message || "Failed to reopen motion" }));
     },
   });
 
@@ -715,42 +814,108 @@ export default function GeneralMeetingDetailPage() {
         ← Back
       </button>
       <div className="admin-page-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <h1 style={{ margin: 0 }}>{meeting.title}</h1>
-          <StatusBadge status={meeting.status} />
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <h1 style={{ margin: 0 }}>{meeting.title}</h1>
+            <StatusBadge status={meeting.status} />
+            {meeting.is_archived && (
+              <span
+                className="status-badge status-badge--closed"
+                style={{ background: "var(--surface-muted, #f1f5f9)", color: "var(--text-muted, #475569)" }}
+              >
+                Archived
+              </span>
+            )}
+          </div>
+          <p className="meeting-detail__subtitle">
+            <span>{meeting.building_name}</span>
+            {meeting.oc_plan_number && meeting.building_id && (
+              <>
+                <span aria-hidden="true">·</span>
+                <Link
+                  to={`/admin/buildings/${meeting.building_id}`}
+                  aria-label={`Open OC Plan ${meeting.oc_plan_number}`}
+                >
+                  {meeting.oc_plan_number}
+                </Link>
+              </>
+            )}
+          </p>
         </div>
-        {meeting.status === "pending" && (
-          <StartGeneralMeetingButton
-            meetingId={meetingId!}
-            onSuccess={handleCloseSuccess}
-          />
-        )}
-        {meeting.status === "open" && (
-          <CloseGeneralMeetingButton
-            meetingId={meetingId!}
-            meetingTitle={meeting.title}
-            onSuccess={handleCloseSuccess}
-          />
-        )}
-        {(meeting.status === "closed" || meeting.status === "pending") && (
-          <button
-            type="button"
-            className="btn btn--danger"
-            onClick={handleDelete}
-            disabled={deleteMutation.isPending}
-          >
-            Delete Meeting
-          </button>
-        )}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+          {meeting.status === "pending" && (
+            <StartGeneralMeetingButton
+              meetingId={meetingId!}
+              onSuccess={handleCloseSuccess}
+            />
+          )}
+          {meeting.status === "open" && (
+            <CloseGeneralMeetingButton
+              meetingId={meetingId!}
+              meetingTitle={meeting.title}
+              onSuccess={handleCloseSuccess}
+            />
+          )}
+          {meeting.status === "closed" && !meeting.is_archived && meeting.closed_at && (
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={() => {
+                setReopenMeetingError(null);
+                setShowReopenMeetingDialog(true);
+              }}
+            >
+              Reopen Meeting
+            </button>
+          )}
+          {(meeting.status === "closed" || meeting.status === "pending") && !meeting.is_archived && (
+            <button
+              type="button"
+              className="btn btn--danger"
+              onClick={handleDelete}
+              disabled={deleteMutation.isPending}
+            >
+              Delete Meeting
+            </button>
+          )}
+          {meeting.status === "closed" && !meeting.is_archived && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                setArchiveMeetingError(null);
+                setShowArchiveMeetingDialog(true);
+              }}
+              disabled={archiveMeetingMutation.isPending}
+            >
+              {archiveMeetingMutation.isPending ? "Archiving…" : "Archive Meeting"}
+            </button>
+          )}
+          {meeting.is_archived && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => {
+                setArchiveMeetingError(null);
+                unarchiveMeetingMutation.mutate();
+              }}
+              disabled={unarchiveMeetingMutation.isPending}
+            >
+              {unarchiveMeetingMutation.isPending ? "Unarchiving…" : "Unarchive Meeting"}
+            </button>
+          )}
+        </div>
       </div>
+
+      {archiveMeetingError && !showArchiveMeetingDialog && (
+        <p className="state-message state-message--error" role="alert">
+          {archiveMeetingError}
+        </p>
+      )}
 
       <div className="meeting-detail-layout">
         <div className="meeting-detail-layout__info">
           <div className="admin-meta">
-            <span className="admin-meta__item">
-              <span className="admin-meta__label">Building</span>
-              {meeting.building_name}
-            </span>
             <span className="admin-meta__item">
               <span className="admin-meta__label">Meeting</span>
               {formatLocalDateTime(meeting.meeting_at)}
@@ -860,15 +1025,25 @@ export default function GeneralMeetingDetailPage() {
         />
       )}
 
-      {meeting.status === "closed" && meeting.email_delivery && !showEmailBanner && (
+      {meeting.status === "closed" && (
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+          {!showEmailBanner && (
+            <button
+              type="button"
+              className="btn btn--secondary"
+              onClick={() => { setResendSuccess(false); setResendError(null); resendMutation.mutate(); }}
+              disabled={resendMutation.isPending}
+            >
+              {resendMutation.isPending ? "Sending..." : meeting.email_delivery ? "Resend Summary Email" : "Send Summary Email"}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn--secondary"
-            onClick={() => { setResendSuccess(false); setResendError(null); resendMutation.mutate(); }}
-            disabled={resendMutation.isPending}
+            onClick={() => { setDownloadError(null); downloadMutation.mutate(); }}
+            disabled={downloadMutation.isPending}
           >
-            {resendMutation.isPending ? "Sending..." : "Resend Summary Email"}
+            {downloadMutation.isPending ? "Downloading…" : "Download Summary PDF"}
           </button>
           {resendSuccess && (
             <span style={{ color: "var(--green)", fontSize: "0.875rem", fontWeight: 600 }}>
@@ -878,10 +1053,12 @@ export default function GeneralMeetingDetailPage() {
           {resendError && (
             <span role="alert" style={{ color: "var(--red)", fontSize: "0.875rem" }}>{resendError}</span>
           )}
+          {downloadError && (
+            <span role="alert" style={{ color: "var(--red)", fontSize: "0.875rem" }}>{downloadError}</span>
+          )}
         </div>
       )}
 
-      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
       {meeting.status !== "closed" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem", flexWrap: "wrap", gap: "0.5rem" }}>
           <div style={{ display: "flex", gap: "0.5rem" }}>
@@ -898,7 +1075,7 @@ export default function GeneralMeetingDetailPage() {
                 className="btn btn--secondary"
                 onClick={() => setShowVoteEntryPanel(true)}
               >
-                Enter In-Person Votes
+                Enter Floor Votes
               </button>
             )}
           </div>
@@ -922,6 +1099,7 @@ export default function GeneralMeetingDetailPage() {
           </div>
         </div>
       )}
+      <h2 style={{ fontSize: "1.25rem", marginBottom: 16 }}>Motions</h2>
       {displayMotions.length === 0 ? (
         <p className="state-message">No motions.</p>
       ) : (
@@ -972,6 +1150,16 @@ export default function GeneralMeetingDetailPage() {
           }}
           closeMotionErrors={closeMotionErrors}
           pendingCloseMotionId={pendingCloseMotionId}
+          onReopenMotion={(motionId) => {
+            setReopenMotionErrors((previous) => {
+              const next = { ...previous };
+              delete next[motionId];
+              return next;
+            });
+            setPendingReopenMotionConfirmId(motionId);
+          }}
+          reopenMotionErrors={reopenMotionErrors}
+          pendingReopenMotionId={pendingReopenMotionId}
         />
       )}
 
@@ -1040,6 +1228,49 @@ export default function GeneralMeetingDetailPage() {
         </div>
       )}
 
+      {pendingReopenMotionConfirmId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Reopen Motion Voting"
+          data-testid="reopen-motion-confirm-dialog"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1000,
+          }}
+          onClick={(event) => { if (event.target === event.currentTarget) setPendingReopenMotionConfirmId(null); }}
+        >
+          <div style={{ background: "#fff", borderRadius: 8, padding: 32, minWidth: 360, maxWidth: 480, width: "100%", boxShadow: "0 4px 24px rgba(0,0,0,0.15)" }}>
+            <h2 style={{ marginTop: 0, marginBottom: 16 }}>Reopen voting for this motion?</h2>
+            <p style={{ marginBottom: 24, color: "var(--text-secondary)" }}>
+              Voters who have not submitted a vote for this motion can vote again. Existing submitted votes will remain unchanged.
+            </p>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="btn btn--secondary" onClick={() => setPendingReopenMotionConfirmId(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                data-testid="reopen-motion-confirm-btn"
+                onClick={() => {
+                  const id = pendingReopenMotionConfirmId;
+                  setPendingReopenMotionConfirmId(null);
+                  reopenMotionMutation.mutate(id);
+                }}
+              >
+                Reopen Voting
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Delete Motion Modal */}
       {pendingDeleteMotionId && (
         <DeleteMotionConfirmModal
@@ -1059,6 +1290,22 @@ export default function GeneralMeetingDetailPage() {
           error={deleteMeetingError}
           onConfirm={handleDeleteMeetingConfirm}
           onCancel={() => { setShowDeleteMeetingModal(false); setDeleteMeetingError(null); }}
+        />
+      )}
+
+      {showReopenMeetingDialog && meeting && (
+        <ReopenGeneralMeetingDialog
+          initialVotingClosesAt={toDatetimeLocalValue(new Date(Math.max(
+            Date.now() + 60 * 60 * 1000,
+            new Date(meeting.meeting_at).getTime() + 60 * 60 * 1000,
+          )).toISOString())}
+          isPending={reopenMeetingMutation.isPending}
+          error={reopenMeetingError}
+          onConfirm={(votingClosesAt) => reopenMeetingMutation.mutate(votingClosesAt)}
+          onCancel={() => {
+            setShowReopenMeetingDialog(false);
+            setReopenMeetingError(null);
+          }}
         />
       )}
 
@@ -1341,6 +1588,23 @@ export default function GeneralMeetingDetailPage() {
           />
         </Suspense>
       )}
+
+      <ConfirmDialog
+        isOpen={showArchiveMeetingDialog}
+        onClose={() => {
+          if (archiveMeetingMutation.isPending) return;
+          setShowArchiveMeetingDialog(false);
+          setArchiveMeetingError(null);
+        }}
+        onConfirm={() => archiveMeetingMutation.mutate()}
+        isPending={archiveMeetingMutation.isPending}
+        error={archiveMeetingError}
+        title="Archive General Meeting"
+        titleId="archive-meeting-detail-title"
+        message={`Are you sure you want to archive "${meeting.title}"? The meeting will be retained for audit compliance and hidden from the active meetings list.`}
+        confirmLabel={archiveMeetingMutation.isPending ? "Archiving…" : "Archive"}
+        confirmClassName="btn btn--secondary"
+      />
 
       {/* Edit Motion Modal */}
       {editingMotion && (

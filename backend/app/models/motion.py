@@ -69,6 +69,12 @@ class Motion(Base):
     voting_closed_at: Mapped[datetime | None] = mapped_column(
         sa.TIMESTAMP(timezone=True), nullable=True, default=None
     )
+    closed_by_meeting: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=sa.text("false"),
+    )
 
     # Relationships
     general_meeting: Mapped["GeneralMeeting"] = relationship(  # noqa: F821

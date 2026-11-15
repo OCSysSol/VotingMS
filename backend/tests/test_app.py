@@ -1313,6 +1313,12 @@ class TestLifespan:
         mock_email_service.requeue_pending_on_startup = AsyncMock(
             side_effect=lambda db: call_order.append("requeue_pending_on_startup")
         )
+        mock_sync_email_delivery = AsyncMock(
+            side_effect=lambda db: call_order.append("sync_email_delivery")
+        )
+        mock_sync_sms_enabled = AsyncMock(
+            side_effect=lambda db: call_order.append("sync_sms_enabled")
+        )
 
         mock_db = AsyncMock()
         mock_session_ctx = AsyncMock()
@@ -1324,14 +1330,27 @@ class TestLifespan:
             patch("app.main._check_migration_head", mock_check_migration_head),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                mock_sync_email_delivery,
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                mock_sync_sms_enabled,
+            ),
         ):
             app_instance = FastAPI()
             async with lifespan(app_instance):
                 pass  # just exercise startup
 
-        assert call_order == ["check_migration_head", "requeue_pending_on_startup"], (
+        assert call_order == [
+            "check_migration_head",
+            "sync_email_delivery",
+            "sync_sms_enabled",
+            "requeue_pending_on_startup",
+        ], (
             "startup operations must run sequentially: check_migration_head first, "
-            "then requeue_pending_on_startup"
+            "then email and SMS synchronization, then requeue_pending_on_startup"
         )
 
     async def test_lifespan_check_migration_head_called_once(self):
@@ -1354,6 +1373,14 @@ class TestLifespan:
             patch("app.main._check_migration_head", mock_check),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                AsyncMock(),
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                AsyncMock(),
+            ),
         ):
             app_instance = FastAPI()
             async with lifespan(app_instance):
@@ -1384,6 +1411,14 @@ class TestLifespan:
             patch("app.main._check_migration_head", AsyncMock()),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                AsyncMock(),
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                AsyncMock(),
+            ),
         ):
             app_instance = FastAPI()
             async with lifespan(app_instance):
@@ -1416,6 +1451,14 @@ class TestLifespan:
             patch("app.main._check_migration_head", raising_check),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                AsyncMock(),
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                AsyncMock(),
+            ),
         ):
             app_instance = FastAPI()
             with pytest.raises(RuntimeError, match="Migration head mismatch"):
@@ -1456,6 +1499,14 @@ class TestLifespan:
             patch("app.main._check_migration_head", flaky_check),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                AsyncMock(),
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                AsyncMock(),
+            ),
             patch("asyncio.sleep", AsyncMock()) as mock_sleep,
         ):
             app_instance = FastAPI()
@@ -1496,6 +1547,14 @@ class TestLifespan:
             patch("app.main._check_migration_head", always_fail),
             patch("app.database.AsyncSessionLocal", mock_session_local),
             patch("app.services.email_service.EmailService", return_value=mock_email_service),
+            patch(
+                "app.services.smtp_config_service.sync_email_delivery_from_testing_mode",
+                AsyncMock(),
+            ),
+            patch(
+                "app.services.smtp_config_service.sync_sms_enabled_from_testing_mode",
+                AsyncMock(),
+            ),
             patch("asyncio.sleep", record_sleep),
         ):
             app_instance = FastAPI()

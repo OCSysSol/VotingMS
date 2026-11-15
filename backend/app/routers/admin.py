@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import aiosmtplib
 import httpx
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, Response, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +40,8 @@ from app.schemas.admin import (
     GeneralMeetingListItem,
     GeneralMeetingOut,
     GeneralMeetingStartOut,
+    GeneralMeetingReopenRequest,
+    GeneralMeetingReopenOut,
     BuildingArchiveOut,
     BuildingCreate,
     SubscriptionChangeRequest,
@@ -74,6 +76,8 @@ from app.schemas.config import (
     LogoUploadOut,
     SmtpConfigOut,
     SmtpConfigUpdate,
+    SmtpDeliveryOut,
+    SmtpDeliveryUpdate,
     SmtpStatusOut,
     SmsConfigOut,
     SmsConfigUpdate,
@@ -88,6 +92,10 @@ from app.services import config_service
 from app.services import smtp_config_service
 from app.services import blob_service
 from app.services import neon_auth_service
+from app.services.report_pdf_service import (
+    generate_meeting_results_pdf,
+    report_pdf_filename,
+)
 from app.services.neon_auth_service import (
     NeonAuthDuplicateUserError,
     NeonAuthNotConfiguredError,
@@ -98,6 +106,7 @@ from app.rate_limiter import (
     admin_import_limiter,
     admin_close_limiter,
     admin_invite_limiter,
+    admin_report_limiter,
     get_client_ip,
     provision_limiter,
     sms_test_rate_limiter,
@@ -458,7 +467,7 @@ async def request_subscription_change(
     Returns 200 with {"message": "Request sent."} on success.
     Returns 503 if SMTP is not configured.
     """
-    from app.services.email_service import SmtpNotConfiguredError
+    from app.services.email_service import EmailDeliveryDisabledError, SmtpNotConfiguredError
 
     origin = derive_origin(request)
     subscription = await admin_service.get_subscription(db)
@@ -476,6 +485,8 @@ async def request_subscription_change(
             status_code=503,
             detail="Email not configured. Contact support@ocss.tech directly.",
         )
+    except EmailDeliveryDisabledError:
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
 
     logger.info(
         "subscription_change_requested",
@@ -528,6 +539,7 @@ async def list_lot_owners(
     offset: int = Query(default=0, ge=0),
     sort_by: str | None = Query(None),
     sort_dir: str | None = Query(None),
+    search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> list[LotOwnerOut]:
     if sort_by is not None and sort_by not in _VALID_LOT_OWNERS_SORT_BY:
@@ -535,7 +547,8 @@ async def list_lot_owners(
     if sort_dir is not None and sort_dir not in _VALID_SORT_DIRS:
         raise HTTPException(status_code=400, detail="Invalid sort_dir value")
     owners = await admin_service.list_lot_owners(
-        building_id, db, limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir
+        building_id, db, limit=limit, offset=offset, sort_by=sort_by, sort_dir=sort_dir,
+        search=search,
     )
     return [LotOwnerOut(**o) for o in owners]
 
@@ -543,9 +556,10 @@ async def list_lot_owners(
 @router.get("/buildings/{building_id}/lot-owners/count")
 async def count_lot_owners_endpoint(
     building_id: uuid.UUID,
+    search: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, int]:
-    count = await admin_service.count_lot_owners(building_id, db)
+    count = await admin_service.count_lot_owners(building_id, db, search=search)
     return {"count": count}
 
 
@@ -872,6 +886,16 @@ async def close_motion_endpoint(
     return MotionDetail(**result)
 
 
+@router.post("/motions/{motion_id}/reopen", response_model=MotionDetail)
+async def reopen_motion_endpoint(
+    motion_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: BetterAuthUser = Depends(require_admin),
+) -> MotionDetail:
+    result = await admin_service.reopen_motion(motion_id, db)
+    return MotionDetail(**result)
+
+
 @router.patch("/motions/{motion_id}/visibility", response_model=MotionDetail)
 async def toggle_motion_visibility_endpoint(
     motion_id: uuid.UUID,
@@ -1032,6 +1056,33 @@ async def get_general_meeting_detail(
     return GeneralMeetingDetail(**detail)
 
 
+@router.get("/general-meetings/{general_meeting_id}/results.pdf")
+async def download_general_meeting_results_pdf(
+    general_meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> Response:
+    """Download the closed meeting's detailed voter and tally report."""
+    admin_report_limiter.check(current_user.user_id)
+    detail = await admin_service.get_general_meeting_detail(general_meeting_id, db)
+    if detail["status"] != "closed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Meeting results are only available after the meeting is closed",
+        )
+
+    filename = report_pdf_filename(detail)
+    return Response(
+        content=generate_meeting_results_pdf(detail),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.patch(
     "/general-meetings/{general_meeting_id}",
     response_model=GeneralMeetingUpdateOut,
@@ -1096,20 +1147,34 @@ async def start_general_meeting_endpoint(
     response_model=GeneralMeetingCloseOut,
 )
 async def close_general_meeting(
-    request: Request,
     general_meeting_id: uuid.UUID,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
     current_user: BetterAuthUser = Depends(require_admin),
 ) -> GeneralMeetingCloseOut:
     admin_close_limiter.check(current_user.user_id)
     meeting = await admin_service.close_general_meeting(general_meeting_id, db)
-    email_service = EmailService()
-    base_url = str(request.base_url).rstrip("/")
-    background_tasks.add_task(email_service.trigger_with_retry, meeting.id, base_url)
     return GeneralMeetingCloseOut(
         id=meeting.id,
         status=meeting.status.value if hasattr(meeting.status, "value") else meeting.status,
+        closed_at=meeting.closed_at,
+        voting_closes_at=meeting.voting_closes_at,
+    )
+
+
+@router.post(
+    "/general-meetings/{general_meeting_id}/reopen",
+    response_model=GeneralMeetingReopenOut,
+)
+async def reopen_general_meeting(
+    general_meeting_id: uuid.UUID,
+    data: GeneralMeetingReopenRequest,
+    db: AsyncSession = Depends(get_db),
+    _: BetterAuthUser = Depends(require_admin),
+) -> GeneralMeetingReopenOut:
+    meeting = await admin_service.reopen_general_meeting(general_meeting_id, data, db)
+    return GeneralMeetingReopenOut(
+        id=meeting.id,
+        status=meeting.status.value if hasattr(meeting.status, "value") else str(meeting.status),
         closed_at=meeting.closed_at,
         voting_closes_at=meeting.voting_closes_at,
     )
@@ -1179,6 +1244,8 @@ async def resend_report(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> ResendReportOut:
+    if not await smtp_config_service.is_email_delivery_enabled(db):
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
     result = await admin_service.resend_report(general_meeting_id, db)
     email_service = EmailService()
     base_url = str(request.base_url).rstrip("/")
@@ -1399,6 +1466,7 @@ async def get_smtp_config(db: AsyncSession = Depends(get_db)) -> SmtpConfigOut:
         smtp_username=config.smtp_username,
         smtp_from_email=config.smtp_from_email,
         password_is_set=config.smtp_password_enc is not None,
+        email_delivery_enabled=config.email_delivery_enabled,
     )
 
 
@@ -1415,7 +1483,24 @@ async def update_smtp_config(
         smtp_username=config.smtp_username,
         smtp_from_email=config.smtp_from_email,
         password_is_set=config.smtp_password_enc is not None,
+        email_delivery_enabled=config.email_delivery_enabled,
     )
+
+
+@router.patch("/config/smtp/delivery", response_model=SmtpDeliveryOut)
+async def update_smtp_delivery(
+    data: SmtpDeliveryUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: BetterAuthUser = Depends(require_admin),
+) -> SmtpDeliveryOut:
+    """Enable or disable all outbound email delivery without changing credentials."""
+    config = await smtp_config_service.set_email_delivery_enabled(data.enabled, db)
+    logger.info(
+        "email_delivery_toggled",
+        enabled=config.email_delivery_enabled,
+        performed_by=current_user.user_id,
+    )
+    return SmtpDeliveryOut(email_delivery_enabled=config.email_delivery_enabled)
 
 
 class SmtpTestRequest(BaseModel):
@@ -1428,13 +1513,15 @@ async def test_smtp_config(body: SmtpTestRequest, db: AsyncSession = Depends(get
 
     Rate limited to 5 requests per minute per server process.
     Returns {"ok": true} on success or raises 400 with the SMTP error message.
-    Returns 409 if SMTP is not configured.
+    Returns 409 if email delivery is disabled or SMTP is not configured.
     """
     from email.mime.text import MIMEText
 
     _check_smtp_test_rate_limit()
 
     config = await smtp_config_service.get_smtp_config(db)
+    if not config.email_delivery_enabled:
+        raise HTTPException(status_code=409, detail="Email delivery is disabled")
     if not config.smtp_host or not config.smtp_username or not config.smtp_from_email or config.smtp_password_enc is None:
         raise HTTPException(status_code=409, detail="SMTP is not configured")
 

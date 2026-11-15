@@ -3,6 +3,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.models.vote import VoteChoice
+
 
 class SessionRestoreRequest(BaseModel):
     general_meeting_id: uuid.UUID
@@ -58,13 +60,22 @@ class AuthVerifyRequest(BaseModel):
         return v.strip()
 
 
+class SubmittedVoteInfo(BaseModel):
+    motion_id: uuid.UUID
+    choice: VoteChoice
+    option_choices: dict[str, str] = Field(default_factory=dict)
+
+
 class LotInfo(BaseModel):
     lot_owner_id: uuid.UUID
     lot_number: str
     financial_position: str
     already_submitted: bool
     is_proxy: bool = False
-    voted_motion_ids: list[uuid.UUID] = []  # motion IDs with submitted votes for this lot
+    # Retained for backward compatibility with older clients.
+    voted_motion_ids: list[uuid.UUID] = Field(default_factory=list)
+    # Exact submitted choices, scoped to this authenticated voter's lot.
+    submitted_votes: list[SubmittedVoteInfo] = Field(default_factory=list)
 
 
 class AuthVerifyResponse(BaseModel):

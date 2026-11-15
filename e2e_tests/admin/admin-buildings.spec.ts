@@ -1,11 +1,11 @@
 import { test, expect } from "../fixtures";
 
 test.describe("Admin Buildings", () => {
-  test("navigates to buildings page via sidebar", async ({ page }) => {
+  test("navigates to OC Plans page via sidebar", async ({ page }) => {
     await page.goto("/admin/buildings");
     await expect(page.getByText("Admin Portal").first()).toBeVisible();
-    await expect(page.getByRole("link", { name: "Buildings" }).first()).toBeVisible();
-    await expect(page.getByRole("heading", { name: "Buildings", exact: true })).toBeVisible();
+    await expect(page.getByRole("link", { name: "OC Plans" }).first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OC Plans", exact: true })).toBeVisible();
   });
 
   test("displays building table with data", async ({ page }) => {
@@ -20,7 +20,7 @@ test.describe("Admin Buildings", () => {
     await page.goto("/admin/buildings");
     const csvContent = "building_name,manager_email\nTest Building E2E,manager@test.com";
     const buffer = Buffer.from(csvContent, "utf-8");
-    const fileInput = page.getByLabel("Buildings file");
+    const fileInput = page.getByLabel("OC Plans file");
     await fileInput.setInputFiles({
       name: "buildings.csv",
       mimeType: "text/csv",
@@ -30,38 +30,60 @@ test.describe("Admin Buildings", () => {
     await expect(page.getByText(/Import complete:/)).toBeVisible();
   });
 
-  test("clicking building name navigates to building detail", async ({ page }) => {
+  test("clicking an OC Plan row navigates to its detail page", async ({ page }) => {
     await page.goto("/admin/buildings");
-    // Click the first building name link
-    const firstBuildingLink = page.getByRole("row").nth(1).getByRole("button").first();
-    const buildingName = await firstBuildingLink.textContent();
-    await firstBuildingLink.click();
+    const firstBuildingRow = page
+      .getByRole("row")
+      .filter({ has: page.getByRole("button", { name: /^Open OC Plan / }) })
+      .first();
+    const ocPlanNumber = (
+      await firstBuildingRow.getByRole("button", { name: /^Open OC Plan / }).textContent()
+    )?.trim();
+    expect(ocPlanNumber).toBeTruthy();
+    await firstBuildingRow.getByRole("cell").nth(1).click();
     await expect(page).toHaveURL(/\/admin\/buildings\//);
-    if (buildingName) {
-      await expect(page.getByText(buildingName)).toBeVisible();
-    }
+    await expect(page.getByRole("heading", { name: ocPlanNumber!, exact: true })).toBeVisible();
   });
 
   test("create building via modal dialog", async ({ page }) => {
     const buildingName = `E2E Modal Building ${Date.now()}`;
+    const ocPlanNumber = `E2E-PLAN-${Date.now()}`;
     await page.goto("/admin/buildings");
-    await expect(page.getByRole("heading", { name: "Buildings", exact: true })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "OC Plans", exact: true })).toBeVisible();
 
     // Open modal
-    await page.getByRole("button", { name: "+ New Building" }).click();
-    await expect(page.getByRole("dialog", { name: "New Building" })).toBeVisible();
+    await page.getByRole("button", { name: "+ New OC Plan" }).click();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).toBeVisible();
 
-    // Fill in the form
+    // OC Plan number is the first and mandatory field.
+    await expect(page.getByLabel("OC Plan Number")).toBeVisible();
+    await page.getByLabel("OC Plan Number").fill(ocPlanNumber);
     await page.getByLabel("Building Name").fill(buildingName);
     await page.getByLabel("Manager Email").fill("e2e-modal@test.com");
 
     // Submit
-    await page.getByRole("button", { name: "Create Building" }).click();
+    await page.getByRole("button", { name: "Create OC Plan" }).click();
 
     // Modal closes after success
-    await expect(page.getByRole("dialog", { name: "New Building" })).not.toBeVisible();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).not.toBeVisible();
 
-    // New building appears in the table
-    await expect(page.getByRole("button", { name: buildingName })).toBeVisible();
+    // New building appears as plain text in a clickable row.
+    const newBuildingRow = page.getByRole("row").filter({ hasText: buildingName });
+    await expect(newBuildingRow).toBeVisible();
+    await newBuildingRow.getByRole("cell").nth(1).click();
+    await expect(page).toHaveURL(/\/admin\/buildings\//);
+    await expect(page.getByRole("heading", { name: ocPlanNumber, exact: true })).toBeVisible();
+    await expect(page.locator("p", { hasText: buildingName })).toBeVisible();
+  });
+
+  test("new OC Plan requires the OC Plan number", async ({ page }) => {
+    await page.goto("/admin/buildings");
+    await page.getByRole("button", { name: "+ New OC Plan" }).click();
+    await page.getByLabel("Building Name").fill(`E2E Required Plan ${Date.now()}`);
+    await page.getByLabel("Manager Email").fill("e2e-required-plan@test.com");
+    await page.getByRole("button", { name: "Create OC Plan" }).click();
+
+    await expect(page.getByText("OC Plan number is required.")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "New OC Plan" })).toBeVisible();
   });
 });

@@ -285,4 +285,42 @@ describe("useVotingState — edge cases", () => {
     expect(spySet).not.toHaveBeenCalled();
     spySet.mockRestore();
   });
+
+  it("default prior-vote projection tolerates omitted option choices", () => {
+    const motion = makeMotion({
+      already_voted: true,
+      submitted_choice: "yes",
+      submitted_option_choices: undefined,
+    });
+    const { result } = renderHook(() =>
+      useVotingState({
+        meetingId: MEETING_ID,
+        motions: [motion],
+        isMotionReadOnly: () => true,
+        unvotedMotions: [],
+      }),
+    );
+    expect(result.current.choices["m1"]).toBe("yes");
+  });
+
+  it("clears candidate choices when selection changes without a meeting id", () => {
+    const motion = makeMotion();
+    const { result, rerender } = renderHook(
+      ({ selectionKey }) =>
+        useVotingState({
+          meetingId: undefined,
+          motions: [motion],
+          isMotionReadOnly: () => false,
+          unvotedMotions: [motion],
+          selectionKey,
+        }),
+      { initialProps: { selectionKey: "lot-a" } },
+    );
+    act(() => {
+      result.current.handleChoiceChange("m1", "yes");
+    });
+    expect(result.current.choices["m1"]).toBe("yes");
+    rerender({ selectionKey: "lot-b" });
+    expect(result.current.choices).toEqual({});
+  });
 });

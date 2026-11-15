@@ -454,11 +454,12 @@ test.describe("WF5: Multi-lot voter — partial submission across two sessions",
     await api.dispose();
     await expect(page).toHaveURL(/vote\/.*\/voting/, { timeout: 20000 });
 
-    // WF5-A shows "Already submitted" and is disabled (scoped to sidebar)
+    // WF5-A shows "Already submitted" but remains selectable for review.
     const sidebar = page.locator(".voting-layout__sidebar");
     const lotAItem = sidebar.locator(".lot-selection__item").filter({ hasText: `Lot ${LOT_A}` });
     await expect(lotAItem.getByText("Already submitted")).toBeVisible({ timeout: 10000 });
-    await expect(lotAItem).toHaveAttribute("aria-disabled", "true");
+    await expect(lotAItem).not.toHaveAttribute("aria-disabled", "true");
+    await expect(lotAItem.getByRole("checkbox")).toBeEnabled();
 
     // WF5-B is still pending — "You are voting for 1 lot." (scoped to sidebar)
     await expect(page.locator(".voting-layout__sidebar").getByText("You are voting for 1 lot.")).toBeVisible();

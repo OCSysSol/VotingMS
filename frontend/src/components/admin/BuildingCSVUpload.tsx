@@ -34,7 +34,7 @@ export default function BuildingCSVUpload({ onSuccess }: BuildingCSVUploadProps)
   return (
     <div className="admin-card">
       <div className="admin-card__header">
-        <h3 className="admin-card__title">Import Buildings</h3>
+        <h3 className="admin-card__title">Import OC Plans</h3>
       </div>
       <div className="admin-upload">
         <p className="admin-upload__hint">
@@ -46,7 +46,7 @@ export default function BuildingCSVUpload({ onSuccess }: BuildingCSVUploadProps)
             ref={fileRef}
             type="file"
             accept=".csv,text/csv,.xlsx,.xls"
-            aria-label="Buildings file"
+            aria-label="OC Plans file"
             style={{ display: "none" }}
             onChange={handleFileChange}
           />

@@ -215,6 +215,24 @@ This document covers admin portal authentication, the admin in-person vote entry
 
 ---
 
+### US-AVE-04: Floor vote confirmation dialog shows detailed votes before confirming
+
+**Status:** ✅ Implemented
+
+**Description:** As an admin entering floor votes, I want the confirmation dialog to show a lot-by-lot breakdown of the new votes I am about to submit so I can verify every choice before confirming.
+
+**Acceptance Criteria:**
+
+- [ ] The confirmation dialog (`ConfirmDialog` in `AdminVoteEntryPanel`) groups entered/applicable votes in the current interaction by selected lot (`Lot {lot_number}` + optional `In arrear` indicator)
+- [ ] Previously recorded/locked prior votes (`priorVoteSourceByLotId`) are excluded from the confirmation breakdown
+- [ ] For binary motions, shows the selected choice (`For`, `Against`, or `Abstain`)
+- [ ] For multi-choice motions, shows per-option choices (`For`, `Against`, or `Abstain`) in option order when any option has a selection
+- [ ] For in-arrear lots on `general` or `multi_choice` motions (without a prior vote), shows `Not eligible`
+- [ ] If a selected lot has no new votes or `Not eligible` entries, displays `"No new votes selected for this lot."`
+- [ ] Preserves accessibility: initial focus on `Cancel`, Escape closes, backdrop click closes, Tab/Shift+Tab focus trap
+
+---
+
 ### US-AUIF-01: Admin vote entry respects multi-choice option limit
 
 **Status:** ✅ Implemented
@@ -389,17 +407,17 @@ This document covers admin portal authentication, the admin in-person vote entry
 
 ---
 
-### US-EMAIL-03: Resend summary email button on admin meeting detail page
+### US-EMAIL-03: Manually send or resend summary email on admin meeting detail page
 
 **Status:** ✅ Implemented
 
-**Description:** As a meeting host, I want a "Resend Summary Email" button on the closed meeting detail page so I can re-trigger the results email at any time.
+**Description:** As a meeting host, I want to explicitly send or resend the summary email from a closed meeting page so I control when results are distributed.
 
 **Acceptance Criteria:**
 
-- [ ] A "Resend Summary Email" button is visible on the admin meeting detail page when `meeting.status === "closed"`
+- [ ] A "Send Results Report" button is visible when no report has been delivered; otherwise an explicit resend action is available on closed meetings.
 - [ ] Clicking the button calls `POST /api/admin/general-meetings/{id}/resend-report` and shows a loading state while in flight
-- [ ] On success the button shows a transient "Queued for resend" confirmation message
+- [ ] On success the button shows a transient queued/sent confirmation message
 - [ ] On error the button shows an inline error message
 - [ ] The backend `resend_report` service function allows resend regardless of the current `EmailDelivery.status`
 - [ ] The endpoint still returns 404 if the meeting does not exist and 409 if the meeting is not closed
@@ -627,7 +645,7 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [ ] The table has 5 columns: "Lot #" (monospace), "Email", "UOE" (monospace, right-aligned), "Submitted By", "Choice"
 - [ ] Voters from all categories (For, Against, Abstained, Absent, Not eligible) appear in the same table, each row labelled with a coloured choice badge in the Choice column
 - [ ] Proxy voters show "(proxy)" next to their email address
-- [ ] Admin-submitted ballots show "Admin" in the Submitted By column; voter-submitted ballots show "Voter"
+- [ ] Admin-submitted floor ballots show "Floor vote" in the user-facing email/source cell; voter-submitted ballots show their voter email
 - [ ] If no voters exist across all categories, a "No voter records." message is shown instead of an empty table
 - [ ] Typecheck/lint passes; all tests pass at 100% coverage
 
@@ -651,11 +669,69 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [x] For multi-choice motions, the CSV contains one row per voter per option-vote with columns: `Lot Number`, `Owner Name`, `Voter Email`, `Option`, `Vote Choice`, `Entitlement (UOE)`, `Submitted By`, `Submitted At`
 - [x] `Owner Name` is the display name from `voter_name` if available, empty string otherwise
 - [x] `Vote Choice` values are human-readable: `For`, `Against`, `Abstained`, `Absent`, `Not eligible`
-- [x] `Submitted By` is `Admin` when `submitted_by_admin = true`, `Voter` otherwise
+- [x] User-facing choice/source text is `Floor vote` when `submitted_by_admin = true`, `Voter` otherwise
 - [x] `Submitted At` is the ballot submission timestamp in ISO 8601 format (UTC)
 - [x] The button uses `.btn.btn--admin` style with a download icon (`↓`) prefix
 - [x] All tests pass at 100% coverage
 - [x] Typecheck/lint passes
+
+---
+
+### US-PDF-DL-01: Download the complete meeting results PDF
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting admin, I want to download the same complete voting-results PDF that is attached to the summary email so I can inspect, store, or share an offline record without sending an email.
+
+**Acceptance Criteria:**
+
+- [x] A `Download Summary PDF` button is shown next to the summary-email action for closed meetings.
+- [x] The download remains available when email delivery is disabled or the email delivery banner is visible.
+- [x] Clicking the button calls an authenticated admin endpoint and downloads an `application/pdf` attachment without navigating away from the meeting detail page.
+- [x] The endpoint returns 404 for an unknown meeting, 409 for a meeting that is not closed, and 401/403 without an authenticated admin session.
+- [x] The button shows a loading state while the PDF is generated and an inline accessible error if generation/download fails.
+- [x] The download and email attachment are produced by the same backend PDF renderer and contain the same substantive voting data.
+- [x] The PDF includes meeting/OC Plan metadata (timestamps in Melbourne time, `Australia/Melbourne` with `AEST`/`AEDT`), participation totals, every motion and resolution type, and weighted/voter tallies (vote counts and UOE sums) per option/category without individual voter or lot-by-lot vote breakdowns.
+- [x] The PDF handles empty categories, long motion/option text, and multi-page meetings without clipped or overlapping content.
+- [x] Admin PDF generation is rate-limited to prevent repeated CPU-intensive requests.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
+
+---
+
+### US-PDF-DL-02: Meeting summary PDF shows option vote counts only
+
+**Status:** ✅ Implemented
+
+**Description:** As a meeting admin, I want the meeting summary PDF to show only aggregate vote counts and entitlement sums per option/category without individual voter or lot-by-lot breakdowns, with all timestamps in Melbourne time.
+
+**Acceptance Criteria:**
+
+- [x] For binary motions, the PDF renders only the `Tally` table (`Category`, `Voter count`, `Entitlement (UOE)`); individual voter tables (`Lot`, `Voter / source`, `UOE`, `Submitted`) and `"No voter records"` empty states are omitted.
+- [x] For multi-choice motions, the PDF renders per-option tally tables (`For`, `For UOE`, `Against`, `Against UOE`, `Abstained`, `Abstained UOE`, `Outcome`) and a single `Motion-level summary` tally table for `Abstained`, `Absent`, and `Not eligible` counts/sums; no per-voter or lot-by-lot tables are rendered.
+- [x] All PDF timestamps (`Meeting time`, `Voting closes`, `Generated`) are formatted in Melbourne time (`Australia/Melbourne` via `zoneinfo.ZoneInfo`, displaying `AEST`/`AEDT`).
+- [x] All tests pass at 100% coverage on `report_pdf_service.py`.
+
+---
+
+### US-UI-FLOOR-01: Use floor-vote terminology and place meeting actions above Motions
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting admin, I want floor-vote terminology and meeting actions arranged in the order I use them so the page is clear during an in-person meeting.
+
+**Acceptance Criteria:**
+
+- [x] The meeting detail action reads `Enter Floor Votes` instead of `Enter In-Person Votes`.
+- [x] The floor-vote selection and vote-grid dialogs use `Floor Votes` in their accessible names and headings.
+- [x] `Add Motion` and `Enter Floor Votes` appear above the `Motions` heading.
+- [x] The existing Show All / Hide All controls remain in the same action row without obscuring the motion controls on narrow screens.
+- [x] In binary and multi-choice voting-detail tables, a ballot entered on behalf of a lot by an admin shows `Floor vote` in the Email/source cell instead of `admin`.
+- [x] Voter-submitted ballots continue to show the actual voter email (with proxy/owner context where available).
+- [x] `submitted_by_admin` remains the authoritative internal source field; no persisted vote data or backend contract is renamed.
+- [x] Component and E2E tests update all affected labels and assert the required visual order.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
 
 ---
 
@@ -666,3 +742,31 @@ This document covers admin portal authentication, the admin in-person vote entry
 - QR code customisation is limited to the tenant logo in the centre (no colour or style options)
 - Automatically resolving multi-choice ties is not supported (admin must resolve manually)
 - Voter name column in the drill-down table (requires backend query change; tracked as a separate story)
+
+### US-AVE-REMAINING-01: Enter in-person votes for unvoted motions on a partially voted lot
+
+**Status:** Proposed (the backend already skips previously voted motions per lot; the UI currently prevents selecting any lot with an app-submitted vote)
+
+- [ ] Admins can select a lot even if its owner or proxy submitted votes on other motions.
+- [ ] Previously submitted motions are shown read-only and cannot be overwritten; admin can enter votes only for unanswered motions. The existing per-motion backend skip behavior remains authoritative.
+- [ ] Preserve voter/proxy audit identity and never replace the original ballot. Show a useful result when no unanswered motions remain.
+
+---
+
+### US-AVE-PROVENANCE-01: Show prior choices and per-motion vote source
+
+**Status:** Proposed
+
+**Description:** As an admin entering in-person votes, I need to see exactly what was already selected for every prior motion and whether each vote came from the user or from an admin. A lot may contain a mixture of both sources.
+
+**Acceptance Criteria:**
+
+- [ ] When an admin opens the vote-entry grid, every previously recorded motion shows the lot's actual selected choice (For, Against, or Abstain), including prior user/proxy votes and prior admin votes.
+- [ ] Multi-choice motions hydrate the exact prior For/Against/Abstain selection for each option.
+- [ ] Provenance is evaluated per motion, not once per lot. For example, one lot may show motions 1-2 as `User voted` and motions 3-5 as `Admin voted`.
+- [ ] Prior user-sourced motions display `User voted`; prior admin-sourced motions display `Admin voted`. Generic `Already voted online` and `Prev. entry` labels are removed.
+- [ ] User-sourced and admin-sourced prior cells have distinct text and visual treatment, so a mixed lot can be scanned without relying on colour alone.
+- [ ] The lot summary identifies the source mix: `User votes recorded`, `Admin votes recorded`, or `Mixed user/admin votes`.
+- [ ] The selected prior choice remains visibly active while its controls remain read-only.
+- [ ] Admin can still enter and submit choices only for motions that have no prior vote.
+- [ ] A lot that first voted online and was later partially completed by an admin retains accurate per-motion provenance.

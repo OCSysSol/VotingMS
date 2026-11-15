@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../tests/msw/server";
-import { apiFetch, apiFetchVoid } from "../client";
+import { apiFetch, apiFetchBlob, apiFetchVoid } from "../client";
 
 const BASE = "http://localhost";
 
@@ -192,5 +192,53 @@ describe("apiFetchVoid", () => {
     await expect(
       apiFetchVoid("/api/test-delete-500", { method: "DELETE" })
     ).rejects.toThrow("500");
+  });
+});
+
+describe("apiFetchBlob", () => {
+  it("returns the response blob", async () => {
+    server.use(
+      http.get(`${BASE}/api/test-blob`, () =>
+        new HttpResponse(new Blob(["%PDF-1.4"]), {
+          headers: { "Content-Type": "application/pdf" },
+        })
+      )
+    );
+
+    const result = await apiFetchBlob("/api/test-blob");
+
+    expect(result.type).toBe("application/pdf");
+    expect(result.size).toBeGreaterThan(0);
+  });
+
+  it("preserves the CSRF header and caller headers", async () => {
+    let requestedWith: string | null = null;
+    let customHeader: string | null = null;
+    server.use(
+      http.get(`${BASE}/api/test-blob-headers`, ({ request }) => {
+        requestedWith = request.headers.get("x-requested-with");
+        customHeader = request.headers.get("x-test");
+        return new HttpResponse(new Blob(["data"]));
+      })
+    );
+
+    await apiFetchBlob("/api/test-blob-headers", {
+      headers: { "X-Test": "present" },
+    });
+
+    expect(requestedWith).toBe("XMLHttpRequest");
+    expect(customHeader).toBe("present");
+  });
+
+  it("throws with status and body on a failed response", async () => {
+    server.use(
+      http.get(`${BASE}/api/test-blob-error`, () =>
+        new HttpResponse("Meeting is not closed", { status: 409 })
+      )
+    );
+
+    await expect(apiFetchBlob("/api/test-blob-error")).rejects.toThrow(
+      "HTTP 409: Meeting is not closed"
+    );
   });
 });

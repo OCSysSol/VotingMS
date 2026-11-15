@@ -26,6 +26,9 @@ class TenantSmtpConfig(Base):
     smtp_username: Mapped[str] = mapped_column(String(254), nullable=False, default="")
     smtp_password_enc: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
     smtp_from_email: Mapped[str] = mapped_column(String(254), nullable=False, default="")
+    email_delivery_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="true"
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

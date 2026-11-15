@@ -69,9 +69,9 @@ describe("AdminLayout", () => {
     expect(screen.getAllByText("Admin Portal").length).toBeGreaterThan(0);
   });
 
-  it("renders Buildings nav link", () => {
+  it("renders OC Plans nav link", () => {
     renderLayout();
-    expect(screen.getAllByRole("link", { name: "Buildings" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "OC Plans" }).length).toBeGreaterThan(0);
   });
 
   it("renders General Meetings nav link", () => {
@@ -164,8 +164,8 @@ describe("AdminLayout", () => {
     const user = userEvent.setup();
     renderLayout();
     await user.click(screen.getByRole("button", { name: "Open navigation" }));
-    // Drawer is open — click the Buildings link inside it
-    const drawerLinks = screen.getAllByRole("link", { name: "Buildings" });
+    // Drawer is open — click the OC Plans link inside it
+    const drawerLinks = screen.getAllByRole("link", { name: "OC Plans" });
     // The drawer link is the last one (sidebar links appear first in DOM)
     await user.click(drawerLinks[drawerLinks.length - 1]);
     const drawer = screen.getByTestId("admin-nav-drawer");

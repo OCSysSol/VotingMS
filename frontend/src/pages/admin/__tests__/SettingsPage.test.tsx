@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../../../../tests/msw/server";
 import SettingsPage from "../SettingsPage";
-import { resetConfigFixture, resetAdminUsersFixture, resetSubscriptionFixture, CURRENT_USER_ID, ADMIN_USER_CURRENT, ADMIN_USER_OTHER } from "../../../../tests/msw/handlers";
+import { resetConfigFixture, resetAdminUsersFixture, resetSmtpConfigFixture, resetSubscriptionFixture, ADMIN_USER_CURRENT, ADMIN_USER_OTHER } from "../../../../tests/msw/handlers";
 import * as configApi from "../../../api/config";
 import * as usersApi from "../../../api/users";
 import * as subscriptionApi from "../../../api/subscription";
@@ -44,6 +44,7 @@ describe("SettingsPage", () => {
   beforeEach(() => {
     resetConfigFixture();
     resetAdminUsersFixture();
+    resetSmtpConfigFixture();
     resetSubscriptionFixture();
   });
 
@@ -752,6 +753,81 @@ describe("SettingsPage", () => {
     expect(screen.getByLabelText("Username")).toBeInTheDocument();
     expect(screen.getByLabelText("From email address")).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
+  });
+
+  it("loads and toggles effective email delivery independently of credentials", async () => {
+    const user = userEvent.setup();
+    let patchedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+          email_delivery_enabled: true,
+        })
+      ),
+      http.patch(`${BASE}/api/admin/config/smtp/delivery`, async ({ request }) => {
+        patchedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ email_delivery_enabled: false });
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+    expect(toggle).toBeChecked();
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(patchedBody).toEqual({ enabled: false });
+    expect(screen.getByText(/Email delivery is disabled/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send test email" })).toBeDisabled();
+  });
+
+  it("reverts the email delivery toggle and shows an error when the PATCH fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(`${BASE}/api/admin/config/smtp`, () =>
+        HttpResponse.json({
+          smtp_host: "smtp.example.com",
+          smtp_port: 587,
+          smtp_username: "user",
+          smtp_from_email: "from@example.com",
+          password_is_set: true,
+          email_delivery_enabled: true,
+        })
+      ),
+      http.patch(`${BASE}/api/admin/config/smtp/delivery`, () =>
+        HttpResponse.json({ detail: "Update failed" }, { status: 500 })
+      )
+    );
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByText(/HTTP 500/)).toBeInTheDocument();
+  });
+
+  it("shows fallback email delivery error for a non-Error rejection", async () => {
+    const user = userEvent.setup();
+    vi.spyOn(configApi, "updateSmtpDelivery").mockRejectedValueOnce("plain error");
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Email Server" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "Email Server" }));
+    const toggle = await screen.findByLabelText("Email delivery");
+
+    await user.click(toggle);
+
+    await waitFor(() => expect(toggle).toBeChecked());
+    expect(screen.getByText("Failed to update email delivery.")).toBeInTheDocument();
   });
 
   it("shows unconfigured notice when SMTP is not set up", async () => {
@@ -2199,6 +2275,19 @@ describe("SettingsPage", () => {
     });
   });
 
+  it("SMS success message disappears after 3 seconds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: (ms) => vi.advanceTimersByTime(ms) });
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByTestId("sms-save-btn"));
+    await waitFor(() => expect(screen.getByText("SMS settings saved.")).toBeInTheDocument());
+    act(() => vi.advanceTimersByTime(3100));
+    await waitFor(() => expect(screen.queryByText("SMS settings saved.")).not.toBeInTheDocument());
+    vi.useRealTimers();
+  });
+
   it("SMS settings save: UI has NOT transitioned while pending, HAS transitioned after complete", async () => {
     let resolveRequest!: (value: Response) => void;
     server.use(
@@ -2250,35 +2339,15 @@ describe("SettingsPage", () => {
     });
   });
 
-  it("test SMS section is NOT shown when sms_enabled is false", async () => {
+  it("Send test SMS trigger is shown but disabled when sms_enabled is false", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "SMS" }));
-    expect(screen.queryByText("Send test SMS")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeDisabled();
   });
 
-  it("test SMS section IS shown when sms_enabled checkbox is checked", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
-    await user.click(screen.getByRole("tab", { name: "SMS" }));
-    await user.click(screen.getByLabelText("Enable SMS OTP"));
-    // The test section heading "Send test SMS" and the button both appear; check the button
-    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeInTheDocument();
-  });
-
-  it("test SMS section shows phone input and send button", async () => {
-    const user = userEvent.setup();
-    renderPage();
-    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
-    await user.click(screen.getByRole("tab", { name: "SMS" }));
-    await user.click(screen.getByLabelText("Enable SMS OTP"));
-    expect(screen.getByLabelText("Phone number")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send test SMS" })).toBeInTheDocument();
-  });
-
-  it("Send test SMS button is disabled when phone input is empty", async () => {
+  it("Send test SMS trigger stays disabled when enabled without a provider", async () => {
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
@@ -2287,21 +2356,115 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("button", { name: "Send test SMS" })).toBeDisabled();
   });
 
-  it("Send test SMS calls endpoint and shows success message", async () => {
+  it("configured SMS opens the recipient phone modal", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "SMS" }));
-    await user.click(screen.getByLabelText("Enable SMS OTP"));
-    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
+    const trigger = screen.getByRole("button", { name: "Send test SMS" });
+    expect(trigger).not.toBeDisabled();
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Send test SMS" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Recipient phone number")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("Send is enabled after entering a recipient phone number", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
     await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await user.type(screen.getByLabelText("Recipient phone number"), "+61412345678");
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
+  });
+
+  it("Send test SMS calls endpoint and shows success message", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await user.type(screen.getByLabelText("Recipient phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
       expect(screen.getByText("Test SMS sent to +61412345678")).toBeInTheDocument();
     });
+    expect(screen.queryByRole("dialog", { name: "Send test SMS" })).not.toBeInTheDocument();
   });
 
   it("Send test SMS shows error message on failure", async () => {
     server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      ),
       http.post(`${BASE}/api/admin/config/sms/test`, () =>
         HttpResponse.json({ detail: "Send failed" }, { status: 500 })
       )
@@ -2310,12 +2473,50 @@ describe("SettingsPage", () => {
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "SMS" }));
-    await user.click(screen.getByLabelText("Enable SMS OTP"));
-    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
     await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await user.type(screen.getByLabelText("Recipient phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
       expect(screen.getByText(/500/)).toBeInTheDocument();
     });
+  });
+
+  it("Escape, backdrop, and Cancel close the test SMS modal", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
+    await user.click(screen.getByRole("tab", { name: "SMS" }));
+    const trigger = screen.getByRole("button", { name: "Send test SMS" });
+
+    await user.click(trigger);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Send test SMS" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Send test SMS" })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("dialog", { name: "Send test SMS" }));
+    expect(screen.queryByRole("dialog", { name: "Send test SMS" })).not.toBeInTheDocument();
+
+    await user.click(trigger);
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog", { name: "Send test SMS" })).not.toBeInTheDocument();
   });
 
   it("SMS settings loaded from API on mount: enabled checkbox reflects fixture", async () => {
@@ -2635,14 +2836,32 @@ describe("SettingsPage", () => {
   });
 
   it("Send test SMS error uses fallback message for non-Error thrown value", async () => {
+    server.use(
+      http.get(`${BASE}/api/admin/config/sms`, () =>
+        HttpResponse.json({
+          sms_enabled: true,
+          sms_provider: "smtp2go",
+          sms_smtp2go_api_key_is_set: true,
+          sms_from_number: "+61400000000",
+          sms_twilio_account_sid: null,
+          sms_twilio_auth_token_is_set: false,
+          sms_twilio_from_number: null,
+          sms_clicksend_username: null,
+          sms_clicksend_api_key_is_set: false,
+          sms_clicksend_from_number: null,
+          sms_webhook_url: null,
+          sms_webhook_secret_is_set: false,
+        })
+      )
+    );
     vi.spyOn(configApi, "testSmsConfig").mockRejectedValueOnce("string-error");
     const user = userEvent.setup();
     renderPage();
     await waitFor(() => expect(screen.getByRole("tab", { name: "SMS" })).toBeInTheDocument());
     await user.click(screen.getByRole("tab", { name: "SMS" }));
-    await user.click(screen.getByLabelText("Enable SMS OTP"));
-    await user.type(screen.getByLabelText("Phone number"), "+61412345678");
     await user.click(screen.getByRole("button", { name: "Send test SMS" }));
+    await user.type(screen.getByLabelText("Recipient phone number"), "+61412345678");
+    await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
       expect(screen.getByText("Test SMS failed.")).toBeInTheDocument();
     });

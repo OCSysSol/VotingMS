@@ -57,7 +57,7 @@ export function BuildingSelectPage() {
         <span className="hero__badge">Annual General Meeting</span>
         <h1 className="hero__title">Cast Your Vote</h1>
         <p className="hero__subtitle">
-          Select your building to find and vote on open General Meeting motions.
+          Select your OC to find and vote on open General Meeting motions.
         </p>
       </div>
 

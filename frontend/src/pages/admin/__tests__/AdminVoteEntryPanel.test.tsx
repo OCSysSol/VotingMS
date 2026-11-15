@@ -39,7 +39,7 @@ describe("AdminVoteEntryPanel", () => {
   it("renders step 1 lot selection dialog", async () => {
     renderPanel();
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     expect(screen.getByText("Proceed to vote entry (0 lots)")).toBeInTheDocument();
   });
@@ -143,7 +143,7 @@ describe("AdminVoteEntryPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
-  it("shows all lots including app-submitted ones (app-submitted shown as disabled)", async () => {
+  it("shows all lots as selectable in step 1", async () => {
     // The ADMIN_MEETING_DETAIL has voter list entries without lot_number, so no lots are app-submitted.
     // All ADMIN_LOT_OWNERS should appear as enabled checkboxes.
     renderPanel();
@@ -156,9 +156,9 @@ describe("AdminVoteEntryPanel", () => {
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
   });
 
-  // New behaviour: app-submitted lots appear in step 1 with disabled checkbox and badge
-  it("app-submitted lots appear in step 1 with disabled checkbox and 'Already submitted' badge", async () => {
-    // Create a meeting where lot 1A has been app-submitted
+  it("allows selecting app-submitted lots and preserves their prior motion while enabling unvoted motions", async () => {
+    const user = userEvent.setup();
+    // Lot 1A has voted on Motion 1; Motion 2 remains available for admin entry.
     const meetingWithSubmittedLot: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
       motions: [
@@ -171,101 +171,132 @@ describe("AdminVoteEntryPanel", () => {
             ],
           },
         },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m2",
+          title: "Motion 2",
+          display_order: 2,
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+            yes: [],
+            no: [],
+            abstained: [],
+            absent: [],
+            not_eligible: [],
+          },
+        },
       ],
     };
     renderPanel({ meeting: meetingWithSubmittedLot });
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
-    // Lot 1A should appear but with a disabled checkbox
-    expect(screen.getByLabelText("Select lot 1A")).toBeDisabled();
-    // "Already submitted" badge should appear for lot 1A
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
-    // Lot 2B is not app-submitted — checkbox should be enabled
+    expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
+    expect(screen.getByText("User votes recorded")).toBeInTheDocument();
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
-  });
-
-  it("app-submitted lots cannot be selected (disabled checkbox stays unchecked)", async () => {
-    const user = userEvent.setup();
-    const meetingWithSubmittedLot: GeneralMeetingDetail = {
-      ...ADMIN_MEETING_DETAIL,
-      motions: [
-        {
-          ...ADMIN_MEETING_DETAIL.motions[0],
-          voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
-            ],
-          },
-        },
-      ],
-    };
-    renderPanel({ meeting: meetingWithSubmittedLot });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
-    });
-    const checkbox1A = screen.getByLabelText("Select lot 1A");
-    expect(checkbox1A).toBeDisabled();
-    // Clicking a disabled checkbox must not change state
-    await user.click(checkbox1A);
-    expect(checkbox1A).not.toBeChecked();
-  });
-
-  // Fix 8: Already submitted badge in step 2 header for app-submitted lot
-  it("Fix 8: shows 'Already submitted' badge in step 2 header for already-submitted lot", async () => {
-    // Use a meeting where lot 2B is app-submitted so we can still select lot 1A and proceed
-    const meetingWithSubmittedLot2B: GeneralMeetingDetail = {
-      ...ADMIN_MEETING_DETAIL,
-      motions: [
-        {
-          ...ADMIN_MEETING_DETAIL.motions[0],
-          voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "owner2@example.com", lot_number: "2B", entitlement: 200, submitted_by_admin: false },
-            ],
-          },
-        },
-      ],
-    };
-    const user = userEvent.setup();
-    renderPanel({ meeting: meetingWithSubmittedLot2B });
-    await waitFor(() => {
-      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
-    });
-    // Lot 2B should appear but be disabled with badge
-    expect(screen.getByLabelText("Select lot 2B")).toBeDisabled();
-    // Select lot 1A (not app-submitted) and proceed to step 2
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
-    // Step 2 does not include lot 2B (it was not selected) — no "Already submitted" badge in step 2
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
     });
+    const priorUserChoice = screen.getByRole("button", { name: "yes for lot 1A motion Motion 1" });
+    expect(priorUserChoice).toBeDisabled();
+    expect(priorUserChoice).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("User voted")).toBeInTheDocument();
+    expect(screen.getByText("User voted").closest("td")).toHaveClass(
+      "admin-vote-entry__prior-cell--user"
+    );
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).not.toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" }));
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Motion 2" })).toHaveAttribute("aria-pressed", "true");
   });
 
-  it("shows 'All lots submitted' message when all lots are app-submitted", async () => {
-    // Create a meeting detail where all lots have non-admin submissions
-    const meetingWithAllSubmitted: GeneralMeetingDetail = {
+  it("hydrates and distinguishes mixed user/admin prior choices per motion in one lot", async () => {
+    const user = userEvent.setup();
+    const baseMotion = ADMIN_MEETING_DETAIL.motions[0];
+    const emptyLists = {
+      yes: [],
+      no: [],
+      abstained: [],
+      absent: [],
+      not_eligible: [],
+      options: {},
+    };
+    const mixedMeeting: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
       motions: [
         {
-          ...ADMIN_MEETING_DETAIL.motions[0],
+          ...baseMotion,
+          id: "mixed-m1",
+          title: "User Motion 1",
+          display_order: 1,
           voter_lists: {
-            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
-            yes: [
-              { voter_email: "o@t.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
-              { voter_email: "o2@t.com", lot_number: "2B", entitlement: 200, submitted_by_admin: false },
-            ],
+            ...emptyLists,
+            yes: [{ voter_email: "owner@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m2",
+          title: "User Motion 2",
+          display_order: 2,
+          voter_lists: {
+            ...emptyLists,
+            no: [{ voter_email: "owner@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m3",
+          title: "Admin Motion 3",
+          display_order: 3,
+          voter_lists: {
+            ...emptyLists,
+            yes: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m4",
+          title: "Admin Motion 4",
+          display_order: 4,
+          voter_lists: {
+            ...emptyLists,
+            no: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
+          },
+        },
+        {
+          ...baseMotion,
+          id: "mixed-m5",
+          title: "Admin Motion 5",
+          display_order: 5,
+          voter_lists: {
+            ...emptyLists,
+            abstained: [{ voter_email: "admin", lot_number: "1A", entitlement: 100, submitted_by_admin: true }],
           },
         },
       ],
     };
-    renderPanel({ meeting: meetingWithAllSubmitted });
+
+    renderPanel({ meeting: mixedMeeting });
     await waitFor(() => {
-      expect(screen.getByText("All lots have already submitted via the app.")).toBeInTheDocument();
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
+    expect(screen.getByText("Mixed user/floor votes")).toBeInTheDocument();
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+
+    await waitFor(() => {
+      expect(screen.getAllByText("User voted")).toHaveLength(2);
+      expect(screen.getAllByText("Floor vote recorded")).toHaveLength(3);
+    });
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion User Motion 1" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "no for lot 1A motion User Motion 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "yes for lot 1A motion Admin Motion 3" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "no for lot 1A motion Admin Motion 4" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "abstained for lot 1A motion Admin Motion 5" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getAllByText("User voted")[0].closest("td")).toHaveClass("admin-vote-entry__prior-cell--user");
+    expect(screen.getAllByText("Floor vote recorded")[0].closest("td")).toHaveClass("admin-vote-entry__prior-cell--admin");
   });
 
   // Step 2: Vote entry grid
@@ -279,7 +310,7 @@ describe("AdminVoteEntryPanel", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     expect(screen.getByText(/Submit votes/)).toBeInTheDocument();
   });
@@ -371,7 +402,7 @@ describe("AdminVoteEntryPanel", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "← Back" }));
     await waitFor(() => {
@@ -392,7 +423,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     expect(screen.getByText(/Submitting votes for 1 lot/)).toBeInTheDocument();
   });
@@ -410,12 +441,12 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     const cancelBtn = screen.getAllByRole("button", { name: "Cancel" })[0];
     await user.click(cancelBtn);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /Submit in-person votes/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Submit floor votes/i })).not.toBeInTheDocument();
     });
     // Still on step 2
     expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
@@ -435,7 +466,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -462,7 +493,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -489,7 +520,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -517,7 +548,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -571,7 +602,7 @@ describe("AdminVoteEntryPanel", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     fireEvent.keyDown(document, { key: "Escape" });
     expect(onClose).toHaveBeenCalled();
@@ -587,7 +618,7 @@ describe("AdminVoteEntryPanel", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     const headers = document.querySelectorAll("th");
     headers.forEach((th) => {
@@ -609,7 +640,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     // Cancel button should have focus
     const cancelBtn = screen.getAllByRole("button", { name: "Cancel" })[0];
@@ -629,11 +660,11 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /Submit in-person votes/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Submit floor votes/i })).not.toBeInTheDocument();
     });
   });
 
@@ -650,7 +681,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     // Focus the Confirm button (last in dialog)
     const confirmBtn = screen.getByRole("button", { name: "Confirm" });
@@ -676,7 +707,7 @@ describe("AdminVoteEntryPanel", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     // Focus the Cancel button (first in dialog)
     const cancelBtns = screen.getAllByRole("button", { name: "Cancel" });
@@ -865,7 +896,7 @@ describe("AdminVoteEntryPanel — multi-choice For/Against/Abstain (US-AVE2-01)"
     await user.click(screen.getByRole("button", { name: "Against option Bob lot 1A" }));
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -934,7 +965,7 @@ describe("AdminVoteEntryPanel — multi-choice For/Against/Abstain (US-AVE2-01)"
     await user.click(screen.getByRole("button", { name: "For option Alice lot 1A" }));
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1018,13 +1049,13 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
   }
 
   // --- AVE-RV-01: Step 1 shows amber badge for admin-submitted lot ---
-  it("AVE-RV-01: Step 1 renders 'Previously entered by admin' badge for admin-submitted lot", async () => {
+  it("AVE-RV-01: Step 1 renders 'Floor votes recorded' badge for admin-submitted lot", async () => {
     renderWithAdminVotes();
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
     // Lot 1A has submitted_by_admin=true — badge must appear
-    const badges = screen.getAllByText("Previously entered by admin");
+    const badges = screen.getAllByText("Floor votes recorded");
     expect(badges.length).toBeGreaterThan(0);
   });
 
@@ -1039,8 +1070,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     // Only lot 1A should have the badge — lot 2B must not
     const lot1ARow = screen.getByLabelText("Select lot 1A").closest("li");
     const lot2BRow = screen.getByLabelText("Select lot 2B").closest("li");
-    expect(lot1ARow).toHaveTextContent("Previously entered by admin");
-    expect(lot2BRow).not.toHaveTextContent("Previously entered by admin");
+    expect(lot1ARow).toHaveTextContent("Floor votes recorded");
+    expect(lot2BRow).not.toHaveTextContent("Floor votes recorded");
   });
 
   // --- AVE-RV-03: Step 2 pre-fills prior vote for admin-submitted lot ---
@@ -1060,8 +1091,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     expect(screen.getByRole("button", { name: /no for lot 1A/i })).toHaveAttribute("aria-pressed", "false");
   });
 
-  // --- AVE-RV-04: Step 2 shows 'Previously entered by admin' badge in column header ---
-  it("AVE-RV-04: Step 2 shows 'Previously entered by admin' badge in column header for admin-submitted lot", async () => {
+  // --- AVE-RV-04: Step 2 shows an admin-source summary in the column header ---
+  it("AVE-RV-04: Step 2 shows 'Floor votes recorded' in the column header", async () => {
     const user = userEvent.setup();
     renderWithAdminVotes();
     await waitFor(() => {
@@ -1070,12 +1101,12 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getAllByText("Previously entered by admin").length).toBeGreaterThan(0);
+      expect(screen.getByText("Floor votes recorded")).toBeInTheDocument();
     });
   });
 
-  // --- AVE-RV-05: Step 2 shows 'Prev. entry' label in vote cell for admin-submitted lot ---
-  it("AVE-RV-05: Step 2 shows 'Prev. entry' label above vote buttons for admin-submitted lot", async () => {
+  // --- AVE-RV-05: Step 2 shows per-motion source in vote cell ---
+  it("AVE-RV-05: Step 2 shows 'Floor vote recorded' above the prefilled vote buttons", async () => {
     const user = userEvent.setup();
     renderWithAdminVotes();
     await waitFor(() => {
@@ -1084,7 +1115,10 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await user.click(screen.getByLabelText("Select lot 1A"));
     await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
     await waitFor(() => {
-      expect(screen.getByText("Prev. entry")).toBeInTheDocument();
+      expect(screen.getByText("Floor vote recorded")).toBeInTheDocument();
+      expect(screen.getByText("Floor vote recorded").closest("td")).toHaveClass(
+        "admin-vote-entry__prior-cell--admin"
+      );
     });
   });
 
@@ -1148,7 +1182,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
       expect(screen.queryByRole("dialog", { name: /Some lots have already been entered/i })).not.toBeInTheDocument();
     });
     // ConfirmDialog must NOT be shown
-    expect(screen.queryByRole("dialog", { name: /Submit in-person votes/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Submit floor votes/i })).not.toBeInTheDocument();
     // Still on step 2
     expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
   });
@@ -1171,7 +1205,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     });
     await user.click(screen.getByRole("button", { name: "Continue anyway" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
   });
 
@@ -1191,7 +1225,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     // Goes directly to ConfirmDialog — no revote warning
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     expect(screen.queryByRole("dialog", { name: /Some lots have already been entered/i })).not.toBeInTheDocument();
   });
@@ -1222,7 +1256,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     });
     await user.click(screen.getByRole("button", { name: "Continue anyway" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1269,7 +1303,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1432,7 +1466,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     });
     await user.click(screen.getByRole("button", { name: "Continue anyway" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1475,7 +1509,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     // Continue
     await user.click(screen.getByRole("button", { name: "Continue anyway" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1490,7 +1524,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
   });
 
   // Non-admin voter-submitted lot badge (AVE-RV-02 boundary: no badge when submitted_by_admin is false)
-  it("No 'Previously entered by admin' badge when lot has only non-admin voter_list entries", async () => {
+  it("keeps app-submitted lots selectable without marking them as prior admin entries", async () => {
     // Build a meeting where lot 1A appears in yes but with submitted_by_admin: false
     const meetingWithVoterSubmitted: GeneralMeetingDetail = {
       ...ADMIN_MEETING_DETAIL,
@@ -1520,20 +1554,19 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
         </MemoryRouter>
       </QueryClientProvider>
     );
-    // 1A is app-submitted — it must be visible but disabled with "Already submitted" badge
+    // Prior app votes are preserved per motion, while admins can select the lot to enter other motions.
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
-    expect(screen.getByLabelText("Select lot 1A")).toBeDisabled();
-    expect(screen.getByText("Already submitted")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select lot 1A")).not.toBeDisabled();
+    expect(screen.getByText("User votes recorded")).toBeInTheDocument();
     // 2B has no prior entry and should be enabled
     expect(screen.getByLabelText("Select lot 2B")).not.toBeDisabled();
-    // No 'Previously entered by admin' badge — that's only for admin-submitted lots
-    expect(screen.queryByText("Previously entered by admin")).not.toBeInTheDocument();
+    expect(screen.queryByText("Floor votes recorded")).not.toBeInTheDocument();
   });
 
-  // Step 2 does NOT show 'Prev. entry' label for non-admin lots
-  it("Step 2 does not show 'Prev. entry' label for non-admin-submitted lots", async () => {
+  // Step 2 shows no source label when no motion has a prior vote.
+  it("Step 2 does not show a prior-vote label when no motion was previously voted", async () => {
     // Use ADMIN_MEETING_DETAIL which has no admin-submitted lots
     const user = userEvent.setup();
     renderPanel();
@@ -1545,7 +1578,8 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
     });
-    expect(screen.queryByText("Prev. entry")).not.toBeInTheDocument();
+    expect(screen.queryByText("Floor vote recorded")).not.toBeInTheDocument();
+    expect(screen.queryByText("User voted")).not.toBeInTheDocument();
   });
 
   // Backdrop click on AdminRevoteWarningDialog dismisses it
@@ -1622,7 +1656,7 @@ describe("AdminVoteEntryPanel — Fix 5 admin re-vote UX", () => {
     });
     await user.click(screen.getByRole("button", { name: "Continue anyway" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1802,7 +1836,7 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     // Do NOT click any vote button — submit without touching any motion
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1839,7 +1873,7 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     await user.click(screen.getAllByRole("button", { name: /yes for lot 1A/i })[0]);
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1875,7 +1909,7 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     // Do NOT interact with any option button — submit without touching MC motion
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -1919,4 +1953,230 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     // Short option remains untruncated
     expect(screen.getByRole("button", { name: "For option Bob lot 1A" })).toBeInTheDocument();
   });
+
+  it("ConfirmDialog shows binary choices and 'No new votes selected for this lot.' when empty", async () => {
+    const meetingTwoMotions: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-1",
+          title: "Approve Budget",
+          motion_number: "M1",
+          motion_type: "general",
+          is_multi_choice: false,
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-2",
+          title: "Appoint Auditor",
+          motion_number: null,
+          display_order: 2,
+          motion_type: "special",
+          is_multi_choice: false,
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-3",
+          title: "Special Levy",
+          motion_number: "M3",
+          display_order: 3,
+          motion_type: "special",
+          is_multi_choice: false,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingTwoMotions });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "yes for lot 1A motion Approve Budget" })).toBeInTheDocument();
+    });
+
+    // Lot 1A votes For, Against, Abstain; Lot 2B leaves all blank
+    await user.click(screen.getByRole("button", { name: "yes for lot 1A motion Approve Budget" }));
+    await user.click(screen.getByRole("button", { name: "no for lot 1A motion Appoint Auditor" }));
+    await user.click(screen.getByRole("button", { name: "abstained for lot 1A motion Special Levy" }));
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+
+    expect(dialog).toHaveTextContent("Lot 1A");
+    expect(dialog).toHaveTextContent("M1. Approve Budget");
+    expect(dialog).toHaveTextContent("For");
+    expect(dialog).toHaveTextContent("2. Appoint Auditor");
+    expect(dialog).toHaveTextContent("Against");
+    expect(dialog).toHaveTextContent("M3. Special Levy");
+    expect(dialog).toHaveTextContent("Abstain");
+
+    expect(dialog).toHaveTextContent("Lot 2B");
+    expect(dialog).toHaveTextContent("No new votes selected for this lot.");
+  });
+
+  it("ConfirmDialog shows multi-choice option choices and Not eligible for in-arrear lots", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners", () => {
+        return HttpResponse.json([
+          { id: "lo-normal", building_id: "b1", lot_number: "1A", financial_position: "normal", unit_entitlement: 100, emails: [] },
+          { id: "lo-arrear", building_id: "b1", lot_number: "2B", financial_position: "in_arrear", unit_entitlement: 50, emails: [] },
+        ]);
+      })
+    );
+    const meetingMixed: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0],
+          id: "mc-1",
+          title: "Board Election",
+          motion_number: "M1",
+          display_order: 1,
+          motion_type: "general",
+          is_multi_choice: true,
+          option_limit: 2,
+          options: [
+            { id: "opt-1", text: "Alice", display_order: 1 },
+            { id: "opt-2", text: "Bob", display_order: 2 },
+            { id: "opt-3", text: "Carol", display_order: 3 },
+          ],
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "sp-1",
+          title: "By-law Change",
+          motion_number: "M2",
+          display_order: 2,
+          motion_type: "special",
+          is_multi_choice: false,
+          options: [],
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingMixed });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "For option Alice lot 1A" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "For option Alice lot 1A" }));
+    await user.click(screen.getByRole("button", { name: "Against option Bob lot 1A" }));
+    await user.click(screen.getByRole("button", { name: "Abstain option Carol lot 1A" }));
+    // In-arrear lot 2B can still vote on Special motion M2
+    await user.click(screen.getByRole("button", { name: "yes for lot 2B motion By-law Change" }));
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+
+    expect(dialog).toHaveTextContent("Alice: For");
+    expect(dialog).toHaveTextContent("Bob: Against");
+    expect(dialog).toHaveTextContent("Carol: Abstain");
+    expect(dialog).toHaveTextContent("In arrear");
+    expect(dialog).toHaveTextContent("M1. Board Election");
+    expect(dialog).toHaveTextContent("Not eligible");
+    expect(dialog).toHaveTextContent("M2. By-law Change");
+  });
+
+  it("ConfirmDialog excludes prior locked votes and shows only newly entered votes", async () => {
+    const meetingWithPrior: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES,
+      motions: [
+        ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0],
+        {
+          ...ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0],
+          id: "m-new-2",
+          title: "New Motion",
+          motion_number: "M2",
+          display_order: 2,
+          voter_lists: {
+            yes: [],
+            no: [],
+            abstained: [],
+            absent: [],
+            not_eligible: [],
+            options: {},
+          },
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingWithPrior });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "no for lot 1A motion New Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "no for lot 1A motion New Motion" }));
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+
+    // Revote warning appears first because lot 1A has prior admin vote
+    await user.click(await screen.findByRole("button", { name: "Continue anyway" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    expect(dialog).toHaveTextContent("M2. New Motion");
+    expect(dialog).toHaveTextContent("Against");
+    // Prior motion title should not appear in ConfirmDialog summary
+    expect(dialog).not.toHaveTextContent(ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0].title);
+  });
+
+  it("ConfirmDialog preserves focus trap, Escape, and backdrop close accessibility", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    const confirmBtn = screen.getByRole("button", { name: "Confirm" });
+
+    // Initial focus on Cancel
+    expect(cancelBtn).toHaveFocus();
+
+    // Shift+Tab wraps from Cancel to Confirm
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(confirmBtn).toHaveFocus();
+
+    // Tab wraps from Confirm to Cancel
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(cancelBtn).toHaveFocus();
+
+    // Escape closes
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Submit floor votes?" })).not.toBeInTheDocument();
+    });
+
+    // Re-open and click backdrop to close
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const reopened = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    fireEvent.click(reopened);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Submit floor votes?" })).not.toBeInTheDocument();
+    });
+    expect(dialog).not.toBeInTheDocument();
+  });
 });
+

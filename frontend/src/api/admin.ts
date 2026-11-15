@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchVoid } from "./client";
+import { apiFetch, apiFetchBlob, apiFetchVoid } from "./client";
 import type { Building, GeneralMeeting, LotOwner, MotionType } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -65,6 +65,7 @@ export interface GeneralMeetingListItem {
   id: string;
   building_id: string;
   building_name: string;
+  oc_plan_number?: string | null;
   title: string;
   status: string;
   meeting_at: string;
@@ -80,6 +81,7 @@ export interface VoterEntry {
   entitlement: number;
   proxy_email?: string | null;
   submitted_by_admin?: boolean;
+  submitted_by_admin_username?: string | null;
   submitted_at?: string | null;
 }
 
@@ -140,6 +142,7 @@ export interface MotionDetail {
   option_limit: number | null;
   options: MotionOptionOut[];
   voting_closed_at: string | null;
+  closed_by_meeting?: boolean;
   tally: MotionTally;
   voter_lists: MotionVoterLists;
 }
@@ -148,11 +151,13 @@ export interface GeneralMeetingDetail {
   id: string;
   building_id?: string;
   building_name: string;
+  oc_plan_number?: string | null;
   title: string;
   status: string;
   meeting_at: string;
   voting_closes_at: string;
   closed_at: string | null;
+  is_archived: boolean;
   total_eligible_voters: number;
   total_submitted: number;
   total_entitlement: number;
@@ -164,6 +169,14 @@ export interface GeneralMeetingCloseOut {
   id: string;
   status: string;
   closed_at: string;
+  voting_closes_at: string;
+}
+
+export interface GeneralMeetingReopenOut {
+  id: string;
+  status: string;
+  closed_at: string | null;
+  voting_closes_at: string;
 }
 
 export interface GeneralMeetingStartOut {
@@ -185,11 +198,27 @@ export interface EmailDeliveryInfo {
 // Request types
 // ---------------------------------------------------------------------------
 
+export interface LotPersonCreateRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+  phone_number?: string | null;
+}
+
+export interface LotProxyCreateRequest {
+  email: string;
+  given_name?: string | null;
+  surname?: string | null;
+  phone_number?: string | null;
+}
+
 export interface LotOwnerCreateRequest {
   lot_number: string;
   given_name?: string | null;
   surname?: string | null;
-  emails: string[];
+  emails?: string[];
+  owners?: LotPersonCreateRequest[];
+  proxy?: LotProxyCreateRequest | null;
   unit_entitlement: number;
   financial_position?: string;
 }
@@ -348,7 +377,7 @@ export interface GeneralMeetingCreateRequest {
 export interface BuildingCreateRequest {
   name: string;
   manager_email: string;
-  oc_plan_number?: string | null;
+  oc_plan_number: string;
 }
 
 export interface BuildingUpdateRequest {
@@ -435,22 +464,26 @@ export async function importBuildings(file: File): Promise<BuildingImportResult>
 
 export async function listLotOwners(
   buildingId: string,
-  params?: { limit?: number; offset?: number; sort_by?: string; sort_dir?: string }
+  params?: { limit?: number; offset?: number; sort_by?: string; sort_dir?: string; search?: string }
 ): Promise<LotOwner[]> {
   const qs = new URLSearchParams();
   if (params?.limit !== undefined) qs.set("limit", String(params.limit));
   if (params?.offset !== undefined) qs.set("offset", String(params.offset));
   if (params?.sort_by !== undefined) qs.set("sort_by", params.sort_by);
   if (params?.sort_dir !== undefined) qs.set("sort_dir", params.sort_dir);
+  if (params?.search !== undefined) qs.set("search", params.search);
   const query = qs.toString();
   return apiFetch<LotOwner[]>(
     `/api/admin/buildings/${buildingId}/lot-owners${query ? `?${query}` : ""}`
   );
 }
 
-export async function countLotOwners(buildingId: string): Promise<number> {
+export async function countLotOwners(buildingId: string, search?: string): Promise<number> {
+  const qs = new URLSearchParams();
+  if (search !== undefined) qs.set("search", search);
+  const query = qs.toString();
   const data = await apiFetch<{ count: number }>(
-    `/api/admin/buildings/${buildingId}/lot-owners/count`
+    `/api/admin/buildings/${buildingId}/lot-owners/count${query ? `?${query}` : ""}`
   );
   return data.count;
 }
@@ -571,6 +604,16 @@ export async function closeGeneralMeeting(meetingId: string): Promise<GeneralMee
   });
 }
 
+export async function reopenGeneralMeeting(
+  meetingId: string,
+  votingClosesAt: string,
+): Promise<GeneralMeetingReopenOut> {
+  return apiFetch<GeneralMeetingReopenOut>(`/api/admin/general-meetings/${meetingId}/reopen`, {
+    method: "POST",
+    body: JSON.stringify({ voting_closes_at: votingClosesAt }),
+  });
+}
+
 export async function startGeneralMeeting(meetingId: string): Promise<GeneralMeetingStartOut> {
   return apiFetch<GeneralMeetingStartOut>(`/api/admin/general-meetings/${meetingId}/start`, {
     method: "POST",
@@ -581,6 +624,10 @@ export async function resendReport(meetingId: string): Promise<ResendReportOut> 
   return apiFetch<ResendReportOut>(`/api/admin/general-meetings/${meetingId}/resend-report`, {
     method: "POST",
   });
+}
+
+export async function downloadMeetingResultsPdf(meetingId: string): Promise<Blob> {
+  return apiFetchBlob(`/api/admin/general-meetings/${meetingId}/results.pdf`);
 }
 
 export async function deleteGeneralMeeting(meetingId: string): Promise<void> {
@@ -730,6 +777,12 @@ export async function deleteMotion(motionId: string): Promise<void> {
 
 export async function closeMotion(motionId: string): Promise<MotionDetail> {
   return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/close`, {
+    method: "POST",
+  });
+}
+
+export async function reopenMotion(motionId: string): Promise<MotionDetail> {
+  return apiFetch<MotionDetail>(`/api/admin/motions/${motionId}/reopen`, {
     method: "POST",
   });
 }

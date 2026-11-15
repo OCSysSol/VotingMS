@@ -446,3 +446,104 @@ The following existing specs cover the Admin persona journey and include the Gen
 ## Schema Migration Required
 
 No — `voting_closes_at` already exists on the `general_meetings` table. No new columns, tables, or enum values are needed for this feature.
+
+## OC Plan lookup and meeting list UX
+
+Add `oc_plan_number` to admin meeting-list item data and render separate OC Plan and Building Name columns. Meeting search must be server-side and applied consistently to list and count queries across meeting title, `Building.name`, and nullable `Building.oc_plan_number`; preserve the status/archive filters and pagination. The meetings toolbar has one search field, left-aligned to match OC Plans and the owner list. Remove the redundant building-search combobox and its `building` URL filter. There was no dedicated backend endpoint for that combobox: it reused the shared `/api/admin/buildings` endpoint, which remains required by the Create General Meeting selector and other building administration pages.
+
+## Create General Meeting — OC Plan selector terminology
+
+`CreateGeneralMeetingForm` currently labels its selector “Building” and uses the generic building combobox copy even though the selected OC Plan's stable `building_id` is already passed through the `?building=` query parameter from the OC Plan detail page. This remains a UI terminology change; the backend meeting payload and `building_id` FK do not change.
+
+- Change the selector label to `OC Plan`.
+- Use `Search OC Plans` as the placeholder, `OC Plans` as the listbox label, and OC Plan wording in validation copy such as `Please select an OC Plan.`
+- Extend `BuildingSearchCombobox` with optional presentation props (for example `displayLabel` and `listboxLabel`) so other uses can retain their existing Building copy. For the create form, render an option as `<oc_plan_number> — <building name>` when a plan number exists and fall back to `<building name>` when it does not.
+- Keep search querying through the existing building admin API because it already matches both building name and OC plan number.
+- Preserve URL prefill and the ability to change the selection. Keep the query key `building` and payload field `building_id` for compatibility.
+- Make the field accessible name `OC Plan` by retaining the `htmlFor` / `id` relationship.
+
+Tests:
+
+- Create form renders a combobox named `OC Plan`, not `Building`.
+- Options display the OC plan number and building name, with a building-name-only fallback.
+- URL prefill remains selected and displays the same combined label.
+- Clearing the selection shows `Please select an OC Plan.` and prevents submit.
+- Existing create/submit tests are updated to use the new accessible name; list-filter combobox tests continue to expect `Building` because that filter is not this request.
+
+No API, schema, or migration change is required.
+
+## Meeting detail action alignment
+
+Group the meeting action buttons in one right-aligned flex container with an 8px gap. In particular, `Reopen Meeting` and `Delete Meeting` remain adjacent on closed meetings rather than being separated by the page header's space-between layout.
+
+## Meeting archival
+
+The existing admin archive/unarchive lifecycle remains the source of truth. Closed meetings expose `Archive` in the meetings list and archived meetings expose `Unarchive`; the backend archive endpoint remains authenticated by `require_admin` and all regression tests continue to cover the lifecycle.
+
+The capability is also exposed on the individual meeting detail page because that is the primary management surface. The backend detail response already includes `is_archived`; add the missing field to the frontend `GeneralMeetingDetail` TypeScript contract.
+
+### Detail-page action behavior
+
+- Show `Archive Meeting` only when the meeting is closed and not archived.
+- Place it in the existing right-aligned meeting action group, alongside Reopen and Delete, without changing their established adjacency.
+- Use an explicit confirmation dialog. Explain that the meeting is retained for audit and hidden from the active meetings list.
+- On confirm, call the existing `archiveGeneralMeeting(id)` API, invalidate both the detail query and list query namespace, and remain on the detail page.
+- Once refreshed, display an `Archived` indicator beside the meeting status and replace the archive action with `Unarchive Meeting`.
+- `Unarchive Meeting` calls the existing `unarchiveGeneralMeeting(id)` API and invalidates detail/list queries. Follow the existing list-page convention of unarchiving without a second confirmation.
+- Surface server errors in an accessible alert and disable actions while their mutation is pending.
+- Do not add an endpoint, database column, or migration.
+
+### Tests
+
+- Detail component: archive action appears for closed active meetings; it is absent for pending/open meetings and already archived meetings.
+- Confirmation cancel makes no API call; confirm calls the existing endpoint, shows pending state, handles failure, and renders archived state after query refresh.
+- Archived detail renders `Archived` and shows unarchive; success removes the archived state and refreshes list data.
+- Existing backend endpoint tests already cover open/already-archived/not-found conflicts, authorization, list filters, and counts.
+- Extend an admin browser E2E to archive a closed meeting from detail, verify the active list no longer contains it, enable `Show archived meetings`, open the archived row, and unarchive it.
+
+## Reopen meeting lifecycle
+
+Reopen only a stored `closed` meeting through an authenticated admin endpoint and require a new `voting_closes_at` strictly after now and `meeting_at`. In one transaction: set status to open, clear `closed_at`, set the new close time, delete only `BallotSubmission.is_absent=true` rows created by the close sweep, and reopen motions tagged as closed by the meeting. Preserve all submitted ballots and individually closed motions. Recompute multi-choice outcomes from retained submitted votes.
+
+Add `motions.closed_by_meeting BOOLEAN NOT NULL DEFAULT false`; meeting close marks this true only when it sets a previously-null `voting_closed_at`. Reopen clears the close timestamp only for those marked rows, then clears the marker. Backfill existing closed meetings by matching motion `voting_closed_at` to parent `closed_at`, where possible. This is the only required schema migration. UI should use an explicit confirmation and collect a new close time. Existing archive/unarchive list controls are already implemented and remain unaffected.
+
+## Meeting detail OC Plan subtitle and left-aligned search
+
+### Detail API
+
+The meeting detail response currently joins `Building` only for `building_name`. Extend the same query and response contract:
+
+- Add nullable `oc_plan_number` to backend `GeneralMeetingDetail`.
+- Select `Building.oc_plan_number.label("oc_plan_number")` alongside `Building.name` in `get_general_meeting_detail`.
+- Unpack the extra row value and return `oc_plan_number` from the service.
+- Add `oc_plan_number?: string | null` to the frontend `GeneralMeetingDetail` TypeScript interface.
+
+This is additive and backward compatible. No migration is needed because `buildings.oc_plan_number` already exists.
+
+### Detail page subtitle
+
+Render a dedicated subtitle under the meeting title, in addition to the title/status row:
+
+```tsx
+<p className="meeting-detail-subtitle">
+  {meeting.building_name}
+  {meeting.oc_plan_number?.trim() && (
+    <> · <Link to={`/admin/buildings/${meeting.building_id}`}>{meeting.oc_plan_number.trim()}</Link></>
+  )}
+</p>
+```
+
+Use React Router `Link`, not an imperative navigate call, so the OC Plan is a real hyperlink. Link to the detail route identified by `meeting.building_id`; the API already returns that stable FK. If `oc_plan_number` is absent, show only the building name and no dangling separator. Remove or avoid duplicating the old “Building” metadata item if the new subtitle becomes its single source of truth.
+
+Accessibility and tests:
+
+- The link name includes the OC Plan number and indicates where it navigates.
+- Clicking/activating it routes to `/admin/buildings/{building_id}`.
+- Tests cover both with and without an OC Plan.
+- The title remains the meeting title, and the subtitle contains both building name and OC Plan.
+
+### Search alignment
+
+Change the meeting filter row so Search is the first control at the left edge and Status follows it. Remove `marginLeft: "auto"`. Keep one search input supporting meeting title, OC Plan, and building, with the existing server-side filter and URL persistence.
+
+Add tests that the search field is present in the left-aligned filter row, status remains functional, and no secondary toolbar search is reintroduced. This supersedes the earlier right-aligned design text.

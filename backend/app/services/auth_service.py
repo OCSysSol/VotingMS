@@ -169,8 +169,13 @@ async def resolve_voter_state(
     from sqlalchemy import select as _select
     from app.models.lot import Lot as _Lot
     from app.models.motion import Motion as _Motion
-    from app.models.vote import Vote as _Vote, VoteStatus as _VoteStatus
+    from app.models.vote import (
+        Vote as _Vote,
+        VoteChoice as _VoteChoice,
+        VoteStatus as _VoteStatus,
+    )
     from app.schemas.auth import LotInfo as _LotInfo
+    from app.schemas.auth import SubmittedVoteInfo as _SubmittedVoteInfo
 
     # Load direct-owner and proxy-lot lookups sequentially on the active request session.
     direct_lot_owner_ids = await _load_direct_lot_owner_ids(db, voter_email, building_id)
@@ -195,18 +200,38 @@ async def resolve_voter_state(
     visible_motions = list(visible_motions_result.scalars().all())
     visible_motion_ids: set[uuid.UUID] = {m.id for m in visible_motions}
 
-    # For each lot, determine the set of visible motion IDs that already have a
-    # submitted Vote row.
+    # For each lot, load the exact submitted choices. Multi-choice motions have one
+    # row per option, so they are grouped into a canonical option map here.
     voted_by_lot_result = await db.execute(
-        _select(_Vote.lot_owner_id, _Vote.motion_id).where(
+        _select(
+            _Vote.lot_owner_id,
+            _Vote.motion_id,
+            _Vote.choice,
+            _Vote.motion_option_id,
+        ).where(
             _Vote.general_meeting_id == general_meeting_id,
             _Vote.lot_owner_id.in_(all_lot_owner_ids),
             _Vote.status == _VoteStatus.submitted,
         )
     )
-    voted_motion_ids_by_lot: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for lot_owner_id, motion_id in voted_by_lot_result.all():
-        voted_motion_ids_by_lot.setdefault(lot_owner_id, set()).add(motion_id)
+    submitted_choices_by_lot: dict[
+        uuid.UUID, dict[uuid.UUID, dict[str, object]]
+    ] = {}
+    for lot_owner_id, motion_id, choice, motion_option_id in voted_by_lot_result.all():
+        motion_choices = submitted_choices_by_lot.setdefault(lot_owner_id, {})
+        grouped = motion_choices.setdefault(
+            motion_id,
+            {"choice": choice, "option_choices": {}},
+        )
+        if motion_option_id is not None and choice is not None:
+            grouped["choice"] = _VoteChoice.selected
+            option_choices = grouped["option_choices"]
+            assert isinstance(option_choices, dict)
+            option_choices[str(motion_option_id)] = {
+                _VoteChoice.selected: "for",
+                _VoteChoice.against: "against",
+                _VoteChoice.abstained: "abstained",
+            }.get(choice, choice.value)
 
     lots = []
     for lot_owner_id in all_lot_owner_ids:
@@ -215,7 +240,8 @@ async def resolve_voter_state(
             continue
         is_proxy = lot_owner_id not in direct_lot_owner_ids
         fp = lo.financial_position
-        voted_for_this_lot = voted_motion_ids_by_lot.get(lot_owner_id, set())
+        submitted_for_this_lot = submitted_choices_by_lot.get(lot_owner_id, {})
+        voted_for_this_lot = set(submitted_for_this_lot)
         already_submitted = (
             len(visible_motion_ids) > 0
             and visible_motion_ids.issubset(voted_for_this_lot)
@@ -227,6 +253,14 @@ async def resolve_voter_state(
             already_submitted=already_submitted,
             is_proxy=is_proxy,
             voted_motion_ids=list(voted_for_this_lot),
+            submitted_votes=[
+                _SubmittedVoteInfo(
+                    motion_id=motion_id,
+                    choice=values["choice"],
+                    option_choices=values["option_choices"],
+                )
+                for motion_id, values in submitted_for_this_lot.items()
+            ],
         ))
 
     lots.sort(key=lambda l: l.lot_number)

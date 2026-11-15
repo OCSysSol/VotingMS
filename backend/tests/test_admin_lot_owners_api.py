@@ -48,6 +48,35 @@ class TestListLotOwners:
         assert isinstance(data, list)
         assert len(data) == 2
 
+    async def test_search_matches_lot_owner_name_email_and_proxy(self, client: AsyncClient, db_session: AsyncSession):
+        building = Building(name="Owner Search Building", manager_email="owner-search@test.com")
+        db_session.add(building)
+        await db_session.flush()
+        lot = LotOwner(
+            building_id=building.id,
+            lot_number="SEARCH-17",
+            unit_entitlement=42,
+        )
+        db_session.add(lot)
+        await db_session.flush()
+        await add_person_to_lot(db_session, lot, "search-owner@test.com", "Harper", "Owner")
+        proxy = await get_or_create_person(db_session, "search-proxy@test.com", "Riley", "Proxy")
+        db_session.add(LotProxy(lot_id=lot.id, person_id=proxy.id))
+        await db_session.commit()
+
+        for term in ("SEARCH-17", "harper", "search-owner@test.com", "riley", "search-proxy@test.com"):
+            response = await client.get(
+                f"/api/admin/buildings/{building.id}/lot-owners?search={term.replace('@', '%40')}"
+            )
+            assert response.status_code == 200
+            assert [row["lot_number"] for row in response.json()] == ["SEARCH-17"]
+
+        count_response = await client.get(
+            f"/api/admin/buildings/{building.id}/lot-owners/count?search=riley"
+        )
+        assert count_response.status_code == 200
+        assert count_response.json()["count"] == 1
+
     async def test_lot_owner_fields_present(
         self, client: AsyncClient, building_with_owners: Building
     ):
@@ -2928,6 +2957,207 @@ class TestLotOwnerNames:
         entry = data["owner_emails"][0]
         assert entry["given_name"] is None
         assert entry["surname"] is None
+
+
+@pytest.mark.asyncio
+class TestCreateLotOwnerNestedPeople:
+    async def test_legacy_emails_payload_remains_supported(
+        self,
+        client: AsyncClient,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-LEGACY",
+                "unit_entitlement": 100,
+                "emails": ["legacy@example.com", " "],
+            },
+        )
+
+        assert response.status_code == 201
+        assert [owner["email"] for owner in response.json()["owner_emails"]] == [
+            "legacy@example.com"
+        ]
+
+    async def test_nested_owners_and_proxy_are_persisted(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-01",
+                "unit_entitlement": 120,
+                "financial_position": "normal",
+                "owners": [
+                    {
+                        "email": "alice@example.com",
+                        "given_name": "Alice",
+                        "surname": "Owner",
+                        "phone_number": "+61400000001",
+                    },
+                    {
+                        "email": "bob@example.com",
+                        "given_name": "Bob",
+                        "surname": "Coowner",
+                        "phone_number": None,
+                    },
+                ],
+                "proxy": {
+                    "email": "proxy@example.com",
+                    "given_name": "Peter",
+                    "surname": "Proxy",
+                    "phone_number": "+61400000002",
+                },
+            },
+        )
+
+        assert response.status_code == 201
+        data = response.json()
+        assert {owner["email"] for owner in data["owner_emails"]} == {
+            "alice@example.com",
+            "bob@example.com",
+        }
+        assert data["proxy_email"] == "proxy@example.com"
+        assert data["proxy_given_name"] == "Peter"
+        assert data["proxy_surname"] == "Proxy"
+        assert data["proxy_phone_number"] == "+61400000002"
+
+        lot = await db_session.scalar(
+            select(Lot).where(
+                Lot.building_id == building.id,
+                Lot.lot_number == "NEST-01",
+            )
+        )
+        assert lot is not None
+        lot_people = (
+            await db_session.execute(
+                select(Person)
+                .join(lot_persons, lot_persons.c.person_id == Person.id)
+                .where(lot_persons.c.lot_id == lot.id)
+            )
+        ).scalars().all()
+        assert {(person.email, person.given_name) for person in lot_people} == {
+            ("alice@example.com", "Alice"),
+            ("bob@example.com", "Bob"),
+        }
+        proxy = await db_session.scalar(
+            select(LotProxy).where(LotProxy.lot_id == lot.id)
+        )
+        proxy_person = await db_session.get(Person, proxy.person_id)
+        assert proxy_person is not None
+        assert proxy_person.given_name == "Peter"
+
+    async def test_nested_people_fill_blanks_without_overwriting_person_data(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building: Building,
+    ):
+        person = Person(
+            email="known@example.com",
+            given_name="Existing",
+            surname=None,
+            phone_number=None,
+        )
+        db_session.add(person)
+        await db_session.commit()
+
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-FILL",
+                "unit_entitlement": 80,
+                "owners": [
+                    {
+                        "email": "KNOWN@example.com",
+                        "given_name": "Replacement",
+                        "surname": "Filled",
+                        "phone_number": "+61400000003",
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        await db_session.refresh(person)
+        assert person.given_name == "Existing"
+        assert person.surname == "Filled"
+        assert person.phone_number == "+61400000003"
+
+    async def test_duplicate_nested_owner_emails_are_deduplicated(
+        self,
+        client: AsyncClient,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-DEDUPE",
+                "unit_entitlement": 90,
+                "owners": [
+                    {"email": "same@example.com", "given_name": "First"},
+                    {"email": "SAME@example.com", "given_name": "Second"},
+                ],
+            },
+        )
+
+        assert response.status_code == 201
+        assert [owner["email"] for owner in response.json()["owner_emails"]] == [
+            "same@example.com"
+        ]
+
+    async def test_invalid_nested_owner_returns_422_without_creating_lot(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-INVALID",
+                "unit_entitlement": 70,
+                "owners": [{"email": " "}],
+            },
+        )
+
+        assert response.status_code == 422
+        lot = await db_session.scalar(
+            select(Lot).where(
+                Lot.building_id == building.id,
+                Lot.lot_number == "NEST-INVALID",
+            )
+        )
+        assert lot is None
+
+    async def test_invalid_nested_proxy_returns_422_without_creating_lot(
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        building: Building,
+    ):
+        response = await client.post(
+            f"/api/admin/buildings/{building.id}/lot-owners",
+            json={
+                "lot_number": "NEST-INVALID-PROXY",
+                "unit_entitlement": 70,
+                "owners": [{"email": "owner@example.com"}],
+                "proxy": {"email": " "},
+            },
+        )
+
+        assert response.status_code == 422
+        lot = await db_session.scalar(
+            select(Lot).where(
+                Lot.building_id == building.id,
+                Lot.lot_number == "NEST-INVALID-PROXY",
+            )
+        )
+        assert lot is None
 
     async def test_update_lot_owner_given_name_and_surname(
         self, client: AsyncClient, db_session: AsyncSession, building: Building

@@ -45,12 +45,24 @@ describe("GeneralMeetingDetailPage", () => {
     expect(screen.getByText("Loading General Meeting...")).toBeInTheDocument();
   });
 
-  it("renders meeting title and building name", async () => {
+  it("renders the meeting title and building name once", async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByText("2024 AGM")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Alpha Tower/)).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Tower")).toHaveLength(1);
+  });
+
+  it("links the OC Plan in the meeting subtitle", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByText("2024 AGM")).toBeInTheDocument();
+    });
+    const ocPlanLink = screen.getByRole("link", { name: "Open OC Plan PS345123A" });
+    const subtitle = screen.getByText("PS345123A").closest(".meeting-detail__subtitle");
+    expect(subtitle).not.toBeNull();
+    expect(within(subtitle as HTMLElement).getByText("Alpha Tower")).toBeInTheDocument();
+    expect(ocPlanLink).toHaveAttribute("href", "/admin/buildings/b1");
   });
 
   it("renders status badge", async () => {
@@ -148,6 +160,187 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
+  it("opens the meeting reopen dialog and submits the new close time", async () => {
+    const user = userEvent.setup();
+    let reopenPayload: Record<string, unknown> | null = null;
+    const closedMeeting = {
+      ...ADMIN_MEETING_DETAIL_CLOSED,
+      id: "agm-reopen-ui",
+      meeting_at: "2023-06-01T10:00:00Z",
+    };
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", ({ params }) =>
+        params.meetingId === "agm-reopen-ui"
+          ? HttpResponse.json(closedMeeting)
+          : HttpResponse.json({ detail: "not found" }, { status: 404 })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/reopen", async ({ request, params }) => {
+        expect(params.meetingId).toBe("agm-reopen-ui");
+        reopenPayload = await request.json() as Record<string, unknown>;
+        return HttpResponse.json({ status: "open", voting_closes_at: "2026-12-31T12:00:00Z" });
+      })
+    );
+
+    renderPage("agm-reopen-ui");
+    await user.click(await screen.findByRole("button", { name: "Reopen Meeting" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Reopen this General Meeting?" });
+    expect(within(dialog).getByText(/Submitted votes will be kept/)).toBeInTheDocument();
+    const closeTime = within(dialog).getByLabelText("New voting close time");
+    fireEvent.change(closeTime, { target: { value: "2026-12-31T12:00" } });
+    await user.click(within(dialog).getByRole("button", { name: "Reopen Meeting" }));
+
+    await waitFor(() => {
+      expect(reopenPayload).toEqual({
+        voting_closes_at: new Date("2026-12-31T12:00").toISOString(),
+      });
+      expect(screen.queryByRole("dialog", { name: "Reopen this General Meeting?" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("right-aligns the Reopen and Delete actions in one compact group", async () => {
+    renderPage("agm2");
+    const reopen = await screen.findByRole("button", { name: "Reopen Meeting" });
+    const remove = screen.getByRole("button", { name: "Delete Meeting" });
+    const archive = screen.getByRole("button", { name: "Archive Meeting" });
+    expect(reopen.parentElement).toBe(remove.parentElement);
+    expect(remove.parentElement).toBe(archive.parentElement);
+    expect(reopen.parentElement).toHaveStyle({
+      display: "flex",
+      justifyContent: "flex-end",
+      gap: "8px",
+    });
+  });
+
+  it("shows Archive Meeting for a closed active meeting but not for open or pending meetings", async () => {
+    const { unmount } = renderPage("agm2");
+    expect(await screen.findByRole("button", { name: "Archive Meeting" })).toBeInTheDocument();
+    unmount();
+
+    const { unmount: unmountOpen } = renderPage();
+    await screen.findByText("2024 AGM");
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+    unmountOpen();
+
+    renderPage("agm-pending");
+    await screen.findByText("2026 AGM");
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+  });
+
+  it("does not archive when the confirmation is cancelled", async () => {
+    const user = userEvent.setup();
+    let archiveCalls = 0;
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () => {
+        archiveCalls += 1;
+        return HttpResponse.json({});
+      })
+    );
+
+    renderPage("agm2");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive General Meeting" });
+    expect(within(dialog).getByText(/retained for audit compliance/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog", { name: "Archive General Meeting" })).not.toBeInTheDocument();
+    expect(archiveCalls).toBe(0);
+  });
+
+  it("archives a closed meeting and renders the archived state", async () => {
+    const user = userEvent.setup();
+    let archived = false;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", () =>
+        HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: archived })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () => {
+        archived = true;
+        return HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: true });
+      })
+    );
+
+    renderPage("agm-archive-success");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    await user.click(
+      within(screen.getByRole("dialog", { name: "Archive General Meeting" }))
+        .getByRole("button", { name: "Archive" })
+    );
+
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Unarchive Meeting" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Archive Meeting" })).not.toBeInTheDocument();
+  });
+
+  it("shows an accessible error when archiving fails", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/archive", () =>
+        HttpResponse.json({ detail: "Archive failed" }, { status: 409 })
+      )
+    );
+
+    renderPage("agm2");
+    await user.click(await screen.findByRole("button", { name: "Archive Meeting" }));
+    const dialog = screen.getByRole("dialog", { name: "Archive General Meeting" });
+    await user.click(within(dialog).getByRole("button", { name: "Archive" }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Archive failed");
+  });
+
+  it("unarchives an archived meeting and restores the closed meeting actions", async () => {
+    const user = userEvent.setup();
+    let archived = true;
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", () =>
+        HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: archived })
+      ),
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/unarchive", () => {
+        archived = false;
+        return HttpResponse.json({ ...ADMIN_MEETING_DETAIL_CLOSED, is_archived: false });
+      })
+    );
+
+    renderPage("agm-unarchive-success");
+    expect(await screen.findByText("Archived")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Reopen Meeting" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Unarchive Meeting" }));
+
+    expect(await screen.findByRole("button", { name: "Archive Meeting" })).toBeInTheDocument();
+    expect(screen.queryByText("Archived")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reopen Meeting" })).toBeInTheDocument();
+  });
+
+  it("confirms reopening a closed motion and calls the reopen API", async () => {
+    const user = userEvent.setup();
+    let reopenedMotionId: string | undefined;
+    const motion = {
+      ...ADMIN_MEETING_DETAIL.motions[0],
+      id: "motion-reopen-ui",
+      title: "Motion to Reopen",
+      voting_closed_at: "2024-06-01T11:00:00Z",
+    };
+    server.use(
+      http.get("http://localhost/api/admin/general-meetings/:meetingId", ({ params }) =>
+        params.meetingId === "agm-motion-reopen-ui"
+          ? HttpResponse.json({ ...ADMIN_MEETING_DETAIL, id: "agm-motion-reopen-ui", motions: [motion] })
+          : HttpResponse.json({ detail: "not found" }, { status: 404 })
+      ),
+      http.post("http://localhost/api/admin/motions/:motionId/reopen", ({ params }) => {
+        reopenedMotionId = String(params.motionId);
+        return HttpResponse.json({ ...motion, voting_closed_at: null });
+      })
+    );
+
+    renderPage("agm-motion-reopen-ui");
+    await user.click(await screen.findByRole("button", { name: "Reopen Motion" }));
+    const dialog = screen.getByRole("dialog", { name: "Reopen Motion Voting" });
+    expect(within(dialog).getByText(/Existing submitted votes will remain unchanged/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Reopen Voting" }));
+
+    await waitFor(() => expect(reopenedMotionId).toBe("motion-reopen-ui"));
+    expect(screen.queryByRole("dialog", { name: "Reopen Motion Voting" })).not.toBeInTheDocument();
+  });
+
   it("shows EmailStatusBanner when email delivery failed", async () => {
     renderPage("agm-failed-email");
     await waitFor(() => {
@@ -236,12 +429,26 @@ describe("GeneralMeetingDetailPage", () => {
     });
   });
 
-  it("does not show Resend Summary Email button for closed meeting without email delivery", async () => {
+  it("shows Send Summary Email for a closed meeting without prior delivery and sends on request", async () => {
+    const user = userEvent.setup();
+    let sendRequested = false;
+    server.use(
+      http.post("http://localhost/api/admin/general-meetings/:meetingId/resend-report", ({ params }) => {
+        expect(params.meetingId).toBe("agm2");
+        sendRequested = true;
+        return HttpResponse.json({ queued: true });
+      })
+    );
     renderPage("agm2");
     await waitFor(() => {
       expect(screen.getByText("2023 AGM")).toBeInTheDocument();
     });
-    expect(screen.queryByRole("button", { name: "Resend Summary Email" })).not.toBeInTheDocument();
+    const sendButton = screen.getByRole("button", { name: "Send Summary Email" });
+    await user.click(sendButton);
+    await waitFor(() => {
+      expect(sendRequested).toBe(true);
+      expect(screen.getByText("Summary email queued for resend.")).toBeInTheDocument();
+    });
   });
 
   it("does not show Resend Summary Email button for open meeting", async () => {
@@ -304,6 +511,86 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
+  });
+
+  it("shows Send Summary Email and Download Summary PDF beside each other", async () => {
+    renderPage("agm2");
+
+    const send = await screen.findByRole("button", { name: "Send Summary Email" });
+    const download = screen.getByRole("button", { name: "Download Summary PDF" });
+
+    expect(send.parentElement).toBe(download.parentElement);
+    expect(download).toHaveClass("btn--secondary");
+  });
+
+  it("downloads the summary PDF without navigating", async () => {
+    const user = userEvent.setup();
+    mockNavigate.mockClear();
+    let requested = false;
+    let downloadedFilename = "";
+    server.use(
+      http.get(
+        "http://localhost/api/admin/general-meetings/:meetingId/results.pdf",
+        () => {
+          requested = true;
+          return new HttpResponse(new Blob(["%PDF-1.4"]), {
+            headers: { "Content-Type": "application/pdf" },
+          });
+        }
+      )
+    );
+    URL.createObjectURL = vi.fn(() => "blob:meeting-pdf");
+    URL.revokeObjectURL = vi.fn();
+    const anchorClick = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        downloadedFilename = this.download;
+      });
+
+    renderPage("agm2");
+    await user.click(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    );
+
+    await waitFor(() => {
+      expect(requested).toBe(true);
+      expect(anchorClick).toHaveBeenCalled();
+    });
+    expect(downloadedFilename).toMatch(/^results-.*-agm2\.pdf$/);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:meeting-pdf");
+    expect(mockNavigate).not.toHaveBeenCalled();
+    anchorClick.mockRestore();
+  });
+
+  it("shows a download error without hiding the action", async () => {
+    const user = userEvent.setup();
+    server.use(
+      http.get(
+        "http://localhost/api/admin/general-meetings/:meetingId/results.pdf",
+        () => HttpResponse.json({ detail: "PDF failed" }, { status: 500 })
+      )
+    );
+    renderPage("agm2");
+
+    await user.click(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("500");
+    expect(
+      screen.getByRole("button", { name: "Download Summary PDF" })
+    ).toBeEnabled();
+  });
+
+  it("keeps PDF download available when the email failure banner is visible", async () => {
+    renderPage("agm-failed-email");
+
+    expect(
+      await screen.findByRole("button", { name: "Download Summary PDF" })
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Resend Summary Email" })
+    ).not.toBeInTheDocument();
   });
 
   it("shows generic error when non-404 fetch fails", async () => {
@@ -463,6 +750,19 @@ describe("GeneralMeetingDetailPage", () => {
     await waitFor(() => {
       expect(screen.getByText("Motions")).toBeInTheDocument();
     });
+  });
+
+  it("places motion actions above the Motions heading", async () => {
+    renderPage();
+
+    const addMotion = await screen.findByRole("button", { name: "Add Motion" });
+    const floorVotes = screen.getByRole("button", { name: "Enter Floor Votes" });
+    const heading = screen.getByRole("heading", { name: "Motions" });
+
+    expect(addMotion.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
+    expect(floorVotes.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy();
   });
 
   it("shows move buttons for open meeting with multiple motions", async () => {
@@ -2936,7 +3236,7 @@ describe("Close Motion", () => {
     });
   });
 
-  it("shows Closed badge for motion with voting_closed_at set", async () => {
+  it("shows reopen action for a closed motion while its meeting remains open", async () => {
     const meetingWithClosedMotion = {
       ...ADMIN_MEETING_DETAIL,
       id: "agm-closed-motion",
@@ -2955,7 +3255,7 @@ describe("Close Motion", () => {
     );
     renderPage("agm-closed-motion");
     await waitFor(() => {
-      expect(screen.getByTestId("motion-voting-closed-badge-m-closed-voting")).toBeInTheDocument();
+      expect(screen.getByTestId("reopen-motion-btn-m-closed-voting")).toBeInTheDocument();
     });
   });
 });
@@ -2980,36 +3280,36 @@ describe("Admin In-Person Vote Entry", () => {
     );
   }
 
-  it("shows Enter In-Person Votes button when meeting is open", async () => {
+  it("shows Enter Floor Votes button when meeting is open", async () => {
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
   });
 
-  it("does not show Enter In-Person Votes button when meeting is closed", async () => {
+  it("does not show Enter Floor Votes button when meeting is closed", async () => {
     renderPage("agm2");
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Enter Floor Votes" })).not.toBeInTheDocument();
     });
   });
 
-  it("does not show Enter In-Person Votes button when meeting is pending", async () => {
+  it("does not show Enter Floor Votes button when meeting is pending", async () => {
     renderPage("agm-pending");
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "Enter In-Person Votes" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Enter Floor Votes" })).not.toBeInTheDocument();
     });
   });
 
-  it("opens AdminVoteEntryPanel when Enter In-Person Votes is clicked", async () => {
+  it("opens AdminVoteEntryPanel when Enter Floor Votes is clicked", async () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
   });
 
@@ -3017,17 +3317,17 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Enter In-Person Votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes/i })).toBeInTheDocument();
     });
     // Cancel the panel
     const cancelBtn = screen.getByRole("button", { name: "Cancel" });
     await user.click(cancelBtn);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: /Enter In-Person Votes/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole("dialog", { name: /Enter Floor Votes/i })).not.toBeInTheDocument();
     });
     // No success modal shown after cancel
     expect(screen.queryByRole("dialog", { name: /Votes submitted/i })).not.toBeInTheDocument();
@@ -3037,9 +3337,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3051,7 +3351,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     // Success modal should appear with "Votes submitted" heading
@@ -3066,9 +3366,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3079,7 +3379,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {
@@ -3095,9 +3395,9 @@ describe("Admin In-Person Vote Entry", () => {
     const user = userEvent.setup();
     renderPage("agm1");
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Enter In-Person Votes" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Enter Floor Votes" })).toBeInTheDocument();
     });
-    await user.click(screen.getByRole("button", { name: "Enter In-Person Votes" }));
+    await user.click(screen.getByRole("button", { name: "Enter Floor Votes" }));
     await waitFor(() => {
       expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
     });
@@ -3108,7 +3408,7 @@ describe("Admin In-Person Vote Entry", () => {
     });
     await user.click(screen.getByRole("button", { name: /Submit votes/ }));
     await waitFor(() => {
-      expect(screen.getByRole("dialog", { name: /Submit in-person votes/i })).toBeInTheDocument();
+      expect(screen.getByRole("dialog", { name: /Submit floor votes/i })).toBeInTheDocument();
     });
     await user.click(screen.getByRole("button", { name: "Confirm" }));
     await waitFor(() => {

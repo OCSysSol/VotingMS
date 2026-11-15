@@ -20,7 +20,7 @@ function renderComponent(onSuccess = vi.fn()) {
 describe("BuildingCSVUpload", () => {
   it("renders file input and choose file button", () => {
     renderComponent();
-    expect(screen.getByLabelText("Buildings file")).toBeInTheDocument();
+    expect(screen.getByLabelText("OC Plans file")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Choose file" })).toBeInTheDocument();
   });
 
@@ -28,7 +28,7 @@ describe("BuildingCSVUpload", () => {
     const user = userEvent.setup();
     renderComponent();
     const file = new File(["building_name,manager_email\nTest,t@t.com"], "buildings.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(screen.getByText(/Import complete: 2 created, 1 updated/)).toBeInTheDocument();
     });
@@ -43,7 +43,7 @@ describe("BuildingCSVUpload", () => {
     const user = userEvent.setup();
     renderComponent();
     const file = new File(["bad"], "bad.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(screen.getByText(/Error:/)).toBeInTheDocument();
     });
@@ -54,7 +54,7 @@ describe("BuildingCSVUpload", () => {
     const onSuccess = vi.fn();
     renderComponent(onSuccess);
     const file = new File(["building_name,manager_email\nTest,t@t.com"], "buildings.csv", { type: "text/csv" });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled();
     });
@@ -67,7 +67,7 @@ describe("BuildingCSVUpload", () => {
     const file = new File(["xlsx binary data"], "buildings.xlsx", {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    await user.upload(screen.getByLabelText("Buildings file"), file);
+    await user.upload(screen.getByLabelText("OC Plans file"), file);
     await waitFor(() => {
       expect(onSuccess).toHaveBeenCalled();
     });

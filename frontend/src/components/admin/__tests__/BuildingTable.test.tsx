@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
@@ -34,6 +34,10 @@ function renderBuildingTable(props: {
 }
 
 describe("BuildingTable", () => {
+  beforeEach(() => {
+    mockNavigate.mockClear();
+  });
+
   it("renders building names and emails", () => {
     renderBuildingTable({ buildings });
     expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
@@ -59,11 +63,33 @@ describe("BuildingTable", () => {
     expect(screen.getByText("Alpha Tower")).toBeInTheDocument();
   });
 
-  it("navigates to building detail on name click", async () => {
+  it("navigates to the OC Plan detail from the OC Plan link", async () => {
     const user = userEvent.setup();
     renderBuildingTable({ buildings });
-    await user.click(screen.getByRole("button", { name: "Alpha Tower" }));
+    await user.click(screen.getByRole("button", { name: "Open OC Plan OC-1001" }));
     expect(mockNavigate).toHaveBeenCalledWith("/admin/buildings/b1");
+  });
+
+  it("navigates to the OC Plan detail when any row cell is clicked", async () => {
+    const user = userEvent.setup();
+    renderBuildingTable({ buildings });
+    await user.click(screen.getByText("Alpha Tower"));
+    expect(mockNavigate).toHaveBeenCalledWith("/admin/buildings/b1");
+  });
+
+  it("keeps the building name as plain text rather than a link", () => {
+    renderBuildingTable({ buildings });
+    expect(screen.queryByRole("button", { name: "Alpha Tower" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alpha Tower" })).not.toBeInTheDocument();
+  });
+
+  it("does not navigate when a sortable header is clicked", async () => {
+    const user = userEvent.setup();
+    const onSort = vi.fn();
+    renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
+    await user.click(screen.getByRole("button", { name: /^OC Plan/ }));
+    expect(onSort).toHaveBeenCalledWith("oc_plan_number");
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 
   it("renders static table headers when no onSort prop provided", () => {
@@ -133,7 +159,7 @@ describe("BuildingTable", () => {
   it("renders sortable OC Plan, Building Name, Manager Email and Created At headers when onSort is provided", () => {
     const onSort = vi.fn();
     renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
-    expect(screen.getByRole("button", { name: /OC Plan/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^OC Plan/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Building Name/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Manager Email/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Created At/ })).toBeInTheDocument();
@@ -143,7 +169,7 @@ describe("BuildingTable", () => {
     const user = userEvent.setup();
     const onSort = vi.fn();
     renderBuildingTable({ buildings, sortBy: "created_at", sortDir: "desc", onSort });
-    await user.click(screen.getByRole("button", { name: /OC Plan/ }));
+    await user.click(screen.getByRole("button", { name: /^OC Plan/ }));
     expect(onSort).toHaveBeenCalledWith("oc_plan_number");
   });
 
@@ -237,6 +263,7 @@ describe("BuildingTable", () => {
       name: `Building ${i + 1}`,
       manager_email: `mgr${i + 1}@example.com`,
       is_archived: false,
+      unarchive_count: 0,
       created_at: "2024-01-01T00:00:00Z",
     }));
     renderBuildingTable({ buildings: manyBuildings });
@@ -252,6 +279,7 @@ describe("BuildingTable", () => {
       name: `Building ${i + 1}`,
       manager_email: `mgr${i + 1}@example.com`,
       is_archived: false,
+      unarchive_count: 0,
       created_at: "2024-01-01T00:00:00Z",
     }));
     renderBuildingTable({ buildings: manyBuildings });
@@ -267,6 +295,7 @@ describe("BuildingTable", () => {
       name: `Building ${i + 1}`,
       manager_email: `mgr${i + 1}@example.com`,
       is_archived: false,
+      unarchive_count: 0,
       created_at: "2024-01-01T00:00:00Z",
     }));
     renderBuildingTable({ buildings: manyBuildings });
@@ -282,6 +311,7 @@ describe("BuildingTable", () => {
       name: `Building ${i + 1}`,
       manager_email: `mgr${i + 1}@example.com`,
       is_archived: false,
+      unarchive_count: 0,
       created_at: "2024-01-01T00:00:00Z",
     }));
     const { rerender } = render(

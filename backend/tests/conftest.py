@@ -182,6 +182,7 @@ def reset_rate_limiters():
         admin_close_limiter,
         admin_import_limiter,
         admin_invite_limiter,
+        admin_report_limiter,
         ballot_submit_limiter,
         provision_limiter,
         public_limiter,
@@ -193,6 +194,7 @@ def reset_rate_limiters():
     admin_import_limiter._timestamps.clear()
     admin_close_limiter._timestamps.clear()
     admin_invite_limiter._timestamps.clear()
+    admin_report_limiter._timestamps.clear()
     smtp_test_rate_limiter.reset("smtp_test")
     sms_test_rate_limiter.reset("sms_test")
     provision_limiter._timestamps.clear()
@@ -202,6 +204,7 @@ def reset_rate_limiters():
     admin_import_limiter._timestamps.clear()
     admin_close_limiter._timestamps.clear()
     admin_invite_limiter._timestamps.clear()
+    admin_report_limiter._timestamps.clear()
     smtp_test_rate_limiter.reset("smtp_test")
     sms_test_rate_limiter.reset("sms_test")
     provision_limiter._timestamps.clear()

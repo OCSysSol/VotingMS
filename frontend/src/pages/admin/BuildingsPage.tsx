@@ -58,7 +58,7 @@ export default function BuildingsPage() {
     [searchParams, setSearchParams]
   );
 
-  // US-ACC-02: Focus trap for New Building modal
+  // US-ACC-02: Focus trap for New OC Plan modal
   useEffect(() => {
     if (!showCreateModal) return;
     const focusable = modalRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS);
@@ -123,7 +123,7 @@ export default function BuildingsPage() {
     }
   }, [safePage, showArchived, totalCount, queryClient, sortBy, sortDir, nameFilterParam]);
 
-  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number?: string | null }>({
+  const mutation = useMutation<Building, Error, { name: string; manager_email: string; oc_plan_number: string }>({
     mutationFn: (data) => createBuilding(data),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["admin", "buildings"] });
@@ -208,13 +208,14 @@ export default function BuildingsPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFormError(null);
+    if (!ocPlanNumber.trim()) { setFormError("OC Plan number is required."); return; }
     if (!name.trim()) { setFormError("Building name is required."); return; }
     if (!managerEmail.trim()) { setFormError("Manager email is required."); return; }
     if (!isValidEmail(managerEmail)) { setFormError("Please enter a valid email address."); return; }
     mutation.mutate({
       name: name.trim(),
       manager_email: managerEmail.trim(),
-      oc_plan_number: ocPlanNumber.trim() || null,
+      oc_plan_number: ocPlanNumber.trim(),
     });
   }
 
@@ -240,38 +241,15 @@ export default function BuildingsPage() {
     void queryClient.invalidateQueries({ queryKey: ["admin", "buildings"] });
   }
 
-  if (error) return <p className="state-message state-message--error">Failed to load buildings.</p>;
+  if (error) return <p className="state-message state-message--error">Failed to load OC Plans.</p>;
 
   return (
     <div>
       <div className="admin-page-header">
-        <h1>Buildings</h1>
+        <h1>OC Plans</h1>
         <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          {/* Fix 4: name filter input */}
-          <div className="field" style={{ maxWidth: 320, marginBottom: 0 }}>
-            <label className="field__label" htmlFor="buildings-name-filter">Search buildings</label>
-            <input
-              id="buildings-name-filter"
-              className="field__input"
-              type="text"
-              value={nameFilterInput}
-              onChange={(e) => handleNameFilterChange(e.target.value)}
-              placeholder="Filter by name…"
-            />
-          </div>
-          <label className="toggle-switch">
-            <input
-              id="show-archived-toggle"
-              className="toggle-switch__input"
-              type="checkbox"
-              checked={showArchived}
-              onChange={(e) => handleShowArchivedChange(e.target.checked)}
-            />
-            <span className="toggle-switch__track" />
-            Show archived
-          </label>
           <button ref={newBuildingBtnRef} className="btn btn--primary" onClick={openModal}>
-            + New Building
+            + New OC Plan
           </button>
         </div>
       </div>
@@ -288,7 +266,7 @@ export default function BuildingsPage() {
             ref={modalRef}
             role="dialog"
             aria-modal="true"
-            aria-label="New Building"
+            aria-label="New OC Plan"
             onKeyDown={handleModalKeyDown}
             style={{
               position: "fixed",
@@ -303,11 +281,24 @@ export default function BuildingsPage() {
               boxShadow: "var(--shadow-lg)",
             }}
           >
-            <h3 className="admin-card__title">New Building</h3>
+            <h3 className="admin-card__title">New OC Plan</h3>
             <p className="field__hint" style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}>
               <span aria-hidden="true">*</span> Required field
             </p>
             <form onSubmit={handleSubmit} noValidate>
+              <div className="field">
+                <label className="field__label field__label--required" htmlFor="building-oc-plan-number">OC Plan Number</label>
+                <input
+                  id="building-oc-plan-number"
+                  className="field__input"
+                  type="text"
+                  value={ocPlanNumber}
+                  onChange={(e) => setOcPlanNumber(e.target.value)}
+                  aria-required="true"
+                  required
+                  placeholder="e.g. PS345123A"
+                />
+              </div>
               <div className="field">
                 <label className="field__label field__label--required" htmlFor="building-name">Building Name</label>
                 <input
@@ -334,17 +325,6 @@ export default function BuildingsPage() {
                   placeholder="e.g. manager@example.com"
                 />
               </div>
-              <div className="field">
-                <label className="field__label" htmlFor="building-oc-plan-number">OC Plan Number</label>
-                <input
-                  id="building-oc-plan-number"
-                  className="field__input"
-                  type="text"
-                  value={ocPlanNumber}
-                  onChange={(e) => setOcPlanNumber(e.target.value)}
-                  placeholder="e.g. OC123456"
-                />
-              </div>
               {formError && (
                 <span role="alert" className="field__error">{formError}</span>
               )}
@@ -354,7 +334,7 @@ export default function BuildingsPage() {
                   className="btn btn--primary"
                   disabled={mutation.isPending}
                 >
-                  {mutation.isPending ? "Creating..." : "Create Building"}
+                  {mutation.isPending ? "Creating..." : "Create OC Plan"}
                 </button>
                 <button
                   type="button"
@@ -371,6 +351,32 @@ export default function BuildingsPage() {
       )}
 
       <div className="admin-card">
+        <div className="admin-card__header">
+          <div style={{ display: "flex", width: "100%", alignItems: "flex-end", justifyContent: "flex-start", gap: 16, flexWrap: "wrap" }}>
+            <div className="field" style={{ maxWidth: 320, flex: "1 1 280px", marginBottom: 0 }}>
+              <label className="field__label" htmlFor="buildings-name-filter">Search OC Plans</label>
+              <input
+                id="buildings-name-filter"
+                className="field__input"
+                type="text"
+                value={nameFilterInput}
+                onChange={(e) => handleNameFilterChange(e.target.value)}
+                placeholder="Filter by OC Plan or building name…"
+              />
+            </div>
+            <label className="toggle-switch">
+              <input
+                id="show-archived-toggle"
+                className="toggle-switch__input"
+                type="checkbox"
+                checked={showArchived}
+                onChange={(e) => handleShowArchivedChange(e.target.checked)}
+              />
+              <span className="toggle-switch__track" />
+              Show archived
+            </label>
+          </div>
+        </div>
         <Pagination
           page={safePage}
           totalPages={totalPages}

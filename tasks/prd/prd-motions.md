@@ -480,3 +480,12 @@ This document covers motion management for the AGM Voting App: CRUD operations o
 - No bulk CSV import of additional motions after meeting creation
 - No scheduling or time-based auto-reveal of motions
 - Reopening a per-motion-closed motion is not supported (irreversible once closed)
+
+### US-MOT-REOPEN-01: Reopen a closed motion
+
+**Status:** Proposed
+
+- [ ] While the parent meeting is open, admins can reopen a motion whose voting window was closed individually.
+- [ ] Reopening clears the motion's voting close timestamp and restores voter controls for that motion. Existing submitted votes remain unchanged.
+- [ ] A closed parent meeting cannot have an individual motion reopened; return a clear conflict.
+- [ ] Keep the existing close action and closed indicator, replacing the latter with a reopen action when eligible.

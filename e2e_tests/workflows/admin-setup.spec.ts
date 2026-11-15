@@ -133,6 +133,17 @@ test.describe("WF1: Admin building setup lifecycle", () => {
   test("WF1.4: edit building manager email to wf1-manager-new@test.com", async ({ page }) => {
     test.setTimeout(60000);
 
+    // Ensure starting state is MANAGER_EMAIL so the test is idempotent across retries/re-runs
+    const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:5173";
+    const api = await makeAdminApi(baseURL);
+    try {
+      await api.patch(`/api/admin/buildings/${buildingId}`, {
+        data: { manager_email: MANAGER_EMAIL },
+      });
+    } finally {
+      await api.dispose();
+    }
+
     await page.goto(`/admin/buildings/${buildingId}`);
     await expect(page.getByText(BUILDING_NAME)).toBeVisible({ timeout: 15000 });
 
@@ -146,8 +157,14 @@ test.describe("WF1: Admin building setup lifecycle", () => {
 
     await page.getByRole("button", { name: /save/i }).click();
 
-    // Page reflects updated email
-    await expect(page.getByText("wf1-manager-new@test.com")).toBeVisible({ timeout: 10000 });
+    // Modal closes after a successful save
+    await expect(page.getByRole("dialog", { name: "Edit Building" })).not.toBeVisible({ timeout: 10000 });
+
+    // The OC Plan header no longer shows the manager email (US-OC-UI-01), so
+    // reopen the edit modal and confirm the persisted value.
+    await page.getByRole("button", { name: /edit building/i }).click();
+    await expect(page.getByLabel(/manager email/i)).toHaveValue("wf1-manager-new@test.com", { timeout: 10000 });
+    await page.getByRole("button", { name: /cancel/i }).click();
   });
 
   // WF1.5: Upload proxy nominations CSV

@@ -46,6 +46,7 @@ from app.models.lot import Lot
 from app.models.lot_person import lot_persons
 from app.models.person import Person
 from app.services.email_service import (
+    EmailDeliveryDisabledError,
     EmailService,
     SmtpNotConfiguredError,
     _TEMPLATES_DIR,
@@ -55,6 +56,13 @@ from app.services.email_service import (
     _send_with_limit,
     _try_acquire_email_lock,
 )
+
+
+def _report_html(msg) -> str:
+    alternative = msg.get_payload()[0]
+    html_part = alternative.get_payload()[0]
+    return html_part.get_payload(decode=True).decode("utf-8")
+from app.services.smtp_config_service import get_smtp_config
 
 
 # ---------------------------------------------------------------------------
@@ -446,6 +454,23 @@ class TestOtelLogging:
 class TestSendReport:
     # --- Happy path ---
 
+    async def test_send_report_is_suppressed_when_delivery_disabled(
+        self, db_session: AsyncSession, mocker
+    ):
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        config = await get_smtp_config(db_session)
+        config.email_delivery_enabled = False
+        await db_session.commit()
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+
+        service = EmailService()
+
+        with pytest.raises(EmailDeliveryDisabledError):
+            await service.send_report(agm.id, db_session, "https://example.com")
+
+        mock_send.assert_not_awaited()
+
     async def test_send_report_success(self, db_session: AsyncSession, mocker):
         """Successful send → aiosmtplib.send called, no exception raised."""
         building = await _create_building(db_session, manager_email="mgr@example.com")
@@ -483,9 +508,13 @@ class TestSendReport:
         msg = mock_send.call_args[0][0]
         assert msg["To"] == "mgr@example.com"
         assert "General Meeting Results Report" in msg["Subject"]
-        # The HTML part content
-        html_part = msg.get_payload()[0].get_payload()
+        # The nested multipart/alternative HTML content
+        html_part = _report_html(msg)
         assert "<html" in html_part.lower()
+        pdf_part = msg.get_payload()[1]
+        assert pdf_part.get_content_type() == "application/pdf"
+        assert pdf_part.get_filename() == f"results-test-generalmeeting-{agm.id}.pdf"
+        assert pdf_part.get_payload(decode=True).startswith(b"%PDF-")
 
     async def test_send_report_uses_smtp_settings(self, db_session: AsyncSession, mocker):
         """send_report passes SMTP settings from DB config to aiosmtplib.send."""
@@ -520,6 +549,40 @@ class TestSendReport:
         assert call_kwargs["username"] == "testuser"
         assert call_kwargs["password"] == "testpass"
         assert call_kwargs["start_tls"] is True
+
+    async def test_pdf_generation_failure_prevents_smtp_send(
+        self, db_session: AsyncSession, mocker
+    ):
+        """A report rendering failure is retryable and never sends an HTML-only email."""
+        building = await _create_building(db_session, manager_email="mgr@example.com")
+        agm = await _create_agm(db_session, building)
+        await _create_motion(db_session, agm)
+        await db_session.commit()
+
+        mock_smtp_config = MagicMock()
+        mock_smtp_config.smtp_host = "smtp.test.com"
+        mock_smtp_config.smtp_port = 587
+        mock_smtp_config.smtp_username = "user"
+        mock_smtp_config.smtp_from_email = "noreply@test.com"
+        mock_smtp_config.smtp_password_enc = "enc"
+        mock_send = mocker.patch("aiosmtplib.send", new_callable=AsyncMock)
+        mocker.patch(
+            "app.services.email_service.get_smtp_config",
+            AsyncMock(return_value=mock_smtp_config),
+        )
+        mocker.patch(
+            "app.services.email_service.get_decrypted_password",
+            return_value="pass",
+        )
+        mocker.patch(
+            "app.services.email_service.generate_meeting_results_pdf",
+            side_effect=RuntimeError("PDF render failed"),
+        )
+
+        with pytest.raises(RuntimeError, match="PDF render failed"):
+            await EmailService().send_report(agm.id, db_session, "https://example.com")
+
+        mock_send.assert_not_awaited()
 
     # --- Error cases ---
 
@@ -620,7 +683,7 @@ class TestSendReport:
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        html_part = msg.get_payload()[0].get_payload()
+        html_part = _report_html(msg)
         expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
         assert expected_url in html_part
 
@@ -647,7 +710,7 @@ class TestSendReport:
 
         mock_send.assert_called_once()
         msg = mock_send.call_args[0][0]
-        html_part = msg.get_payload()[0].get_payload()
+        html_part = _report_html(msg)
         expected_url = f"https://vms-demo.ocss.tech/admin/general-meetings/{agm.id}"
         assert expected_url in html_part
         # Confirm there is no double-slash in the path
@@ -661,6 +724,91 @@ class TestSendReport:
 
 class TestTriggerWithRetry:
     # --- Happy path ---
+
+    async def test_uses_default_session_factory_when_not_supplied(self, mocker):
+        session_ctx = AsyncMock()
+        session_ctx.__aenter__ = AsyncMock(return_value=AsyncMock())
+        session_ctx.__aexit__ = AsyncMock(return_value=None)
+        factory = MagicMock(return_value=session_ctx)
+        mocker.patch("app.services.email_service.AsyncSessionLocal", factory)
+        mocker.patch(
+            "app.services.email_service.is_email_delivery_enabled",
+            AsyncMock(return_value=False),
+        )
+
+        await EmailService().trigger_with_retry(uuid.uuid4())
+
+        factory.assert_called_once_with()
+
+    async def test_exits_when_delivery_is_disabled_before_retry_attempt(
+        self, db_session: AsyncSession, mocker
+    ):
+        mocker.patch(
+            "app.services.email_service.is_email_delivery_enabled",
+            AsyncMock(side_effect=[True, False]),
+        )
+        send_report = mocker.patch.object(EmailService, "send_report", new_callable=AsyncMock)
+
+        await EmailService().trigger_with_retry(
+            uuid.uuid4(),
+            session_factory=_make_mock_factory(db_session),
+        )
+
+        send_report.assert_not_awaited()
+
+    async def test_disabled_error_from_send_report_does_not_increment_attempts(
+        self, db_session: AsyncSession, mocker
+    ):
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        await db_session.commit()
+        mocker.patch(
+            "app.services.email_service.is_email_delivery_enabled",
+            AsyncMock(return_value=True),
+        )
+        mocker.patch.object(
+            EmailService,
+            "send_report",
+            new_callable=AsyncMock,
+            side_effect=EmailDeliveryDisabledError("Email delivery is disabled"),
+        )
+
+        await EmailService().trigger_with_retry(
+            agm.id,
+            session_factory=_make_mock_factory(db_session),
+        )
+
+        await db_session.refresh(delivery)
+        assert delivery.total_attempts == 0
+        assert delivery.status == EmailDeliveryStatus.pending
+
+    async def test_returns_without_attempt_when_delivery_disabled(
+        self, db_session: AsyncSession, mocker
+    ):
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        config = await get_smtp_config(db_session)
+        config.email_delivery_enabled = False
+        await db_session.commit()
+        lock = mocker.patch(
+            "app.services.email_service._try_acquire_email_lock",
+            new_callable=AsyncMock,
+        )
+        send_report = mocker.patch.object(EmailService, "send_report", new_callable=AsyncMock)
+
+        await EmailService().trigger_with_retry(
+            agm.id,
+            "https://example.com",
+            session_factory=_make_mock_factory(db_session),
+        )
+
+        await db_session.refresh(delivery)
+        assert delivery.total_attempts == 0
+        assert delivery.status == EmailDeliveryStatus.pending
+        lock.assert_not_awaited()
+        send_report.assert_not_awaited()
 
     async def test_first_attempt_succeeds(self, db_session: AsyncSession, mocker):
         """First attempt succeeds → status=delivered, total_attempts=1."""
@@ -974,6 +1122,10 @@ class TestTriggerWithRetry:
             send_call_count["n"] += 1
 
         mocker.patch("aiosmtplib.send", side_effect=counting_send)
+        mocker.patch(
+            "app.services.email_service.is_email_delivery_enabled",
+            AsyncMock(return_value=True),
+        )
 
         # The second trigger_with_retry call must skip because the lock is held.
         # We simulate this by making _try_acquire_email_lock return False on the
@@ -1091,6 +1243,23 @@ class TestRequeuePendingOnStartup:
         await db_session.commit()
 
     # --- Happy path ---
+
+    async def test_is_noop_when_delivery_disabled(self, db_session: AsyncSession, mocker):
+        await self._clear_pending_deliveries(db_session)
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        delivery = await _create_email_delivery(db_session, agm)
+        delivery.status = EmailDeliveryStatus.pending
+        config = await get_smtp_config(db_session)
+        config.email_delivery_enabled = False
+        await db_session.commit()
+        trigger_mock = mocker.patch.object(
+            EmailService, "trigger_with_retry", new_callable=AsyncMock
+        )
+
+        await EmailService().requeue_pending_on_startup(db_session)
+
+        trigger_mock.assert_not_called()
 
     async def test_startup_summary_warning_logged_when_pending_found(
         self, db_session: AsyncSession, mocker
@@ -1294,7 +1463,7 @@ class TestRequeuePendingOnStartup:
 
 
 # ---------------------------------------------------------------------------
-# Integration: close GeneralMeeting → email triggered
+# Integration: report delivery is explicitly requested
 # ---------------------------------------------------------------------------
 
 
@@ -1302,10 +1471,10 @@ class TestCloseAgmEmailIntegration:
     async def _make_client(self, app):
         return AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
-    async def test_close_agm_creates_email_delivery_and_triggers(
+    async def test_close_agm_does_not_create_delivery_or_trigger_email(
         self, client: AsyncClient, db_session: AsyncSession, mocker
     ):
-        """POST /api/admin/general-meetings/{id}/close creates EmailDelivery and schedules trigger_with_retry via BackgroundTasks."""
+        """Closing a meeting does not queue or send its report automatically."""
         building = Building(name=f"Bld {uuid.uuid4()}", manager_email="mgr@example.com")
         db_session.add(building)
         await db_session.flush()
@@ -1326,7 +1495,7 @@ class TestCloseAgmEmailIntegration:
         db_session.add(motion)
         await db_session.commit()
 
-        # Patch trigger_with_retry so BackgroundTasks runs it without hitting SMTP
+        # Patch trigger_with_retry to ensure closing does not schedule a send.
         trigger_mock = mocker.patch(
             "app.services.email_service.EmailService.trigger_with_retry",
             new_callable=AsyncMock,
@@ -1335,16 +1504,35 @@ class TestCloseAgmEmailIntegration:
         resp = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
         assert resp.status_code == 200
 
-        # EmailDelivery should have been created
+        # No delivery record is created until the admin explicitly requests a send.
         result = await db_session.execute(
             select(EmailDelivery).where(EmailDelivery.general_meeting_id == agm.id)
         )
         delivery = result.scalar_one_or_none()
-        assert delivery is not None
-        assert delivery.status == EmailDeliveryStatus.pending
+        assert delivery is None
 
-        # trigger_with_retry should have been scheduled via BackgroundTasks
-        trigger_mock.assert_called_once_with(agm.id, "http://test")
+        trigger_mock.assert_not_awaited()
+
+    async def test_resend_report_returns_409_when_delivery_disabled(
+        self, client: AsyncClient, db_session: AsyncSession, mocker
+    ):
+        building = await _create_building(db_session)
+        agm = await _create_agm(db_session, building)
+        config = await get_smtp_config(db_session)
+        config.email_delivery_enabled = False
+        await db_session.commit()
+        trigger_mock = mocker.patch(
+            "app.services.email_service.EmailService.trigger_with_retry",
+            new_callable=AsyncMock,
+        )
+
+        response = await client.post(
+            f"/api/admin/general-meetings/{agm.id}/resend-report"
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Email delivery is disabled"
+        trigger_mock.assert_not_awaited()
 
     async def test_resend_report_triggers_email(
         self, client: AsyncClient, db_session: AsyncSession, mocker

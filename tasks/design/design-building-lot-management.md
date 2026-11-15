@@ -1741,7 +1741,7 @@ This feature:
 3. Preserves \`id: UUID\` as the PK on \`buildings\` with zero disruption to existing foreign keys.
 4. Requires no backfill for existing rows (\`oc_plan_number\` defaults to \`NULL\`).
 5. Updates Admin UI (table columns, create/edit modals, search filtering by both name and OC plan).
-6. Updates Voter UI (public meeting endpoints, combobox, and meeting headers formatted as \`\${building_name} — \${oc_plan_number}\`).
+6. Updates Voter UI public data and the building selector. The selector formats options and selected text as \`\${oc_plan_number} - \${building_name}\`; meeting headers retain their separately specified formatting.
 7. Enhances CSV/Excel bulk import to accept \`oc_plan_number\` as an optional column.
 
 ## 2. Technical Design
@@ -1783,9 +1783,231 @@ oc_plan_number: Mapped[str | None] = mapped_column(String(100), nullable=True, i
 ### 2.3 Frontend Changes
 - Add \`oc_plan_number\` to TypeScript types (\`Building\`, \`BuildingOut\`, \`GeneralMeetingWithBuildingOut\`, etc.).
 - Admin \`BuildingTable\`: add "OC Plan" column (renders \`—\` when null/empty).
+- Admin OC Plans rows navigate to the OC Plan detail page when any cell is clicked, matching the Meetings list. The OC Plan value is the keyboard-accessible link target; the Building Name remains plain text and sortable column headers retain sort-only behavior.
 - Admin \`BuildingsPage\`: add OC Plan input in create modal; search bar filters by name or plan.
 - Admin \`BuildingDetailPage\`: edit modal allows updating \`oc_plan_number\`; header shows OC plan.
-- Voter \`VoterBuildingCombobox\`, \`VotingPage\`, \`ConfirmationPage\`, \`GeneralMeetingSummaryPage\`: display formatted \`\${building_name} — \${oc_plan_number}\` (or just \`\${building_name}\` if plan is absent).
+- Voter \`VoterBuildingCombobox\`: search both fields and display \`\${oc_plan_number} - \${building_name}\` (or just \`\${building_name}\` if plan is absent). Other voter headers retain their separately specified formatting.
 
 ## 3. Schema Migration Required
 **Yes.** New Alembic revision to add \`oc_plan_number\`, add index, and drop \`uq_buildings_name\`.
+
+## OC Plan admin UX additions
+
+The persistence model already has `Building.oc_plan_number`; this request is terminology and form/search UX, not an entity or schema rename. Rename admin navigation/list copy to “OC Plans”. On an individual detail page, render `building.oc_plan_number` as the `<h1>` rather than a literal “OC Plan(s)” heading, and render the building name as the smaller subtitle beneath it. If an OC Plan number is absent, fall back to the building name as the title. Add a server-side text filter over owner rows (lot number, person names/emails, proxy name/email), and left-align the search field in the owner-list toolbar to match the OC Plans and Meetings lists.
+
+The `demo` branch already implements the OC Plan navigation/list terminology, selected-OC-Plan title and subtitles, owner/proxy search filter, and Create General Meeting prefill. Those behaviours should be regression-tested rather than reimplemented. The remaining work is Add Lot Owner parity and the Create General Meeting selector terminology documented below.
+
+### Add Lot Owner modal parity
+
+#### Current behaviour
+
+`frontend/src/components/admin/LotOwnerForm.tsx` has two separate implementations:
+
+- `EditModal` manages a lot's owner list, owner names/phones, proxy nomination, unit entitlement, and financial position.
+- `AddForm` uses the same outer dialog shell but only collects lot number, one email, unit entitlement, and financial position.
+
+The add path also sends only `emails: string[]` to `POST /api/admin/buildings/{building_id}/lot-owners`, so owner names, phones, extra owners, and proxy cannot be captured in the initial create action.
+
+#### Frontend design
+
+Keep `LotOwnerForm` as the public boundary and preserve its existing edit-mode behaviour. Rebuild add mode to match the edit modal's visible structure and component vocabulary:
+
+1. Same `.dialog-overlay` / `.dialog` shell, max-width, max-height, heading treatment, required-field legend, spacing, buttons, and accessibility attributes.
+2. `Lot Number` remains the first add-only field because it is the new lot's identity.
+3. Add an `Owners (name + email)` section using the same `PersonEmailAutocomplete`, given-name, surname, phone, edit/remove, and `Add owner` controls as edit mode.
+4. Add the same `Proxy` section, including autocomplete, given name, surname, phone, `Set proxy`, and `Remove proxy` controls.
+5. Keep `Unit Entitlement` and `Financial Position` in the same relative position as edit mode.
+6. The primary action remains `Add Lot Owner`; Cancel, Escape, overlay click, and pending-state behaviour stay consistent with edit mode.
+
+Add mode should use local draft arrays for owners rather than issuing follow-up API calls while the modal is open. At least one owner email is required by this UI. Duplicate emails should be rejected/deduplicated before submit. The autocomplete-selected owner/proxy conflict flow should use the same `PersonConflictModal` as edit mode whenever a submitted name or phone differs from the stored person record.
+
+Do not keep the old single-email fields as an alternate add path. One implementation must own add-mode layout so the two modals cannot drift again.
+
+#### API and transaction design
+
+Extend the existing create request rather than requiring a sequence of create/edit/proxy mutations:
+
+```json
+{
+  "lot_number": "12A",
+  "unit_entitlement": 100,
+  "financial_position": "normal",
+  "owners": [
+    {
+      "email": "owner@example.com",
+      "given_name": "Alex",
+      "surname": "Lee",
+      "phone_number": "+61400000000"
+    }
+  ],
+  "proxy": {
+    "email": "proxy@example.com",
+    "given_name": "Sam",
+    "surname": "Taylor",
+    "phone_number": "+61400000001"
+  }
+}
+```
+
+Backend contract:
+
+- Add reusable owner/proxy input schemas with max-length validation equivalent to `AddOwnerEmailRequest` / `SetProxyRequest`.
+- Extend `LotOwnerCreate` with optional `owners` and `proxy` fields.
+- Retain `emails: list[str]` for backward compatibility and for API consumers that only supply addresses. If `owners` is non-empty it is authoritative; otherwise convert `emails` into unnamed owner entries.
+- Normalize owner and proxy emails to lowercase and trim surrounding whitespace.
+- Use the existing person fill-blanks policy. For an existing person, do not overwrite a non-null name or phone. Conflicts that require overwrite confirmation are resolved in the frontend before submit.
+- Create the lot, owner links, people, and optional one-to-one proxy inside the existing service transaction. Commit once after all records are assembled so a proxy/person failure cannot leave a lot without the requested owner/proxy data.
+- Return the normal `LotOwnerOut`, including `owner_emails` and all `proxy_*` fields, so the frontend can immediately invalidate and refresh the table.
+
+Keep the route path and `building_id` relationship unchanged; `building_id` remains the stable storage/API FK even though the UI calls the entity an OC Plan.
+
+#### Validation and failure handling
+
+- Existing 404 (building not found) and 409 (duplicate lot number per building) semantics remain unchanged.
+- Invalid owner/proxy input returns 422 before persistence.
+- Duplicate owner entries for one lot may be deduplicated by normalized email; the UI should normally prevent them.
+- A request with no owners remains valid at the API layer for backward compatibility, but the Add Lot Owner UI requires at least one owner email.
+- A proxy without an email is invalid; omitted proxy fields mean no proxy nomination.
+- No database migration is required. `persons`, `lot_persons`, and `lot_proxies` already exist.
+
+#### Tests
+
+Backend integration tests:
+
+- Legacy payload using only `emails` still returns 201 and preserves existing behaviour.
+- Nested `owners` persists multiple people with names/phones and returns them in `owner_emails`.
+- Optional nested `proxy` persists and returns `proxy_email`, `proxy_given_name`, `proxy_surname`, and `proxy_phone_number`.
+- Fill-blanks policy does not overwrite existing person name/phone values.
+- Invalid nested owner/proxy payload returns 422 and creates no lot.
+- Duplicate lot number remains 409.
+- Verify the final `LotOwnerOut` shape in all cases.
+
+Frontend tests:
+
+- Add and edit modals have the same shell, heading treatment, section labels, control styling, and field order apart from add-only Lot Number.
+- Add mode exposes owner name/email/phone, add/edit/remove-owner, proxy name/email/phone, set/remove-proxy, entitlement, and financial position.
+- Submitting sends nested `owners` and `proxy`, then calls `onSuccess`.
+- Required-field and malformed-email validation work for owner and proxy inputs.
+- Owner/proxy conflict confirmation works in add mode.
+- Existing duplicate-lot and failed-create paths leave the modal open with an alert.
+- MSW create handler must echo submitted owner/proxy data so component tests prove the payload is consumed.
+
+Update existing component and E2E add-owner tests more precisely than merely checking the dialog shell. No schema migration or preview database branch is required.
+
+## OC Plan search alignment and test seed population
+
+### Left-aligned search toolbars
+
+The OC Plans list, Meetings list, and owner list on an individual OC Plan page must use a consistent left-aligned filter row:
+
+- The search control is the first item at the left edge of the filter container.
+- Secondary controls such as status or “Show archived” follow the search field.
+- No toolbar uses `margin-left: auto`, `justify-content: flex-end`, or another spacer that moves the search field to the right.
+- On the OC Plans list, keep “+ New OC Plan” in the page action area, but move search and “Show archived” into a table-card filter header whose contents start at the left.
+- On Meetings, render search first and the status selector second. Remove the current auto margin.
+- On the owner list, change its table-card header from end alignment to start alignment.
+
+Use the existing `.field`, `.field__input`, `.admin-card__header`, and inline layout conventions already accepted by `design-system.md`. Add component tests that assert the filter row alignment contract, not only the existence of the input.
+
+### E2E building generation
+
+`e2e_tests/workflows/helpers.ts` currently creates buildings with only `name` and `manager_email`, leaving test OC Plan values empty. Update the shared test seed path so every generated building receives a non-empty OC Plan:
+
+1. Add a deterministic generator that produces `PS` + six digits + one uppercase letter, for example `PS345123A`.
+2. Derive the digits/letter from a stable hash of the building name and an optional sequence so concurrent specs do not all receive the same number.
+3. Allow callers to provide an explicit complete OC Plan value, including suffixed multi-plan values such as `PS345123A1` or `PS345123A2`.
+4. Include `oc_plan_number` in `POST /api/admin/buildings`.
+5. When an existing building is found without an OC Plan, PATCH it to populate the value; when the helper is called for a distinct OC Plan number, match by that value rather than incorrectly reusing a same-name row with a different plan.
+6. Export the generator so `e2e_tests/global-setup.ts` can use the same rule for its directly-created voting and admin buildings, or refactor those paths onto the shared helper.
+
+Supporting multiple OC Plans for one building name does not require a schema change. The existing model represents each OC Plan as a building/OC Plan row with its own `oc_plan_number`; callers pass distinct suffixed values when they need multiple plans. Keep existing test names and IDs stable where possible.
+
+### Tests
+
+- Seed helper sends `oc_plan_number` on create and patches an existing row that lacks one.
+- Generated plans match `^PS\d{6}[A-Z]$`; explicit values such as `PS345123A1` and `PS345123A2` are preserved exactly.
+- Global setup and helper-created buildings are returned with a non-empty plan.
+- OC Plans, Meetings, and owner search inputs all start at the same left-aligned position in their filter row.
+- Existing OC Plan title, owner search, pagination, and sorting tests remain green.
+
+No database migration is required.
+
+## Voter building selector — search and display contract
+
+### Current data path
+
+`BuildingSelectPage` calls `GET /api/buildings` and passes the returned
+`BuildingOut[]` to `VoterBuildingCombobox`. That public endpoint already returns
+both `name` and `oc_plan_number` and applies the authoritative eligibility filter
+(active, non-archived building with an open meeting). The voter selector then
+filters the bounded response in memory. No voter-specific search endpoint,
+query parameter, or backend change is required for this behaviour.
+
+`BuildingDropdown` is not imported by the voter flow. The active implementation
+is `VoterBuildingCombobox`; do not create a second selector implementation.
+
+### Required display format
+
+When an OC Plan is present, the dropdown option and the combobox text shown
+after/while a building is selected must both use:
+
+```text
+<oc_plan_number> - <building name>
+```
+
+Examples:
+
+```text
+PS345123A - The Vale
+PS345123A1 - The Vale
+PS345123A2 - The Vale
+```
+
+The order is intentionally OC Plan first. Use one shared formatter for both the
+input value and option labels so they cannot drift. Trim whitespace from the OC
+Plan. When the OC Plan is null, empty, or whitespace-only, fall back to the
+building name alone rather than rendering a dangling separator or placeholder.
+
+This replaces the older voter-combobox format
+`<building name> — <oc_plan_number>` for the selector only. Other meeting or
+confirmation headers are outside this change unless separately specified.
+
+### Search behaviour
+
+Search is a case-insensitive substring match against either field:
+
+- building-name substring, e.g. `vale` matches `The Vale`;
+- OC Plan substring, e.g. `345123` or `A2` matches the corresponding option;
+- combined display text is not required as a separate backend search field.
+
+The query must match both fields independently, not only the rendered label.
+The selector keeps its current keyboard, outside-click, Escape, "All buildings",
+clear-selection, and accessibility behaviour:
+
+- `role="combobox"` and `role="listbox"` remain in use;
+- Arrow Up/Down and Enter continue to navigate/select;
+- Escape/outside click restore the current selection;
+- typing after a selection continues to clear the selected building ID;
+- selecting "All buildings" continues to emit the empty ID.
+
+Update the placeholder to communicate both searchable attributes, for example
+`Type building name or OC Plan…`. Keep the accessible label
+`Select your building`.
+
+### Tests
+
+Component coverage must verify:
+
+- an OC Plan option renders as `PS345123A - Building Name`;
+- the selected input renders the same order and separator;
+- searching by a building-name substring returns the matching option;
+- searching by an OC Plan substring returns the matching option;
+- a query matching neither field yields only "All buildings";
+- missing/blank OC Plan renders the building name alone;
+- duplicate building names with different plans remain distinguishable by OC Plan;
+- clear/reset restores the correct formatted selection.
+
+E2E coverage should search the seeded open-meeting building once by building
+name and once by its generated OC Plan, then select it and assert the same
+`OC Plan - Building` text in the combobox. Existing building-eligibility and
+voter-auth tests remain authoritative.

@@ -769,7 +769,7 @@ describe("AGMReportView", () => {
     expect(screen.getAllByText("Lot #").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Email").length).toBeGreaterThan(0);
     expect(screen.getAllByText("UOE").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Submitted By").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
     expect(screen.getAllByText("Choice").length).toBeGreaterThan(0);
   });
 
@@ -782,7 +782,6 @@ describe("AGMReportView", () => {
     expect(screen.getByText("voter1@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("L1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("100").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voter").length).toBeGreaterThan(0);
   });
 
   it("MC drill-down: For voters show For choice badge", async () => {
@@ -842,10 +841,10 @@ describe("AGMReportView", () => {
     render(<AGMReportView motions={[mcWithProxy]} />);
     const showBtn = screen.getAllByRole("button", { name: /Show voting details for Alice/ })[0];
     await user.click(showBtn);
-    expect(screen.getByText("(proxy)")).toBeInTheDocument();
+    expect(screen.getByText("proxy@example.com (proxy)")).toBeInTheDocument();
   });
 
-  it("MC drill-down: admin-submitted ballot shows 'Admin' in Submitted By column", async () => {
+  it("MC drill-down: admin-submitted ballot displays Floor vote", async () => {
     const user = userEvent.setup();
     const mcWithAdmin: MotionDetail = {
       ...mcMotionFixture,
@@ -870,7 +869,8 @@ describe("AGMReportView", () => {
     render(<AGMReportView motions={[mcWithAdmin]} />);
     const showBtn = screen.getAllByRole("button", { name: /Show voting details for Alice/ })[0];
     await user.click(showBtn);
-    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByText("Floor vote")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
   });
 
   it("MC drill-down: option with no voters shows 'No voter records.'", async () => {
@@ -1238,11 +1238,11 @@ describe("AGMReportView", () => {
     expect(screen.getByText("Lot #")).toBeInTheDocument();
     expect(screen.getByText("Email")).toBeInTheDocument();
     expect(screen.getByText("UOE")).toBeInTheDocument();
-    expect(screen.getByText("Submitted By")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
     expect(screen.getByText("Choice")).toBeInTheDocument();
   });
 
-  it("Fix 6: voter row contains lot number, email, entitlement, Voter label, and choice badge", async () => {
+  it("Fix 6: voter row contains lot number, email, entitlement, and choice badge", async () => {
     const user = userEvent.setup();
     render(<AGMReportView motions={[motions[0]]} />);
     await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
@@ -1250,7 +1250,6 @@ describe("AGMReportView", () => {
     expect(screen.getByText("voter1@example.com")).toBeInTheDocument();
     expect(screen.getAllByText("L1").length).toBeGreaterThan(0);
     expect(screen.getAllByText("100").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Voter").length).toBeGreaterThan(0);
     // Check choice badge text (For)
     const forBadges = screen.getAllByText("For");
     expect(forBadges.length).toBeGreaterThan(0);
@@ -1271,10 +1270,10 @@ describe("AGMReportView", () => {
     };
     render(<AGMReportView motions={[motionWithProxy]} />);
     await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
-    expect(screen.getByText("(proxy)")).toBeInTheDocument();
+    expect(screen.getByText("proxy@example.com (proxy)")).toBeInTheDocument();
   });
 
-  it("Fix 6: admin-submitted ballot shows 'Admin' in Submitted By column", async () => {
+  it("Fix 6: admin-submitted ballot displays Floor vote", async () => {
     const user = userEvent.setup();
     const motionWithAdmin: typeof motions[0] = {
       ...motions[0],
@@ -1289,7 +1288,8 @@ describe("AGMReportView", () => {
     };
     render(<AGMReportView motions={[motionWithAdmin]} />);
     await user.click(screen.getByRole("button", { name: /Expand voting details for Motion 1/ }));
-    expect(screen.getByText("Admin")).toBeInTheDocument();
+    expect(screen.getByText("Floor vote")).toBeInTheDocument();
+    expect(screen.queryByText("Submitted By")).not.toBeInTheDocument();
   });
 
   it("Fix 6: empty voter lists show 'No voter records.' message", async () => {
@@ -1697,7 +1697,7 @@ describe("AGMReportView", () => {
     expect(csv).toContain("proxy@example.com (proxy)");
   });
 
-  it("per-motion CSV: admin-submitted ballot shows 'Admin' in Submitted By column", async () => {
+  it("per-motion CSV: admin-submitted ballot shows 'Floor vote' in Submitted By column", async () => {
     const singleMotion: MotionDetail[] = [
       {
         ...motions[0],
@@ -1712,7 +1712,7 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(singleMotion);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
   it("per-motion CSV: Owner Name is empty string when voter_name is null", async () => {
@@ -1848,7 +1848,7 @@ describe("AGMReportView", () => {
     expect(csv).toContain("proxy@example.com (proxy)");
   });
 
-  it("per-motion CSV for multi-choice motion admin ballot shows 'Admin' in Submitted By", async () => {
+  it("per-motion CSV for multi-choice motion admin ballot shows 'Floor vote' in Submitted By", async () => {
     const mcWithAdmin: MotionDetail[] = [
       {
         ...mcMotionFixture,
@@ -1868,7 +1868,7 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(mcWithAdmin);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
   it("'↓ CSV' button is disabled when multi-choice motion has no voters", () => {
@@ -2070,7 +2070,7 @@ describe("AGMReportView", () => {
 
   // --- Global CSV export: admin submitted_by_admin=true in multi-choice path ---
 
-  it("global CSV export: multi-choice For voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("global CSV export: multi-choice For voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcWithAdmin: MotionDetail = {
       ...mcMotionFixture,
       voter_lists: {
@@ -2088,10 +2088,10 @@ describe("AGMReportView", () => {
       },
     };
     const csv = await captureCSVFromExport([mcWithAdmin]);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
-  it("global CSV export: multi-choice Against voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("global CSV export: multi-choice Against voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcWithAdminAgainst: MotionDetail = {
       ...mcMotionFixture,
       voter_lists: {
@@ -2105,10 +2105,10 @@ describe("AGMReportView", () => {
       },
     };
     const csv = await captureCSVFromExport([mcWithAdminAgainst]);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
-  it("global CSV export: multi-choice Abstained voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("global CSV export: multi-choice Abstained voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcWithAdminAbs: MotionDetail = {
       ...mcMotionFixture,
       voter_lists: {
@@ -2122,10 +2122,10 @@ describe("AGMReportView", () => {
       },
     };
     const csv = await captureCSVFromExport([mcWithAdminAbs]);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
-  it("global CSV export: multi-choice absent voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("global CSV export: multi-choice absent voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcWithAdminAbsent: MotionDetail = {
       ...mcMotionFixture,
       voter_lists: {
@@ -2140,10 +2140,10 @@ describe("AGMReportView", () => {
       },
     };
     const csv = await captureCSVFromExport([mcWithAdminAbsent]);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
-  it("global CSV export: binary motion voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("global CSV export: binary motion voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const binaryWithAdmin: MotionDetail[] = [
       {
         ...motions[0],
@@ -2158,7 +2158,7 @@ describe("AGMReportView", () => {
       },
     ];
     const csv = await captureCSVFromExport(binaryWithAdmin);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
   });
 
   // ---------------------------------------------------------------------------
@@ -2230,7 +2230,7 @@ describe("AGMReportView", () => {
     expect(csv).toContain('"Absent"');
   });
 
-  it("per-motion CSV: MC against voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("per-motion CSV: MC against voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcAdminAgainst: MotionDetail[] = [
       {
         ...mcMotionFixture,
@@ -2248,11 +2248,11 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(mcAdminAgainst);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
     expect(csv).toContain('"Against"');
   });
 
-  it("per-motion CSV: MC abstained voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("per-motion CSV: MC abstained voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcAdminAbs: MotionDetail[] = [
       {
         ...mcMotionFixture,
@@ -2270,11 +2270,11 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(mcAdminAbs);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
     expect(csv).toContain('"Abstained"');
   });
 
-  it("per-motion CSV: MC absent voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("per-motion CSV: MC absent voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const mcAdminAbsent: MotionDetail[] = [
       {
         ...mcMotionFixture,
@@ -2290,11 +2290,11 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(mcAdminAbsent);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
     expect(csv).toContain('"Absent"');
   });
 
-  it("per-motion CSV: binary voter with submitted_by_admin=true shows 'Admin'", async () => {
+  it("per-motion CSV: binary voter with submitted_by_admin=true shows 'Floor vote'", async () => {
     const binaryAdmin: MotionDetail[] = [
       {
         ...motions[0],
@@ -2309,7 +2309,7 @@ describe("AGMReportView", () => {
       },
     ];
     const { csv } = await captureMotionCSV(binaryAdmin);
-    expect(csv).toContain('"Admin"');
+    expect(csv).toContain('"Floor vote"');
     expect(csv).toContain('"For"');
   });
 

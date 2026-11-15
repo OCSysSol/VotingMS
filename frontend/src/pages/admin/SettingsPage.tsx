@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, testSmtpConfig, getSmsConfig, updateSmsConfig, testSmsConfig } from "../../api/config";
+import { getAdminConfig, updateAdminConfig, uploadLogo, uploadFavicon, getSmtpConfig, updateSmtpConfig, updateSmtpDelivery, testSmtpConfig, getSmsConfig, updateSmsConfig, testSmsConfig } from "../../api/config";
 import type { TenantConfig, SmsConfigOut, SmsProvider } from "../../api/config";
 import { listAdminUsers, inviteAdminUser, removeAdminUser } from "../../api/users";
 import type { AdminUser } from "../../api/users";
@@ -42,6 +42,9 @@ export default function SettingsPage() {
   const [smtpFromEmail, setSmtpFromEmail] = useState("");
   const [smtpPassword, setSmtpPassword] = useState("");
   const [smtpPasswordIsSet, setSmtpPasswordIsSet] = useState(false);
+  const [emailDeliveryEnabled, setEmailDeliveryEnabled] = useState(true);
+  const [isUpdatingEmailDelivery, setIsUpdatingEmailDelivery] = useState(false);
+  const [emailDeliveryError, setEmailDeliveryError] = useState("");
   const [isSmtpUnconfigured, setIsSmtpUnconfigured] = useState(false);
   const [isSmtpSaving, setIsSmtpSaving] = useState(false);
   const [smtpSaveSuccess, setSmtpSaveSuccess] = useState(false);
@@ -79,6 +82,7 @@ export default function SettingsPage() {
   const [isTestingSms, setIsTestingSms] = useState(false);
   const [smsTestPhone, setSmsTestPhone] = useState("");
   const [smsTestResult, setSmsTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [showTestSmsModal, setShowTestSmsModal] = useState(false);
 
   // User management state
   const hasFetchedUsers = useRef(false);
@@ -133,6 +137,7 @@ export default function SettingsPage() {
         setSmtpUsername(smtp.smtp_username);
         setSmtpFromEmail(smtp.smtp_from_email);
         setSmtpPasswordIsSet(smtp.password_is_set);
+        setEmailDeliveryEnabled(smtp.email_delivery_enabled ?? true);
         const isUnconfigured = !smtp.smtp_host || !smtp.smtp_username || !smtp.smtp_from_email || !smtp.password_is_set;
         setIsSmtpUnconfigured(isUnconfigured);
 
@@ -293,6 +298,23 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleEmailDeliveryToggle(enabled: boolean) {
+    const previous = emailDeliveryEnabled;
+    setEmailDeliveryEnabled(enabled);
+    setEmailDeliveryError("");
+    setIsUpdatingEmailDelivery(true);
+    try {
+      const updated = await updateSmtpDelivery(enabled);
+      setEmailDeliveryEnabled(updated.email_delivery_enabled);
+    } catch (err) {
+      setEmailDeliveryEnabled(previous);
+      const message = err instanceof Error ? err.message : "Failed to update email delivery.";
+      setEmailDeliveryError(message);
+    } finally {
+      setIsUpdatingEmailDelivery(false);
+    }
+  }
+
   async function handleSmtpTest() {
     setShowTestEmailModal(false);
     setSmtpTestResult(null);
@@ -355,6 +377,7 @@ export default function SettingsPage() {
   }
 
   async function handleSmsTest() {
+    setShowTestSmsModal(false);
     setSmsTestResult(null);
     setIsTestingSms(true);
     try {
@@ -367,6 +390,27 @@ export default function SettingsPage() {
       setIsTestingSms(false);
       setSmsTestPhone("");
     }
+  }
+
+  function closeTestSmsModal() {
+    setShowTestSmsModal(false);
+    setSmsTestPhone("");
+  }
+
+  function isSmsProviderConfiguredForTest(): boolean {
+    if (smsProvider === "smtp2go") {
+      return smtp2goApiKeyIsSet && Boolean(smtp2goSenderNumber.trim());
+    }
+    if (smsProvider === "twilio") {
+      return Boolean(twilioAccountSid.trim()) && twilioAuthTokenIsSet && Boolean(twilioFromNumber.trim());
+    }
+    if (smsProvider === "clicksend") {
+      return Boolean(clicksendUsername.trim()) && clicksendApiKeyIsSet && Boolean(clicksendFromNumber.trim());
+    }
+    if (smsProvider === "webhook") {
+      return Boolean(webhookUrl.trim());
+    }
+    return false;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -801,6 +845,35 @@ export default function SettingsPage() {
               <p className="admin-card__title">Mail Server</p>
             </div>
             <div className="admin-card__body">
+              <div className="field">
+                <label className="field__label" htmlFor="email-delivery-enabled">
+                  <input
+                    id="email-delivery-enabled"
+                    type="checkbox"
+                    checked={emailDeliveryEnabled}
+                    disabled={isUpdatingEmailDelivery}
+                    onChange={(e) => { void handleEmailDeliveryToggle(e.target.checked); }}
+                    style={{ marginRight: 8 }}
+                  />
+                  Email delivery
+                </label>
+                <p
+                  className="field__hint"
+                  style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: "0.75rem" }}
+                >
+                  Controls actual SMTP delivery for OTP and results emails. This is separate
+                  from the Email verification channel setting. Testing deployments reset
+                  this setting when the server starts.
+                </p>
+                {!emailDeliveryEnabled && (
+                  <div className="warning-banner" role="alert">
+                    Email delivery is disabled. OTP and results emails will not be sent.
+                  </div>
+                )}
+                {emailDeliveryError && (
+                  <p className="field__error" role="alert">{emailDeliveryError}</p>
+                )}
+              </div>
               {isSmtpUnconfigured && (
                 <div className="warning-banner" role="alert">
                   ⚠️ Mail server is not configured — emails will not be sent until SMTP settings are saved.
@@ -901,7 +974,7 @@ export default function SettingsPage() {
                   <button
                     type="button"
                     className="btn btn--secondary"
-                    disabled={isTestingSmtp || isSmtpUnconfigured}
+                    disabled={isTestingSmtp || isSmtpUnconfigured || !emailDeliveryEnabled}
                     onClick={() => { setSmtpTestResult(null); setShowTestEmailModal(true); }}
                   >
                     {isTestingSmtp ? "Sending…" : "Send test email"}
@@ -1103,42 +1176,29 @@ export default function SettingsPage() {
                 </p>
               )}
 
-              <button
-                type="submit"
-                className="btn btn--primary"
-                data-testid="sms-save-btn"
-                disabled={isSmsSaving}
-              >
-                {isSmsSaving ? "Saving…" : "Save"}
-              </button>
-            </form>
-
-            {smsEnabled && (
-              <div style={{ marginTop: 24 }}>
-                <p className="admin-card__title" style={{ marginBottom: 12 }}>Send test SMS</p>
-                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
-                  <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-                    <label className="field__label" htmlFor="sms-test-phone">Phone number</label>
-                    <input
-                      id="sms-test-phone"
-                      className="field__input"
-                      type="tel"
-                      value={smsTestPhone}
-                      onChange={(e) => setSmsTestPhone(e.target.value)}
-                      placeholder="+61412345678"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    className="btn btn--secondary"
-                    disabled={isTestingSms || !smsTestPhone}
-                    onClick={() => { void handleSmsTest(); }}
-                  >
-                    {isTestingSms ? "Sending…" : "Send test SMS"}
-                  </button>
-                </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  type="submit"
+                  className="btn btn--primary"
+                  data-testid="sms-save-btn"
+                  disabled={isSmsSaving}
+                >
+                  {isSmsSaving ? "Saving…" : "Save"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--secondary"
+                  disabled={isTestingSms || !smsEnabled || !isSmsProviderConfiguredForTest()}
+                  onClick={() => {
+                    setSmsTestResult(null);
+                    setSmsTestPhone("");
+                    setShowTestSmsModal(true);
+                  }}
+                >
+                  {isTestingSms ? "Sending…" : "Send test SMS"}
+                </button>
               </div>
-            )}
+            </form>
           </div>
         </div>
       </div>
@@ -1360,6 +1420,53 @@ export default function SettingsPage() {
                 className="btn btn--primary"
                 disabled={!testEmailRecipient || isTestingSmtp}
                 onClick={() => { void handleSmtpTest(); }}
+              >
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Test SMS modal */}
+      {showTestSmsModal && (
+        <div
+          className="dialog-overlay"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="test-sms-modal-title"
+          onKeyDown={(e) => { if (e.key === "Escape") closeTestSmsModal(); }}
+          onClick={(e) => { if (e.target === e.currentTarget) closeTestSmsModal(); }}
+        >
+          <div className="dialog">
+            <h2 id="test-sms-modal-title" className="dialog__title">Send test SMS</h2>
+            <div className="dialog__body">
+              <div className="field">
+                <label className="field__label" htmlFor="test-sms-recipient">Recipient phone number</label>
+                <input
+                  id="test-sms-recipient"
+                  className="field__input"
+                  type="tel"
+                  value={smsTestPhone}
+                  onChange={(e) => setSmsTestPhone(e.target.value)}
+                  placeholder="+61412345678"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="dialog__actions">
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={closeTestSmsModal}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={!smsTestPhone.trim() || isTestingSms}
+                onClick={() => { void handleSmsTest(); }}
               >
                 Send
               </button>

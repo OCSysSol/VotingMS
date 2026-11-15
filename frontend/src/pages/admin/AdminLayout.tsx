@@ -28,7 +28,7 @@ function NavContent({ onNavClick, isServerAdmin }: { onNavClick?: () => void; is
             }
             onClick={onNavClick}
           >
-            Buildings
+            OC Plans
           </NavLink>
         </li>
         <li className="admin-nav__item">

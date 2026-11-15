@@ -55,7 +55,7 @@ class BuildingOut(BaseModel):
 class BuildingCreate(BaseModel):
     name: str = Field(..., max_length=255)
     manager_email: str = Field(..., max_length=254)
-    oc_plan_number: str | None = Field(default=None, max_length=100)
+    oc_plan_number: str = Field(..., max_length=100)
 
     @field_validator("name")
     @classmethod
@@ -73,11 +73,11 @@ class BuildingCreate(BaseModel):
 
     @field_validator("oc_plan_number")
     @classmethod
-    def oc_plan_number_strip(cls, v: str | None) -> str | None:
-        if v is not None:
-            stripped = v.strip()
-            return stripped if stripped else None
-        return None
+    def oc_plan_number_strip(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("oc_plan_number must not be empty")
+        return stripped
 
 
 class BuildingUpdate(BaseModel):
@@ -178,11 +178,41 @@ class LotOwnerOut(BaseModel):
         ]
 
 
+class LotProxyInput(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
+class LotPersonInput(BaseModel):
+    email: str = Field(..., max_length=254)
+    given_name: str | None = Field(default=None, max_length=255)
+    surname: str | None = Field(default=None, max_length=255)
+    phone_number: str | None = Field(default=None, max_length=20)
+
+    @field_validator("email")
+    @classmethod
+    def email_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("email must not be empty")
+        return v
+
+
 class LotOwnerCreate(BaseModel):
     lot_number: str = Field(..., max_length=255)
     unit_entitlement: int
     financial_position: str = "normal"
     emails: list[str] = []
+    owners: list[LotPersonInput] = []
+    proxy: LotProxyInput | None = None
     given_name: str | None = Field(default=None, max_length=255)
     surname: str | None = Field(default=None, max_length=255)
 
@@ -495,6 +525,7 @@ class GeneralMeetingListItem(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID
     building_name: str
+    oc_plan_number: str | None = None
     title: str
     status: str
     meeting_at: datetime
@@ -592,6 +623,7 @@ class MotionDetail(BaseModel):
     option_limit: int | None = None
     options: list[MotionOptionOut] = []
     voting_closed_at: datetime | None = None
+    closed_by_meeting: bool = False
     tally: MotionTally
     voter_lists: MotionVoterLists
 
@@ -605,6 +637,7 @@ class GeneralMeetingDetail(BaseModel):
     id: uuid.UUID
     building_id: uuid.UUID | None = None
     building_name: str
+    oc_plan_number: str | None = None
     title: str
     status: str
     meeting_at: datetime
@@ -633,6 +666,17 @@ class GeneralMeetingCloseOut(BaseModel):
     id: uuid.UUID
     status: str
     closed_at: datetime
+    voting_closes_at: datetime
+
+
+class GeneralMeetingReopenRequest(BaseModel):
+    voting_closes_at: datetime
+
+
+class GeneralMeetingReopenOut(BaseModel):
+    id: uuid.UUID
+    status: str
+    closed_at: datetime | None
     voting_closes_at: datetime
 
 

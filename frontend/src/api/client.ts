@@ -61,3 +61,26 @@ export async function apiFetchVoid(
     throw new Error(`HTTP ${response.status}: ${text}`);
   }
 }
+
+/** Fetch a binary response while preserving the same auth/error conventions. */
+export async function apiFetchBlob(
+  path: string,
+  options?: RequestInit
+): Promise<Blob> {
+  const { headers: _headers, ...restOptions } = options ?? {};
+  const response = await fetch(`${BASE_URL}${path}`, {
+    headers: {
+      "X-Requested-With": "XMLHttpRequest",
+      ...(_headers ?? {}),
+    },
+    credentials: "include",
+    ...restOptions,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`HTTP ${response.status}: ${text}`);
+  }
+
+  return response.blob();
+}

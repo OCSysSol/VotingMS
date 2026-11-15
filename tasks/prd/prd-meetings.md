@@ -134,20 +134,20 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 
 ---
 
-### US-007: Close meeting and send results report
+### US-007: Close meeting and manage results report delivery
 
-**Status:** ✅ Implemented
+**Status:** Close flow implemented; manual-send requirement proposed
 
-**Description:** As a meeting manager, I want to close voting and receive a results report so I can record the meeting outcome.
+**Description:** As a meeting manager, I want to close voting and decide when to send the results report so I can review the meeting outcome before distribution.
 
 **Acceptance Criteria:**
 
 - [ ] Manager can close an open meeting via a "Close Voting" button in the admin portal
 - [ ] On close: meeting status changes to "closed"; all voting inputs are disabled for lot owners; all remaining draft votes are discarded and those voters are recorded as absent
-- [ ] System attempts to send one HTML email to the manager email address stored against the building
-- [ ] If send fails, the system retries with exponential backoff up to a maximum of 30 attempts; retry schedule and outcomes are logged using OTEL-compliant structured logging
-- [ ] If all 30 retries are exhausted, the admin portal displays a clear, persistent error banner: "Results report could not be delivered to [email]. Please retry manually or download the report."
-- [ ] A "Retry Send" button resets and restarts the retry sequence for any meeting whose report failed to deliver
+- [ ] Closing a meeting does not automatically send a report or start a delivery retry sequence
+- [ ] An admin explicitly triggers sending from the closed meeting page; the system then sends one HTML email to the manager email address stored against the building
+- [ ] After the admin triggers sending, failures retry with exponential backoff up to a maximum of 30 attempts; retry schedule and outcomes are logged using structured logging
+- [ ] If all retries are exhausted, the admin portal displays a clear persistent error and allows the admin to trigger another send
 - [ ] The report (viewable in-app and sent by email) includes a summary and, for each motion: motion title and description, total Yes/No/Abstained/Absent (voter count + weighted unit entitlements), not-eligible counts for in-arrear lots, per-option tallies for multi-choice motions
 - [ ] Voter lists show **lot numbers and individual entitlements** (not email addresses) to protect privacy; one row per lot
 - [ ] Host can export the full voter breakdown as a CSV file via an "Export voter lists (CSV)" button
@@ -417,4 +417,65 @@ This document covers the full lifecycle of a General Meeting: creation, pending/
 - No `pending` → `closed` direct transition (a meeting must pass through `open` first, even if only transiently during a cold start)
 - No voter notification when a pending meeting opens
 - No editing of meeting title or meeting date/time (`meeting_at`) after creation
-- Reopening a per-motion-closed motion is not supported (irreversible once closed)
+
+### US-MTG-OC-01: Show and search OC Plans in meetings
+
+**Status:** Proposed
+
+- [ ] The General Meetings table displays separate “OC Plan” and “Building Name” columns.
+- [ ] The search filter matches case-insensitive text in OC Plan number and building name (and retains meeting title matching, if present). List and count endpoints use consistent filters.
+
+### US-MTG-REOPEN-01: Reopen a closed meeting
+
+**Status:** Proposed
+
+- [ ] Admins can reopen a closed meeting from its detail page after explicit confirmation and must set a new voting close time later than now and meeting start.
+- [ ] Reopening allows voter and admin vote entry. Existing submitted votes remain unchanged; absent ballot submissions created during close are removed.
+- [ ] Clear only motion close times applied by meeting closure; motions individually closed beforehand stay closed.
+- [ ] Reopen and subsequent close do not send reports automatically. A closed or pending meeting cannot be reopened; return a clear conflict.
+
+### US-MTG-ARCHIVE-02: Expose meeting archive controls
+
+**Status:** Backend, archived filtering, and list-row controls already exist; expose the same capability from the meeting detail page.
+
+**Description:** As a meeting admin, I want to archive a retained closed meeting from the page where I manage that meeting, and unarchive an archived meeting, so archival is discoverable without returning to the meetings list.
+
+**Acceptance Criteria:**
+
+- [ ] A closed, non-archived meeting detail page shows an `Archive Meeting` action alongside the other meeting actions.
+- [ ] Pending and open meetings do not show the archive action; repeated/archive-invalid states remain protected by the existing authenticated backend endpoint.
+- [ ] Activating `Archive Meeting` opens an explicit confirmation explaining that the meeting will be hidden from the active meetings list and retained for audit.
+- [ ] Confirming calls `POST /api/admin/general-meetings/{id}/archive`, invalidates detail and list queries, keeps the user on the meeting detail page, and shows an `Archived` status indicator plus an `Unarchive Meeting` action.
+- [ ] An archived meeting detail page shows `Archived` and allows `Unarchive Meeting` via `POST /api/admin/general-meetings/{id}/unarchive`; the action refreshes both detail and list data.
+- [ ] Archive errors are shown accessibly on the detail page, and action buttons expose pending/disabled state while the request is in flight.
+- [ ] The frontend `GeneralMeetingDetail` contract includes the `is_archived` boolean already returned by the backend.
+- [ ] Existing archive/unarchive list controls, archived list filtering, authorization, and API behavior remain unchanged.
+- [ ] Component/E2E coverage verifies action visibility, confirmation/cancel, successful archive state, unarchive, API failure, and non-admin rejection through the existing protected endpoint.
+
+### US-MTG-OC-DETAIL-01: Meeting subtitle includes linked OC Plan
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the meeting subtitle to show both the building name and its OC Plan, with the OC Plan linking to the OC Plan page, so I can quickly move between the meeting and its primary entity.
+
+**Acceptance Criteria:**
+
+- [ ] The meeting detail page shows a subtitle beneath the meeting title containing the building name.
+- [ ] When an OC Plan number exists, the subtitle also shows the OC Plan and links it to `/admin/buildings/{building_id}`.
+- [ ] The link is keyboard accessible and names the OC Plan it opens.
+- [ ] If the OC Plan is absent, the subtitle shows the building name without a dangling separator or empty link.
+- [ ] The meeting detail API returns nullable `oc_plan_number`; no migration is required.
+
+### US-MTG-UI-02: Left-align meeting, OC Plan, and owner search
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the search controls on the Meetings, OC Plans, and owner lists to share a left-aligned layout so the filter rows are consistent.
+
+**Acceptance Criteria:**
+
+- [ ] Each search input is the first control at the left edge of its filter row.
+- [ ] Meetings keeps one search across meeting title, OC Plan, and building; Status follows the search.
+- [ ] OC Plans keeps Search followed by Show archived; the New OC Plan action remains available.
+- [ ] The owner list search is left-aligned beneath the OC Plan actions.
+- [ ] No search control relies on right alignment or an auto margin.

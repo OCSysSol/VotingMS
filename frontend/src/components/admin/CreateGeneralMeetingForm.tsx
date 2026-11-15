@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { createGeneralMeeting } from "../../api/admin";
 import type { GeneralMeetingOut, GeneralMeetingCreateRequest } from "../../api/admin";
 import MotionEditor, { type MotionFormEntry } from "./MotionEditor";
@@ -11,8 +11,9 @@ import { formatApiErrorMessage, MOTION_LIMITS } from "../../utils/validation";
 
 export default function CreateGeneralMeetingForm() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
-  const [buildingId, setBuildingId] = useState("");
+  const [buildingId, setBuildingId] = useState(() => searchParams.get("building") ?? "");
   const [title, setTitle] = useState("");
   const [meetingAt, setMeetingAt] = useState("");
   const [votingClosesAt, setVotingClosesAt] = useState("");
@@ -29,7 +30,7 @@ export default function CreateGeneralMeetingForm() {
     e.preventDefault();
     setFormError(null);
 
-    if (!buildingId) { setFormError("Please select a building."); return; }
+    if (!buildingId) { setFormError("Please select an OC Plan."); return; }
     if (!title.trim()) { setFormError("Title is required."); return; }
     if (!meetingAt) { setFormError("Meeting date/time is required."); return; }
     if (!votingClosesAt) { setFormError("Voting close date/time is required."); return; }
@@ -120,12 +121,16 @@ export default function CreateGeneralMeetingForm() {
         <span aria-hidden="true">*</span> Required field
       </p>
       <div className="field">
-        <label className="field__label field__label--required" htmlFor="agm-building">Building</label>
+        <label className="field__label field__label--required" htmlFor="agm-building">OC Plan</label>
         <BuildingSearchCombobox
           id="agm-building"
           value={buildingId}
           onChange={(id) => setBuildingId(id)}
-          placeholder="Search buildings"
+          placeholder="Search OC Plans"
+          displayLabel={(building) => building.oc_plan_number?.trim() || building.name}
+          listboxLabel="OC Plans"
+          clearLabel="Clear selection"
+          emptyLabel="No OC Plans found"
         />
       </div>
 

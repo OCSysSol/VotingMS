@@ -202,6 +202,52 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 
 ---
 
+### US-SMTP-07: Admin can suppress email delivery for testing without deleting SMTP settings
+
+**Status:** ✅ Implemented — branch: `codex/otp-email-delivery-toggle`
+
+**Description:** As an admin, I want to enable or disable actual email delivery from the Mail Server settings so that human UAT can send real email when needed, while automated testing can run without making any SMTP calls.
+
+**Acceptance Criteria:**
+
+- [ ] The Email Server tab contains an "Email delivery" toggle alongside the existing SMTP configuration fields.
+- [ ] The toggle is saved independently through a dedicated admin API and does not require resubmitting or deleting stored SMTP credentials.
+- [ ] When email delivery is disabled, OTP emails, results reports, pending-report retries, and SMTP test emails make no SMTP calls.
+- [ ] Disabling email delivery does not remove Email from the voter's enabled OTP channels; request-OTP continues to generate the OTP and returns the existing enumeration-safe response.
+- [ ] When email delivery is enabled, existing SMTP behaviour is unchanged.
+- [ ] On every application startup, `TESTING_MODE=true` sets email delivery to disabled and `TESTING_MODE=false` sets it to enabled. A cold start may therefore undo a temporary manual UAT change.
+- [ ] When `TESTING_MODE=true` and email delivery is disabled, the latest-OTP retrieval endpoint is available only to authenticated admins.
+- [ ] The latest-OTP retrieval endpoint is unavailable when email delivery is enabled or when `TESTING_MODE=false`.
+- [ ] The Settings page clearly distinguishes "Email delivery" from the existing "Email verification" channel toggle and warns when delivery is disabled.
+- [ ] The "Send test email" action is disabled while email delivery is off.
+- [ ] Automated E2E tests retrieve OTPs using the authenticated admin API and do not trigger SMTP.
+- [ ] Backend and frontend tests pass at the repository's required coverage threshold.
+- [ ] Typecheck and lint pass.
+
+---
+
+### US-SMTP-08: Attach the complete voting-results PDF to the summary email
+
+**Status:** ✅ Implemented — branch: `codex/meeting-summary-pdf-oc-plan-fixes`, committed 2026-11-14
+
+**Description:** As a meeting host, I want the summary email to include a complete voting-results PDF so recipients have a durable offline record of all tallies and voter details.
+
+**Acceptance Criteria:**
+
+- [x] Every successful summary-report send attaches a PDF generated from the same meeting-detail data used by the admin results view.
+- [x] The email remains multipart and keeps the existing HTML body plus a PDF attachment with an `application/pdf` content type and a safe, descriptive filename.
+- [x] The PDF contains all information required by `US-PDF-DL-01`, including voter-level details and `Floor vote` labels for admin-entered ballots.
+- [x] PDF generation happens from authoritative meeting/vote data at send time; no object-storage copy is required for the initial implementation.
+- [x] SMTP retries regenerate the attachment from current closed-meeting data and continue to use the existing delivery record/advisory-lock deduplication.
+- [x] PDF generation failures are surfaced through the existing email delivery error/retry state rather than sending an email without the required attachment.
+- [x] A test inspects the constructed MIME message and verifies that both an HTML part and a PDF attachment are present.
+- [x] All tests pass at 100% coverage.
+- [ ] Typecheck/lint passes.
+
+**Storage recommendation:** Generate PDFs on demand from the database while the report is needed. The database remains the source of truth, avoiding stale duplicated files and avoiding an unauthenticated public object URL for sensitive voter data. If legal or audit requirements later need an immutable copy of each delivered email, archive that exact PDF to a private bucket with tenant-scoped metadata, checksum, retention policy, and short-lived signed access; do not use the existing public Blob upload helper for this report.
+
+---
+
 ### US-006: Sync lot owner data from PropertyIQ
 
 **Status:** 🔄 Partial — PropertyIQ API credentials pending
@@ -373,3 +419,41 @@ This document covers cross-cutting platform concerns: tenant branding configurat
 - No role hierarchy for admin users (flat --- any admin can invite or remove others)
 - No self-removal (the current admin's Remove button is hidden, not merely disabled)
 - No per-building OTP channel configuration (one global toggle per tenant)
+
+### US-OTP-SMTP-OBS-01: Improve request-OTP SMTP diagnostics
+
+**Status:** Proposed (failure logging exists; broaden structured lifecycle coverage)
+
+- [x] Add structured events for OTP request receipt, selected channel, delivery attempt start, success/failure, and elapsed time.
+- [x] Correlate events by request/meeting ID without logging OTP codes, SMTP passwords, full email addresses, or message bodies.
+- [x] Log failures with a sanitized provider category and detail. Per US-OTP-DELIVERY-01, keep the API and voter UI indistinguishable for known and unknown addresses.
+
+### US-SMS-UI-01: Test SMS uses the same interaction as test email
+
+**Status:** Proposed
+
+**Description:** As an admin, I want the Test SMS flow to match Test Email so that both SMS and email configuration can be verified through the same predictable modal workflow.
+
+**Acceptance Criteria:**
+
+- [ ] The SMS form action row contains `Save` and `Send test SMS`, matching the Mail Server action layout.
+- [ ] `Send test SMS` opens a modal with a `Recipient phone number` field and `Cancel` / `Send` actions.
+- [ ] Escape, overlay click, and Cancel close the modal.
+- [ ] Send is disabled for an empty number or while a request is in flight.
+- [ ] Success and delivery errors appear in the SMS form after the modal closes.
+- [ ] The trigger is disabled when provider-level SMS is off or the selected provider is not fully configured.
+- [ ] The old inline test SMS panel is removed.
+
+### US-SMS-TESTMODE-01: SMS provider enablement follows TESTING_MODE
+
+**Status:** Proposed
+
+**Description:** As an operator, I want the provider-level SMS toggle to reset from `TESTING_MODE` exactly as Email delivery does, so test deployments do not attempt real SMS delivery after a cold start.
+
+**Acceptance Criteria:**
+
+- [ ] On application startup, `TESTING_MODE=true` persists provider-level `sms_enabled=false`.
+- [ ] On application startup, `TESTING_MODE=false` persists provider-level `sms_enabled=true`.
+- [ ] The reset mirrors `email_delivery_enabled`; an admin can still toggle the setting in the running process.
+- [ ] The voter-channel `otp_sms_enabled` setting is unchanged by this reset.
+- [ ] Startup remains sequential and uses the existing transient database retry policy.

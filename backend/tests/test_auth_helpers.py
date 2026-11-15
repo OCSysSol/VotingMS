@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import (
@@ -28,6 +29,7 @@ from app.models import (
     LotOwner,
     LotProxy,
     Motion,
+    MotionOption,
     Vote,
     VoteChoice,
     VoteStatus,
@@ -247,6 +249,115 @@ class TestResolveVoterState:
         lot_info = result["lots"][0]
         assert str(motions[0].id) in [str(mid) for mid in lot_info.voted_motion_ids]
         assert str(motions[1].id) not in [str(mid) for mid in lot_info.voted_motion_ids]
+
+    async def test_submitted_votes_include_exact_choice_and_exclude_drafts(
+        self, db_session: AsyncSession, basic_setup: dict
+    ):
+        """LotInfo exposes the exact submitted choice for each motion, never drafts."""
+        agm = basic_setup["agm"]
+        building = basic_setup["building"]
+        lo = basic_setup["lot_owner"]
+        motions = basic_setup["motions"]
+
+        db_session.add_all([
+            Vote(
+                general_meeting_id=agm.id,
+                lot_owner_id=lo.id,
+                motion_id=motions[0].id,
+                choice=VoteChoice.no,
+                status=VoteStatus.submitted,
+                voter_email=basic_setup["voter_email"],
+            ),
+            Vote(
+                general_meeting_id=agm.id,
+                lot_owner_id=lo.id,
+                motion_id=motions[1].id,
+                choice=VoteChoice.yes,
+                status=VoteStatus.draft,
+                voter_email=basic_setup["voter_email"],
+            ),
+        ])
+        await db_session.flush()
+
+        result = await _resolve_voter_state(
+            db=db_session,
+            voter_email=basic_setup["voter_email"],
+            general_meeting_id=agm.id,
+            building_id=building.id,
+        )
+        submitted = result["lots"][0].submitted_votes
+
+        assert len(submitted) == 1
+        assert submitted[0].motion_id == motions[0].id
+        assert submitted[0].choice == VoteChoice.no
+        assert submitted[0].option_choices == {}
+
+    async def test_submitted_votes_group_multi_choice_options(
+        self, db_session: AsyncSession, basic_setup: dict
+    ):
+        """Per-option multi-choice rows become one selected choice with an option map."""
+        agm = basic_setup["agm"]
+        building = basic_setup["building"]
+        lo = basic_setup["lot_owner"]
+        motion = basic_setup["motions"][0]
+        motion.is_multi_choice = True
+        db_session.add_all([
+            MotionOption(
+                motion_id=motion.id,
+                text="Option A",
+                display_order=1,
+            ),
+            MotionOption(
+                motion_id=motion.id,
+                text="Option B",
+                display_order=2,
+            ),
+        ])
+        await db_session.flush()
+        options = (
+            await db_session.execute(
+                select(MotionOption)
+                .where(MotionOption.motion_id == motion.id)
+                .order_by(MotionOption.display_order)
+            )
+        ).scalars().all()
+
+        db_session.add_all([
+            Vote(
+                general_meeting_id=agm.id,
+                lot_owner_id=lo.id,
+                motion_id=motion.id,
+                motion_option_id=options[0].id,
+                choice=VoteChoice.selected,
+                status=VoteStatus.submitted,
+                voter_email=basic_setup["voter_email"],
+            ),
+            Vote(
+                general_meeting_id=agm.id,
+                lot_owner_id=lo.id,
+                motion_id=motion.id,
+                motion_option_id=options[1].id,
+                choice=VoteChoice.against,
+                status=VoteStatus.submitted,
+                voter_email=basic_setup["voter_email"],
+            ),
+        ])
+        await db_session.flush()
+
+        result = await _resolve_voter_state(
+            db=db_session,
+            voter_email=basic_setup["voter_email"],
+            general_meeting_id=agm.id,
+            building_id=building.id,
+        )
+        submitted = result["lots"][0].submitted_votes
+
+        assert len(submitted) == 1
+        assert submitted[0].choice == VoteChoice.selected
+        assert submitted[0].option_choices == {
+            str(options[0].id): "for",
+            str(options[1].id): "against",
+        }
 
     # --- Boundary values ---
 

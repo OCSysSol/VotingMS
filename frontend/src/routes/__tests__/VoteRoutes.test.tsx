@@ -34,7 +34,7 @@ describe("VoteRoutes", () => {
   it("renders BuildingSelectPage at /", async () => {
     renderRoutes("/");
     await waitFor(() => {
-      expect(screen.getByLabelText("Select your building")).toBeInTheDocument();
+      expect(screen.getByLabelText("Select your OC")).toBeInTheDocument();
     });
   });
 

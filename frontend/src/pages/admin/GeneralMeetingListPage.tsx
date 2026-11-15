@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -11,7 +11,6 @@ import type { GeneralMeetingListItem } from "../../api/admin";
 import GeneralMeetingTable from "../../components/admin/GeneralMeetingTable";
 import type { SortDir } from "../../components/admin/SortableColumnHeader";
 import Pagination from "../../components/admin/Pagination";
-import BuildingSearchCombobox from "../../components/admin/BuildingSearchCombobox";
 import ConfirmDialog from "../../components/admin/ConfirmDialog";
 
 const PAGE_SIZE = 20;
@@ -19,6 +18,7 @@ const PAGE_SIZE = 20;
 // Text columns default to asc, date columns default to desc
 const DEFAULT_SORT_DIR: Record<string, SortDir> = {
   title: "asc",
+  oc_plan_number: "asc",
   building_name: "asc",
   created_at: "desc",
 };
@@ -27,8 +27,10 @@ export default function GeneralMeetingListPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const selectedBuildingId = searchParams.get("building") ?? "";
   const selectedStatus = searchParams.get("status") ?? "";
+  const meetingSearch = searchParams.get("name") ?? "";
+  const [meetingSearchInput, setMeetingSearchInput] = useState(meetingSearch);
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [showArchived, setShowArchived] = useState(false);
   const [archiveTarget, setArchiveTarget] = useState<GeneralMeetingListItem | null>(null);
@@ -43,16 +45,26 @@ export default function GeneralMeetingListPage() {
   const sortBy = searchParams.get("sort_by") ?? "created_at";
   const sortDir = (searchParams.get("sort_dir") ?? "desc") as SortDir;
 
-  function handleBuildingChange(id: string) {
-    const next = new URLSearchParams(searchParams);
-    if (id) {
-      next.set("building", id);
-    } else {
-      next.delete("building");
-    }
-    next.delete("page");
-    setSearchParams(next);
+  function handleMeetingSearchChange(value: string) {
+    setMeetingSearchInput(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      const trimmed = value.trim();
+      if (trimmed) next.set("name", trimmed);
+      else next.delete("name");
+      next.delete("page");
+      setSearchParams(next, { replace: true });
+    }, 300);
   }
+
+  useEffect(() => {
+    setMeetingSearchInput(meetingSearch);
+  }, [meetingSearch]);
+
+  useEffect(() => () => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+  }, []);
 
   function handleShowArchivedChange(checked: boolean) {
     setShowArchived(checked);
@@ -91,12 +103,12 @@ export default function GeneralMeetingListPage() {
   }
 
   const { data: countData } = useQuery<{ count: number }>({
-    queryKey: ["admin", "general-meetings", "count", selectedBuildingId, selectedStatus, showArchived],
+    queryKey: ["admin", "general-meetings", "count", selectedStatus, showArchived, meetingSearch],
     queryFn: () =>
       getGeneralMeetingsCount({
-        building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
         is_archived: showArchived ? true : false,
+        name: meetingSearch || undefined,
       }),
   });
 
@@ -105,16 +117,16 @@ export default function GeneralMeetingListPage() {
   const safePage = Math.min(page, totalPages);
 
   const { data: meetings = [], isLoading, error } = useQuery<GeneralMeetingListItem[]>({
-    queryKey: ["admin", "general-meetings", "list", safePage, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
+    queryKey: ["admin", "general-meetings", "list", safePage, selectedStatus, showArchived, sortBy, sortDir, meetingSearch],
     queryFn: () =>
       listGeneralMeetings({
         limit: PAGE_SIZE,
         offset: (safePage - 1) * PAGE_SIZE,
-        building_id: selectedBuildingId || undefined,
         status: selectedStatus || undefined,
         is_archived: showArchived ? true : false,
         sort_by: sortBy,
         sort_dir: sortDir,
+        name: meetingSearch || undefined,
       }),
   });
 
@@ -123,20 +135,20 @@ export default function GeneralMeetingListPage() {
     const nextOffset = safePage * PAGE_SIZE;
     if (nextOffset < totalCount) {
       void queryClient.prefetchQuery({
-        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedBuildingId, selectedStatus, showArchived, sortBy, sortDir],
+        queryKey: ["admin", "general-meetings", "list", safePage + 1, selectedStatus, showArchived, sortBy, sortDir, meetingSearch],
         queryFn: () =>
           listGeneralMeetings({
             limit: PAGE_SIZE,
             offset: nextOffset,
-            building_id: selectedBuildingId || undefined,
             status: selectedStatus || undefined,
             is_archived: showArchived ? true : false,
             sort_by: sortBy,
             sort_dir: sortDir,
+            name: meetingSearch || undefined,
           }),
       });
     }
-  }, [safePage, selectedBuildingId, selectedStatus, showArchived, totalCount, queryClient, sortBy, sortDir]);
+  }, [safePage, selectedStatus, showArchived, totalCount, queryClient, sortBy, sortDir, meetingSearch]);
 
   function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     const value = e.target.value;
@@ -213,19 +225,19 @@ export default function GeneralMeetingListPage() {
       )}
       <div className="admin-card">
         <div className="admin-card__header">
-          <div style={{ display: "flex", gap: 16, alignItems: "flex-end" }}>
-            {/* Building search combobox */}
-            <div style={{ maxWidth: 280 }}>
-              <label className="field__label" htmlFor="building-combobox">Building</label>
-              <BuildingSearchCombobox
-                id="building-combobox"
-                value={selectedBuildingId}
-                onChange={(id) => handleBuildingChange(id)}
-                placeholder="All buildings"
+          <div style={{ display: "flex", width: "100%", gap: 16, alignItems: "flex-end", justifyContent: "flex-start" }}>
+            <div style={{ maxWidth: 320, flex: "1 1 280px" }}>
+              <label className="field__label" htmlFor="meeting-search">Search</label>
+              <input
+                id="meeting-search"
+                className="field__input"
+                type="search"
+                value={meetingSearchInput}
+                onChange={(e) => handleMeetingSearchChange(e.target.value)}
+                placeholder="Meeting, OC Plan, or building"
               />
             </div>
-
-            <div style={{ maxWidth: 180 }}>
+            <div style={{ maxWidth: 180, flex: "0 1 180px" }}>
               <label className="field__label" htmlFor="status-filter">Status</label>
               <select
                 id="status-filter"

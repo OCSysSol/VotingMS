@@ -24,6 +24,7 @@ import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { generateOcPlanNumber } from "./workflows/helpers";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -71,6 +72,7 @@ export const RUN_SUFFIX = getBranchSuffix();
 fs.writeFileSync(path.join(E2E_TESTS_DIR, ".run-suffix"), RUN_SUFFIX);
 
 export const E2E_BUILDING_NAME = `E2E Test Building-${RUN_SUFFIX}`;
+export const E2E_BUILDING_OC_PLAN = generateOcPlanNumber(E2E_BUILDING_NAME);
 export const E2E_LOT_NUMBER = "E2E-1";
 export const E2E_LOT_EMAIL = "e2e-voter@test.com";
 export const E2E_LOT_ENTITLEMENT = 10;
@@ -82,6 +84,7 @@ export const E2E_AGM_TITLE = `E2E Test AGM-${RUN_SUFFIX}`;
 // list (sorted by created_at DESC) — ensuring admin tests target this AGM
 // rather than the voting-test AGM.
 export const E2E_ADMIN_BUILDING_NAME = `E2E Admin Test Building-${RUN_SUFFIX}`;
+export const E2E_ADMIN_BUILDING_OC_PLAN = generateOcPlanNumber(E2E_ADMIN_BUILDING_NAME);
 
 const BYPASS_TOKEN = process.env.VERCEL_BYPASS_TOKEN;
 
@@ -254,16 +257,28 @@ export default async function globalSetup(_config: FullConfig) {
     const buildingsRes = await retryGet(
       `/api/admin/buildings?name=${encodeURIComponent(E2E_BUILDING_NAME)}`
     );
-    const buildings = (await buildingsRes.json()) as { id: string; name: string }[];
+    const buildings = (await buildingsRes.json()) as { id: string; name: string; oc_plan_number: string | null }[];
     // name filter is a substring match — use exact-name guard as safety net
     let building = buildings.find((b) => b.name === E2E_BUILDING_NAME) ?? null;
 
     if (!building) {
       const created = await api.post("/api/admin/buildings", {
-        data: { name: E2E_BUILDING_NAME, manager_email: "e2e-manager@test.com" },
+        data: {
+          name: E2E_BUILDING_NAME,
+          manager_email: "e2e-manager@test.com",
+          oc_plan_number: E2E_BUILDING_OC_PLAN,
+        },
         timeout: 60000,
       });
-      building = (await created.json()) as { id: string; name: string };
+      building = (await created.json()) as { id: string; name: string; oc_plan_number: string | null };
+    } else if (!building.oc_plan_number?.trim()) {
+      const patched = await api.patch(`/api/admin/buildings/${building.id}`, {
+        data: { oc_plan_number: E2E_BUILDING_OC_PLAN },
+        timeout: 60000,
+      });
+      if (!patched.ok()) {
+        throw new Error(`Failed to populate E2E OC Plan: ${await patched.text()}`);
+      }
     }
 
     // Ensure lot owner exists with the correct email.
@@ -381,15 +396,27 @@ export default async function globalSetup(_config: FullConfig) {
     const adminBuildingsRes = await retryGet(
       `/api/admin/buildings?name=${encodeURIComponent(E2E_ADMIN_BUILDING_NAME)}`
     );
-    const adminBuildings = (await adminBuildingsRes.json()) as { id: string; name: string }[];
+    const adminBuildings = (await adminBuildingsRes.json()) as { id: string; name: string; oc_plan_number: string | null }[];
     // name filter is a substring match — use exact-name guard as safety net
     let adminBuilding = adminBuildings.find((b) => b.name === E2E_ADMIN_BUILDING_NAME) ?? null;
     if (!adminBuilding) {
       const created = await api.post("/api/admin/buildings", {
-        data: { name: E2E_ADMIN_BUILDING_NAME, manager_email: "e2e-admin-mgr@test.com" },
+        data: {
+          name: E2E_ADMIN_BUILDING_NAME,
+          manager_email: "e2e-admin-mgr@test.com",
+          oc_plan_number: E2E_ADMIN_BUILDING_OC_PLAN,
+        },
         timeout: 60000,
       });
-      adminBuilding = (await created.json()) as { id: string; name: string };
+      adminBuilding = (await created.json()) as { id: string; name: string; oc_plan_number: string | null };
+    } else if (!adminBuilding.oc_plan_number?.trim()) {
+      const patched = await api.patch(`/api/admin/buildings/${adminBuilding.id}`, {
+        data: { oc_plan_number: E2E_ADMIN_BUILDING_OC_PLAN },
+        timeout: 60000,
+      });
+      if (!patched.ok()) {
+        throw new Error(`Failed to populate E2E admin OC Plan: ${await patched.text()}`);
+      }
     }
 
     // Add a placeholder lot owner so the building has at least one voter
