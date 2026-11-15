@@ -215,6 +215,24 @@ This document covers admin portal authentication, the admin in-person vote entry
 
 ---
 
+### US-AVE-04: Floor vote confirmation dialog shows detailed votes before confirming
+
+**Status:** ✅ Implemented
+
+**Description:** As an admin entering floor votes, I want the confirmation dialog to show a lot-by-lot breakdown of the new votes I am about to submit so I can verify every choice before confirming.
+
+**Acceptance Criteria:**
+
+- [ ] The confirmation dialog (`ConfirmDialog` in `AdminVoteEntryPanel`) groups entered/applicable votes in the current interaction by selected lot (`Lot {lot_number}` + optional `In arrear` indicator)
+- [ ] Previously recorded/locked prior votes (`priorVoteSourceByLotId`) are excluded from the confirmation breakdown
+- [ ] For binary motions, shows the selected choice (`For`, `Against`, or `Abstain`)
+- [ ] For multi-choice motions, shows per-option choices (`For`, `Against`, or `Abstain`) in option order when any option has a selection
+- [ ] For in-arrear lots on `general` or `multi_choice` motions (without a prior vote), shows `Not eligible`
+- [ ] If a selected lot has no new votes or `Not eligible` entries, displays `"No new votes selected for this lot."`
+- [ ] Preserves accessibility: initial focus on `Cancel`, Escape closes, backdrop click closes, Tab/Shift+Tab focus trap
+
+---
+
 ### US-AUIF-01: Admin vote entry respects multi-choice option limit
 
 **Status:** ✅ Implemented
@@ -673,12 +691,26 @@ This document covers admin portal authentication, the admin in-person vote entry
 - [x] The endpoint returns 404 for an unknown meeting, 409 for a meeting that is not closed, and 401/403 without an authenticated admin session.
 - [x] The button shows a loading state while the PDF is generated and an inline accessible error if generation/download fails.
 - [x] The download and email attachment are produced by the same backend PDF renderer and contain the same substantive voting data.
-- [x] The PDF includes meeting/OC Plan metadata, participation totals, every motion and resolution type, weighted/voter tallies, and voter-level details for binary and multi-choice motions.
-- [x] Admin-entered ballots display `Floor vote` in the user-facing email/source cell; the internal `admin` source sentinel is not shown.
+- [x] The PDF includes meeting/OC Plan metadata (timestamps in Melbourne time, `Australia/Melbourne` with `AEST`/`AEDT`), participation totals, every motion and resolution type, and weighted/voter tallies (vote counts and UOE sums) per option/category without individual voter or lot-by-lot vote breakdowns.
 - [x] The PDF handles empty categories, long motion/option text, and multi-page meetings without clipped or overlapping content.
 - [x] Admin PDF generation is rate-limited to prevent repeated CPU-intensive requests.
 - [x] All tests pass at 100% coverage.
 - [ ] Typecheck/lint passes.
+
+---
+
+### US-PDF-DL-02: Meeting summary PDF shows option vote counts only
+
+**Status:** ✅ Implemented
+
+**Description:** As a meeting admin, I want the meeting summary PDF to show only aggregate vote counts and entitlement sums per option/category without individual voter or lot-by-lot breakdowns, with all timestamps in Melbourne time.
+
+**Acceptance Criteria:**
+
+- [x] For binary motions, the PDF renders only the `Tally` table (`Category`, `Voter count`, `Entitlement (UOE)`); individual voter tables (`Lot`, `Voter / source`, `UOE`, `Submitted`) and `"No voter records"` empty states are omitted.
+- [x] For multi-choice motions, the PDF renders per-option tally tables (`For`, `For UOE`, `Against`, `Against UOE`, `Abstained`, `Abstained UOE`, `Outcome`) and a single `Motion-level summary` tally table for `Abstained`, `Absent`, and `Not eligible` counts/sums; no per-voter or lot-by-lot tables are rendered.
+- [x] All PDF timestamps (`Meeting time`, `Voting closes`, `Generated`) are formatted in Melbourne time (`Australia/Melbourne` via `zoneinfo.ZoneInfo`, displaying `AEST`/`AEDT`).
+- [x] All tests pass at 100% coverage on `report_pdf_service.py`.
 
 ---
 

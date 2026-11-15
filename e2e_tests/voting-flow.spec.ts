@@ -93,7 +93,7 @@ test.describe("Lot owner voting flow", () => {
 
     await page.goto("/");
 
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await combobox.fill(E2E_BUILDING_NAME);
     await page.getByRole("option", {
       name: formatVoterBuildingLabel(E2E_BUILDING_NAME),
@@ -138,7 +138,7 @@ test.describe("Lot owner voting flow", () => {
   test("AGM closed state: closed AGM shows View My Submission button", async ({ page }) => {
     await page.goto("/");
     // Select the E2E building — it has a closed AGM created in beforeAll
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await combobox.fill(E2E_BUILDING_NAME);
     await page.getByRole("option", {
       name: formatVoterBuildingLabel(E2E_BUILDING_NAME),

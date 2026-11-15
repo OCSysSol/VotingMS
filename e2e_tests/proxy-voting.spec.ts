@@ -218,7 +218,7 @@ test.describe("Proxy voter journey", () => {
       await page.goto("/");
 
       // Select the mixed-proxy building
-      const combobox = page.getByLabel("Select your building");
+      const combobox = page.getByLabel("Select your OC");
       await expect(combobox).toBeVisible();
       await combobox.fill(MIXED_BUILDING_NAME);
       await page.getByRole("option", {

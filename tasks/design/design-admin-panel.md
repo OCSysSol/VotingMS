@@ -417,3 +417,33 @@ None. Existing per-`Vote.voter_email` data is sufficient to expose accurate per-
 ## OC Plan meeting-list columns and navigation prefill
 
 Meeting list items need the joined `oc_plan_number`, and list/count filtering needs a shared search value across building name and OC plan (plus title if retained). From OC Plan detail, route to meeting creation with `building_id` and preselect that building in the form; no schema change.
+
+---
+
+## Meeting Summary PDF — Counts-Only & Melbourne Timezone (US-PDF-DL-02)
+
+In `backend/app/services/report_pdf_service.py`:
+- **Counts-only rendering:**
+  - `_append_binary_motion` renders only the `Tally` table (`["Category", "Voter count", "Entitlement (UOE)"]`). Individual voter tables (`["Lot", "Voter / source", "UOE", "Submitted"]`) and `"No voter records"` empty states are removed.
+  - `_append_multi_choice_motion` renders each option's heading and per-option tally table (`["For", "For UOE", "Against", "Against UOE", "Abstained", "Abstained UOE", "Outcome"]`), followed by a single `"Motion-level summary"` tally table (`["Category", "Voter count", "Entitlement (UOE)"]`) for `abstained`, `absent`, and `not_eligible` (defaulting counts/sums to `0`). Per-option voter tables and per-category voter tables are removed.
+  - Unused `_voter_rows()` and `format_voter_display()` helpers are removed.
+- **Melbourne timezone:**
+  - `_format_datetime` converts `datetime` values (treating naive datetimes as UTC first) to `zoneinfo.ZoneInfo("Australia/Melbourne")` and formats with `strftime("%d %b %Y, %H:%M %Z")` (producing `AEST` or `AEDT`).
+  - `Generated` timestamp uses `datetime.now(UTC)` converted via `_format_datetime`.
+
+---
+
+## Floor Vote Confirmation Dialog Details (US-AVE-04)
+
+In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx`:
+- Build `pendingSubmissionSummary` from `selectedLotsArr`, `visibleMotions`, `lotVotes`, and `priorVoteSourceByLotId`:
+  - For each selected lot (`isInArrear = lo.financial_position === "in_arrear"`):
+    - Iterate `visibleMotions` where `priorVoteSourceByLotId[lo.id]?.[motion.id]` is null/undefined (excluding already-recorded prior votes).
+    - If `isInArrear && (motion.motion_type === "general" || motion.is_multi_choice)`: record status `"Not eligible"`.
+    - Else if `motion.is_multi_choice`: read `lotVotes[lo.id]?.multiChoiceChoices[motion.id]`, and if any option has a choice, list `{ optionText, choiceLabel }` (`"For"` | `"Against"` | `"Abstain"`) in `motion.options` order.
+    - Else (binary): read `lotVotes[lo.id]?.choices[motion.id]` and record `choiceLabel` (`"For"` | `"Against"` | `"Abstain"`) if set.
+- `ConfirmDialog` (`maxWidth: 680`) renders:
+  - Heading `"Submit floor votes?"` and summary line `"Submitting votes for {lotCount} lot(s) across {motionCount} motion(s). This cannot be undone."`
+  - Scrollable detail container (`maxHeight: "55vh"`, `overflowY: "auto"`) listing each lot (`Lot {lot_number}` + optional `In arrear` badge), and each motion (`{motion_number || display_order}. {motion.title}`) with its choice(s) or `"No new votes selected for this lot."` if empty.
+  - Preserves existing accessibility: initial focus on `Cancel`, Escape closes, backdrop click closes, Tab/Shift+Tab focus trap.
+

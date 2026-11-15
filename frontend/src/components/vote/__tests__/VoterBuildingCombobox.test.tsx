@@ -38,7 +38,7 @@ describe("VoterBuildingCombobox", () => {
   it("renders a labelled input with role=combobox", () => {
     renderCombobox();
     expect(screen.getByRole("combobox")).toBeInTheDocument();
-    expect(screen.getByLabelText("Select your building")).toBeInTheDocument();
+    expect(screen.getByLabelText("Select your OC")).toBeInTheDocument();
   });
 
   it("shows placeholder text", () => {

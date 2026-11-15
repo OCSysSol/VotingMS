@@ -317,6 +317,10 @@ test.describe("Gap 1: Admin vote entry for partially-submitted lot", () => {
       await voteGrid.getByRole("button", { name: "Submit votes" }).click();
       const confirmDialog = page.getByRole("dialog", { name: "Submit floor votes?" });
       await expect(confirmDialog).toBeVisible({ timeout: 10000 });
+      await expect(confirmDialog.getByText(`Lot ${LOT_A}`)).toBeVisible();
+      await expect(confirmDialog.getByText(new RegExp(MOTION2_TITLE))).toBeVisible();
+      await expect(confirmDialog.getByText("Against")).toBeVisible();
+      await expect(confirmDialog.getByText(new RegExp(MOTION1_TITLE))).not.toBeVisible();
       await confirmDialog.getByRole("button", { name: "Confirm" }).click();
 
       // Panel closes on successful submission

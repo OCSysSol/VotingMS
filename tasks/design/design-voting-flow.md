@@ -122,6 +122,11 @@ Single-lot proxy voter: compact inline strip above motions showing lot number + 
 
 Fetches `GET /api/general-meeting/{id}/my-ballot`. Renders submitted votes per lot. Support email displayed if configured (`useBranding()`). "Vote for remaining lots" button driven by `remaining_lot_owner_ids` in session state.
 
+### `BuildingSelectPage.tsx` & `VoterBuildingCombobox.tsx`
+
+- `BuildingSelectPage.tsx` subtitle reads: `"Select your OC to find and vote on open General Meeting motions."`
+- `VoterBuildingCombobox.tsx` label reads: `"Select your OC"`
+
 ### `LotSelectionPage.tsx` / lot sidebar
 
 Lots loaded from `sessionStorage["meeting_lots_info_<meetingId>"]` (written by `AuthPage` after successful auth). Each lot shows lot number, financial position badge (`in_arrear` → amber badge), and proxy badge.

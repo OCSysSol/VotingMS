@@ -1953,4 +1953,230 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     // Short option remains untruncated
     expect(screen.getByRole("button", { name: "For option Bob lot 1A" })).toBeInTheDocument();
   });
+
+  it("ConfirmDialog shows binary choices and 'No new votes selected for this lot.' when empty", async () => {
+    const meetingTwoMotions: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-1",
+          title: "Approve Budget",
+          motion_number: "M1",
+          motion_type: "general",
+          is_multi_choice: false,
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-2",
+          title: "Appoint Auditor",
+          motion_number: null,
+          display_order: 2,
+          motion_type: "special",
+          is_multi_choice: false,
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-bin-3",
+          title: "Special Levy",
+          motion_number: "M3",
+          display_order: 3,
+          motion_type: "special",
+          is_multi_choice: false,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingTwoMotions });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "yes for lot 1A motion Approve Budget" })).toBeInTheDocument();
+    });
+
+    // Lot 1A votes For, Against, Abstain; Lot 2B leaves all blank
+    await user.click(screen.getByRole("button", { name: "yes for lot 1A motion Approve Budget" }));
+    await user.click(screen.getByRole("button", { name: "no for lot 1A motion Appoint Auditor" }));
+    await user.click(screen.getByRole("button", { name: "abstained for lot 1A motion Special Levy" }));
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+
+    expect(dialog).toHaveTextContent("Lot 1A");
+    expect(dialog).toHaveTextContent("M1. Approve Budget");
+    expect(dialog).toHaveTextContent("For");
+    expect(dialog).toHaveTextContent("2. Appoint Auditor");
+    expect(dialog).toHaveTextContent("Against");
+    expect(dialog).toHaveTextContent("M3. Special Levy");
+    expect(dialog).toHaveTextContent("Abstain");
+
+    expect(dialog).toHaveTextContent("Lot 2B");
+    expect(dialog).toHaveTextContent("No new votes selected for this lot.");
+  });
+
+  it("ConfirmDialog shows multi-choice option choices and Not eligible for in-arrear lots", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners", () => {
+        return HttpResponse.json([
+          { id: "lo-normal", building_id: "b1", lot_number: "1A", financial_position: "normal", unit_entitlement: 100, emails: [] },
+          { id: "lo-arrear", building_id: "b1", lot_number: "2B", financial_position: "in_arrear", unit_entitlement: 50, emails: [] },
+        ]);
+      })
+    );
+    const meetingMixed: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0],
+          id: "mc-1",
+          title: "Board Election",
+          motion_number: "M1",
+          display_order: 1,
+          motion_type: "general",
+          is_multi_choice: true,
+          option_limit: 2,
+          options: [
+            { id: "opt-1", text: "Alice", display_order: 1 },
+            { id: "opt-2", text: "Bob", display_order: 2 },
+            { id: "opt-3", text: "Carol", display_order: 3 },
+          ],
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "sp-1",
+          title: "By-law Change",
+          motion_number: "M2",
+          display_order: 2,
+          motion_type: "special",
+          is_multi_choice: false,
+          options: [],
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingMixed });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "For option Alice lot 1A" })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: "For option Alice lot 1A" }));
+    await user.click(screen.getByRole("button", { name: "Against option Bob lot 1A" }));
+    await user.click(screen.getByRole("button", { name: "Abstain option Carol lot 1A" }));
+    // In-arrear lot 2B can still vote on Special motion M2
+    await user.click(screen.getByRole("button", { name: "yes for lot 2B motion By-law Change" }));
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+
+    expect(dialog).toHaveTextContent("Alice: For");
+    expect(dialog).toHaveTextContent("Bob: Against");
+    expect(dialog).toHaveTextContent("Carol: Abstain");
+    expect(dialog).toHaveTextContent("In arrear");
+    expect(dialog).toHaveTextContent("M1. Board Election");
+    expect(dialog).toHaveTextContent("Not eligible");
+    expect(dialog).toHaveTextContent("M2. By-law Change");
+  });
+
+  it("ConfirmDialog excludes prior locked votes and shows only newly entered votes", async () => {
+    const meetingWithPrior: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES,
+      motions: [
+        ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0],
+        {
+          ...ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0],
+          id: "m-new-2",
+          title: "New Motion",
+          motion_number: "M2",
+          display_order: 2,
+          voter_lists: {
+            yes: [],
+            no: [],
+            abstained: [],
+            absent: [],
+            not_eligible: [],
+            options: {},
+          },
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingWithPrior });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "no for lot 1A motion New Motion" })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: "no for lot 1A motion New Motion" }));
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+
+    // Revote warning appears first because lot 1A has prior admin vote
+    await user.click(await screen.findByRole("button", { name: "Continue anyway" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    expect(dialog).toHaveTextContent("M2. New Motion");
+    expect(dialog).toHaveTextContent("Against");
+    // Prior motion title should not appear in ConfirmDialog summary
+    expect(dialog).not.toHaveTextContent(ADMIN_MEETING_DETAIL_WITH_ADMIN_VOTES.motions[0].title);
+  });
+
+  it("ConfirmDialog preserves focus trap, Escape, and backdrop close accessibility", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" });
+    const confirmBtn = screen.getByRole("button", { name: "Confirm" });
+
+    // Initial focus on Cancel
+    expect(cancelBtn).toHaveFocus();
+
+    // Shift+Tab wraps from Cancel to Confirm
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(confirmBtn).toHaveFocus();
+
+    // Tab wraps from Confirm to Cancel
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(cancelBtn).toHaveFocus();
+
+    // Escape closes
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Submit floor votes?" })).not.toBeInTheDocument();
+    });
+
+    // Re-open and click backdrop to close
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const reopened = await screen.findByRole("dialog", { name: "Submit floor votes?" });
+    fireEvent.click(reopened);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Submit floor votes?" })).not.toBeInTheDocument();
+    });
+    expect(dialog).not.toBeInTheDocument();
+  });
 });
+

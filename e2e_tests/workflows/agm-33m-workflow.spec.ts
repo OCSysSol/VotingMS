@@ -1076,7 +1076,7 @@ test("33M.17: voter alecools visits, sees M8/M9 visible, signs out without votin
   await page.getByRole("button", { name: "Sign out" }).click();
 
   // Should be redirected to home page
-  await expect(page.getByLabel("Select your building")).toBeVisible({ timeout: 15000 });
+  await expect(page.getByLabel("Select your OC")).toBeVisible({ timeout: 15000 });
 });
 
 // ===========================================================================

@@ -103,7 +103,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     test.setTimeout(60000);
 
     await page.goto("/");
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await expect(combobox).toBeVisible({ timeout: 15000 });
 
     // Fill the combobox — the open-meeting building must appear as a listbox option
@@ -126,7 +126,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     }
 
     await page.goto("/");
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await expect(combobox).toBeVisible({ timeout: 15000 });
 
     // Fill the combobox — the closed-only building must NOT appear as a listbox option
@@ -149,7 +149,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     }
 
     await page.goto("/");
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await expect(combobox).toBeVisible({ timeout: 15000 });
 
     // Fill the combobox — the no-meetings building must NOT appear as a listbox option
@@ -164,7 +164,7 @@ test.describe("Building filter — voter home page dropdown (US-BLD-02)", () => 
     test.setTimeout(60000);
 
     await page.goto("/");
-    const combobox = page.getByLabel("Select your building");
+    const combobox = page.getByLabel("Select your OC");
     await expect(combobox).toBeVisible({ timeout: 15000 });
 
     await combobox.fill(BUILDING_OPEN);
