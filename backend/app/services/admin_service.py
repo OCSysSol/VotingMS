@@ -5012,4 +5012,11 @@ async def enter_votes_for_meeting(
         submitted_count += 1
 
     await db.commit()
+    logger.info(
+        "admin_votes_entered",
+        agm_id=str(general_meeting_id),
+        admin_user_id=admin_user_id,
+        submitted_count=submitted_count,
+        skipped_count=skipped_count,
+    )
     return {"submitted_count": submitted_count, "skipped_count": skipped_count}

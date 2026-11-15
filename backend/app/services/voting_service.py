@@ -92,8 +92,20 @@ async def save_draft(
 
     effective = get_effective_status(general_meeting)
     if effective == GeneralMeetingStatus.pending:
+        logger.warning(
+            "draft_denied",
+            reason="voting_not_started",
+            agm_id=str(general_meeting_id),
+            motion_id=str(motion_id),
+        )
         raise HTTPException(status_code=403, detail="Voting has not started yet for this General Meeting")
     if effective == GeneralMeetingStatus.closed:
+        logger.warning(
+            "draft_denied",
+            reason="meeting_closed",
+            agm_id=str(general_meeting_id),
+            motion_id=str(motion_id),
+        )
         raise HTTPException(status_code=403, detail="Voting is closed for this meeting")
 
     # Check not already submitted by lot_owner_id.
@@ -106,6 +118,13 @@ async def save_draft(
         )
     )
     if submission_result.scalar_one_or_none() is not None:
+        logger.warning(
+            "draft_denied",
+            reason="already_submitted",
+            agm_id=str(general_meeting_id),
+            motion_id=str(motion_id),
+            lot_owner_id=str(lot_owner_id) if lot_owner_id else None,
+        )
         raise HTTPException(status_code=409, detail="Ballot already submitted for this voter")
 
     # Verify motion belongs to this general meeting
@@ -114,6 +133,12 @@ async def save_draft(
     )
     motion = motion_result.scalar_one_or_none()
     if motion is None:
+        logger.warning(
+            "draft_denied",
+            reason="motion_not_in_meeting",
+            agm_id=str(general_meeting_id),
+            motion_id=str(motion_id),
+        )
         raise HTTPException(
             status_code=422, detail="Motion does not belong to this meeting"
         )
@@ -161,6 +186,14 @@ async def save_draft(
             db.add(vote)
 
     await db.flush()
+    logger.info(
+        "draft_saved",
+        agm_id=str(general_meeting_id),
+        motion_id=str(motion_id),
+        lot_owner_id=str(lot_owner_id) if lot_owner_id else None,
+        action="cleared" if choice is None else "upserted",
+        choice=choice.value if choice is not None else None,
+    )
 
 
 async def get_drafts(
@@ -619,6 +652,7 @@ async def submit_ballot(
         "agm_id": str(general_meeting_id),
         "voter_email": voter_email,
         "lot_count": len(lot_owner_ids),
+        "revote_lot_count": len(existing_subs_by_lot),
     }
     if proxy_lots:
         log_kwargs["proxy_email"] = voter_email

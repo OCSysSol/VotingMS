@@ -11,6 +11,7 @@ import asyncio
 from dataclasses import dataclass
 
 import httpx
+import structlog
 from fastapi import Depends, HTTPException, Request
 
 from app.config import settings
@@ -100,6 +101,7 @@ async def require_admin(request: Request) -> BetterAuthUser:
             if not data or not data.get("user"):
                 raise HTTPException(status_code=401, detail="Authentication required")
             user = data["user"]
+            structlog.contextvars.bind_contextvars(admin_user_id=str(user["id"]))
             return BetterAuthUser(
                 email=user["email"],
                 user_id=user["id"],
