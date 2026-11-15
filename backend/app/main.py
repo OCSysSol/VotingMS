@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import time
 import traceback
 import uuid as _uuid_module
 from contextlib import asynccontextmanager
@@ -62,7 +63,8 @@ _SECURITY_HEADERS = {
 
 
 _CORS_ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-_CORS_ALLOW_HEADERS = "Content-Type, Authorization, Accept, X-Requested-With"
+_CORS_ALLOW_HEADERS = "Content-Type, Authorization, Accept, X-Requested-With, X-Client-Session-ID"
+_CORS_EXPOSE_HEADERS = "X-Request-ID"
 _CORS_MAX_AGE = "600"
 
 
@@ -121,6 +123,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
                         "Access-Control-Allow-Credentials": "true",
                         "Access-Control-Allow-Methods": _CORS_ALLOW_METHODS,
                         "Access-Control-Allow-Headers": _CORS_ALLOW_HEADERS,
+                        "Access-Control-Expose-Headers": _CORS_EXPOSE_HEADERS,
                         "Access-Control-Max-Age": _CORS_MAX_AGE,
                         "Vary": "Origin",
                     },
@@ -135,6 +138,7 @@ class DynamicCORSMiddleware(BaseHTTPMiddleware):
         if allowed:
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Expose-Headers"] = _CORS_EXPOSE_HEADERS
             response.headers["Vary"] = "Origin"
         return response
 
@@ -217,22 +221,47 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
-    """RR3-38: Attach a UUID request ID to every request.
+    """RR3-38: Attach correlation IDs and emit structured HTTP access logs.
 
-    Generates a new UUID per request, stores it in the _request_id_var context
-    variable, and binds it into structlog's context so every log line emitted
-    within the request includes ``request_id``.  Also sets the X-Request-ID
-    response header for client-side correlation.
+    Generates a new UUID ``request_id`` per request, reads optional
+    ``X-Client-Session-ID`` from the request headers, binds both into
+    structlog's context so every log line emitted within the request includes
+    them, emits an ``http_request_completed`` access log with duration and
+    status code, and sets the ``X-Request-ID`` response header.
     """
 
     async def dispatch(self, request: Request, call_next):
         request_id = str(_uuid_module.uuid4())
         _request_id_var.set(request_id)
-        structlog.contextvars.bind_contextvars(request_id=request_id)
+        client_session_id = request.headers.get("X-Client-Session-ID", "").strip()[:64]
+        context_kwargs: dict[str, str] = {"request_id": request_id}
+        if client_session_id:
+            context_kwargs["client_session_id"] = client_session_id
+        structlog.contextvars.bind_contextvars(**context_kwargs)
+
+        start_time = time.perf_counter()
+        status_code = 500
         try:
             response = await call_next(request)
+            status_code = response.status_code
         finally:
-            structlog.contextvars.unbind_contextvars("request_id")
+            duration_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            if request.url.path != "/api/health/live":
+                _structlog_logger.info(
+                    "http_request_completed",
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=status_code,
+                    duration_ms=duration_ms,
+                )
+            structlog.contextvars.unbind_contextvars(
+                "request_id",
+                "client_session_id",
+                "session_id",
+                "general_meeting_id",
+                "building_id",
+                "admin_user_id",
+            )
         response.headers["X-Request-ID"] = request_id
         return response
 
