@@ -140,7 +140,7 @@ export function VoterBuildingCombobox({
   return (
     <div className="field" ref={containerRef} style={{ position: "relative" }}>
       <label className="field__label" htmlFor={inputId}>
-        Select your building
+        Select your OC
       </label>
       <input
         ref={inputRef}

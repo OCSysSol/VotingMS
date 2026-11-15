@@ -9,7 +9,6 @@ from io import BytesIO
 from pypdf import PdfReader
 
 from app.services.report_pdf_service import (
-    format_voter_display,
     generate_meeting_results_pdf,
     report_pdf_filename,
 )
@@ -82,11 +81,11 @@ def _pdf_text(data: bytes) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
-def test_binary_report_contains_metadata_tallies_and_floor_vote() -> None:
+def test_binary_report_contains_metadata_tallies_and_excludes_voters() -> None:
     detail = _binary_detail(
         voters=[
             _voter(
-                voter_email="admin",
+                voter_email="secret-voter@example.com",
                 submitted_by_admin=True,
                 submitted_at=None,
             )
@@ -101,13 +100,31 @@ def test_binary_report_contains_metadata_tallies_and_floor_vote() -> None:
     assert "Harbour Tower" in text
     assert "Annual General Meeting / 2026" in text
     assert "Motion M-1: Adopt <budget> & plan" in text
-    assert "Floor vote" in text
+    assert "Tally" in text
     assert "Voter count" in text
     assert "Entitlement (UOE)" in text
-    assert "No voter records" in text
+    assert "02 Jan 2026, 14:04 AEDT" in text
+    assert "02 Jan 2026, 15:04 AEDT" in text
+    assert "UTC" not in text
+    assert "Voter / source" not in text
+    assert "Floor vote" not in text
+    assert "No voter records" not in text
+    assert "secret-voter@example.com" not in text
 
 
-def test_multi_choice_report_contains_each_option_and_voter_choice() -> None:
+def test_melbourne_aest_and_naive_datetime_formatting() -> None:
+    detail = _binary_detail()
+    # Naive datetime treated as UTC -> converted to Australia/Melbourne AEST (UTC+10 in July)
+    detail["meeting_at"] = datetime(2026, 7, 2, 3, 4)
+    detail["voting_closes_at"] = datetime(2026, 7, 2, 4, 4, tzinfo=UTC)
+
+    text = _pdf_text(generate_meeting_results_pdf(detail))
+
+    assert "02 Jul 2026, 13:04 AEST" in text
+    assert "02 Jul 2026, 14:04 AEST" in text
+
+
+def test_multi_choice_report_contains_option_tallies_and_summary_only() -> None:
     voter = _voter(
         voter_name='Jane "JD" <Owner>',
         proxy_email="proxy@example.com",
@@ -128,9 +145,9 @@ def test_multi_choice_report_contains_each_option_and_voter_choice() -> None:
             "tally": {
                 "yes": {"voter_count": 0, "entitlement_sum": 0},
                 "no": {"voter_count": 0, "entitlement_sum": 0},
-                "abstained": {"voter_count": 0, "entitlement_sum": 0},
-                "absent": {"voter_count": 0, "entitlement_sum": 0},
-                "not_eligible": {"voter_count": 0, "entitlement_sum": 0},
+                "abstained": {"voter_count": 2, "entitlement_sum": 150},
+                "absent": {"voter_count": 1, "entitlement_sum": 50},
+                "not_eligible": {"voter_count": 3, "entitlement_sum": 250},
                 "options": [
                     {
                         "option_id": option_id,
@@ -179,17 +196,27 @@ def test_multi_choice_report_contains_each_option_and_voter_choice() -> None:
     text = _pdf_text(generate_meeting_results_pdf(detail))
 
     assert "Special | Multi-choice" in text
+    assert "Option tallies" in text
     assert "Alice <Admin>" in text
-    assert "Jane \"JD\" <Owner>" in text
-    assert "owner@example.com" in text
-    assert "proxy" in text
-    assert "Motion-level abstained" in text
+    assert "Bob" in text
+    assert "Motion-level summary" in text
+    assert "Abstained" in text
+    assert "150" in text
+    assert "Absent" in text
+    assert "50" in text
     assert "Not eligible" in text
+    assert "250" in text
+    assert "Jane" not in text
+    assert "owner@example.com" not in text
+    assert "proxy" not in text
+    assert "Voter / source" not in text
+    assert "No voter records" not in text
 
 
 def test_empty_and_none_values_render_without_internal_reprs() -> None:
     detail = _binary_detail()
     detail["meeting_at"] = "raw timestamp"
+    detail["voting_closes_at"] = None
     detail["motions"] = [
         {
             "id": uuid.uuid4(),
@@ -208,6 +235,7 @@ def test_empty_and_none_values_render_without_internal_reprs() -> None:
     text = _pdf_text(generate_meeting_results_pdf(detail))
 
     assert "No option records" in text
+    assert "Motion-level summary" in text
     assert "Enum-Value | Multi-choice" in text
     assert "None" not in text
     assert "MotionVoterLists" not in text
@@ -225,31 +253,23 @@ def test_no_motions_report_has_intentional_empty_state() -> None:
     assert "0%" in text
 
 
-def test_large_voter_list_paginates() -> None:
-    voters = [
-        _voter(
-            lot_number=str(index),
-            voter_email=f"owner{index}@example.com",
-            entitlement=index,
-        )
-        for index in range(1, 121)
+def test_many_motions_paginate() -> None:
+    detail = _binary_detail()
+    base_motion = detail["motions"][0]
+    detail["motions"] = [
+        {
+            **base_motion,
+            "id": uuid.uuid4(),
+            "display_order": index,
+            "motion_number": f"M-{index}",
+            "title": f"Motion {index}",
+        }
+        for index in range(1, 20)
     ]
-    detail = _binary_detail(voters=voters)
 
     data = generate_meeting_results_pdf(detail)
 
     assert len(PdfReader(BytesIO(data)).pages) > 1
-
-
-def test_voter_display_variants() -> None:
-    assert format_voter_display(_voter(submitted_by_admin=True)) == "Floor vote"
-    assert (
-        format_voter_display(_voter(voter_name="Jane Smith", proxy_email="proxy@example.com"))
-        == "Jane Smith <owner@example.com> (proxy)"
-    )
-    assert format_voter_display(_voter(voter_name="Jane Smith")) == "Jane Smith <owner@example.com>"
-    assert format_voter_display({"voter_email": None, "proxy_email": "proxy@example.com"}) == "Proxy voter (proxy)"
-    assert format_voter_display({}) == "—"
 
 
 def test_filename_is_safe_and_deterministic_with_fallback() -> None:

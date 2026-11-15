@@ -54,13 +54,13 @@ test.describe("API health", () => {
 test.describe("Voter flow", () => {
   test("home page loads and shows building selector without console errors", async ({ page, consoleErrors: _ }) => {
     await page.goto("/");
-    await expect(page.getByLabel("Select your building")).toBeVisible();
+    await expect(page.getByLabel("Select your OC")).toBeVisible();
     // consoleErrors fixture auto-asserts no unexpected browser errors at end of test
   });
 
   test("building selector is populated with at least one building", async ({ page }) => {
     await page.goto("/");
-    const select = page.getByLabel("Select your building");
+    const select = page.getByLabel("Select your OC");
     await expect(select).toBeVisible();
     // Dropdown should have options beyond the placeholder
     const options = select.locator("option");

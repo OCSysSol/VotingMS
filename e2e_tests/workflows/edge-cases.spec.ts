@@ -198,11 +198,11 @@ test.describe("WF8: Edge cases", () => {
     await page.goto("/");
 
     // Without selecting a building, "Enter Voting" should not appear
-    await expect(page.getByLabel("Select your building")).toBeVisible();
+    await expect(page.getByLabel("Select your OC")).toBeVisible();
     await expect(page.getByRole("button", { name: "Enter Voting" })).not.toBeVisible();
 
     // Select the WF8 building → meeting list appears
-    await page.getByLabel("Select your building").fill(BUILDING);
+    await page.getByLabel("Select your OC").fill(BUILDING);
     await page.getByRole("option", {
       name: formatVoterBuildingLabel(BUILDING),
       exact: true,

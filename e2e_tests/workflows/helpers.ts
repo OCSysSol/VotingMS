@@ -672,7 +672,7 @@ export async function goToAuthPage(page: Page, buildingName: string): Promise<vo
   // The session token is now stored in an HttpOnly cookie — localStorage is not used.
   await page.context().clearCookies({ name: 'agm_session' });
   await page.goto("/");
-  const combobox = page.getByLabel("Select your building");
+  const combobox = page.getByLabel("Select your OC");
   await expect(combobox).toBeVisible();
   await combobox.fill(buildingName);
   // Tolerate both the name-only fallback and the current formatted label.

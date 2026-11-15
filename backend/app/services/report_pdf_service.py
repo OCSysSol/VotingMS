@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 from io import BytesIO
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_LEFT
@@ -45,31 +46,16 @@ def _xml(value: Any) -> str:
     return html.escape(_text(value), quote=False).replace("\n", "<br/>")
 
 
+_MELBOURNE_TZ = ZoneInfo("Australia/Melbourne")
+
+
 def _format_datetime(value: Any) -> str:
     if value is None:
         return "—"
     if isinstance(value, datetime):
-        rendered = value
-        if rendered.tzinfo is None:
-            rendered = rendered.replace(tzinfo=UTC)
-        return rendered.astimezone(UTC).strftime("%d %b %Y, %H:%M UTC")
+        rendered = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+        return rendered.astimezone(_MELBOURNE_TZ).strftime("%d %b %Y, %H:%M %Z")
     return _text(value) or "—"
-
-
-def format_voter_display(voter: dict[str, Any]) -> str:
-    """Return the canonical human-readable voter/source label."""
-    if voter.get("submitted_by_admin"):
-        return "Floor vote"
-
-    voter_name = _text(voter.get("voter_name"))
-    voter_email = _text(voter.get("voter_email"))
-    if voter_name and voter_email:
-        display = f"{voter_name} <{voter_email}>"
-    else:
-        display = voter_name or voter_email
-    if voter.get("proxy_email"):
-        display = f"{display or 'Proxy voter'} (proxy)"
-    return display or "—"
 
 
 def report_pdf_filename(detail: dict[str, Any]) -> str:
@@ -195,20 +181,6 @@ def _data_table(
     return table
 
 
-def _voter_rows(voters: list[dict[str, Any]], option: str = "", choice: str = "") -> list[list[Any]]:
-    rows: list[list[Any]] = []
-    for voter in voters:
-        row: list[Any] = [
-            _text(voter.get("lot_number")) or "—",
-            format_voter_display(voter),
-            _text(voter.get("entitlement")),
-            _format_datetime(voter.get("submitted_at")),
-        ]
-        if option or choice:
-            row[2:2] = [option or "—", choice or "—"]
-        rows.append(row)
-    return rows
-
 
 def _append_empty_state(
     story: list[Any],
@@ -242,22 +214,6 @@ def _append_binary_motion(
         )
     )
 
-    voter_lists = motion.get("voter_lists") or {}
-    for key, label in _CATEGORY_LABELS:
-        voters = voter_lists.get(key) or []
-        story.append(_p(label, styles["heading"]))
-        if voters:
-            story.append(
-                _data_table(
-                    ["Lot", "Voter / source", "UOE", "Submitted"],
-                    _voter_rows(voters),
-                    [22 * mm, 91 * mm, 20 * mm, 37 * mm],
-                    styles,
-                )
-            )
-        else:
-            _append_empty_state(story, "No voter records", styles)
-
 
 def _append_multi_choice_motion(
     story: list[Any],
@@ -270,19 +226,6 @@ def _append_multi_choice_motion(
     if option_tallies:
         stories: list[Any] = []
         for option in option_tallies:
-            option_voter_rows: list[list[Any]] = []
-            voter_lists = motion.get("voter_lists") or {}
-            option_id = _text(option.get("option_id"))
-            for choice_key, label in (
-                ("options_for", "For"),
-                ("options_against", "Against"),
-                ("options_abstained", "Abstained"),
-            ):
-                for voter in (voter_lists.get(choice_key) or {}).get(option_id, []):
-                    option_voter_rows.extend(
-                        _voter_rows([voter], option.get("option_text"), label)
-                    )
-
             stories.append(_p(option.get("option_text"), styles["heading"]))
             stories.append(
                 _data_table(
@@ -300,37 +243,32 @@ def _append_multi_choice_motion(
                     styles,
                 )
             )
-            if option_voter_rows:
-                stories.append(
-                    _data_table(
-                        ["Lot", "Option", "Choice", "Voter / source", "UOE", "Submitted"],
-                        option_voter_rows,
-                        [16 * mm, 35 * mm, 19 * mm, 58 * mm, 14 * mm, 28 * mm],
-                        styles,
-                    )
-                )
-            else:
-                stories.append(_p("No voter records", styles["small"]))
             stories.append(Spacer(1, 4))
         story.extend(stories)
     else:
         _append_empty_state(story, "No option records", styles)
 
-    voter_lists = motion.get("voter_lists") or {}
-    for key, label in (("abstained", "Motion-level abstained"), ("absent", "Absent"), ("not_eligible", "Not eligible")):
-        voters = voter_lists.get(key) or []
-        story.append(_p(label, styles["heading"]))
-        if voters:
-            story.append(
-                _data_table(
-                    ["Lot", "Voter / source", "UOE", "Submitted"],
-                    _voter_rows(voters),
-                    [22 * mm, 91 * mm, 20 * mm, 37 * mm],
-                    styles,
-                )
-            )
-        else:
-            _append_empty_state(story, "No voter records", styles)
+    summary_rows = [
+        [
+            label,
+            (tally.get(key) or {}).get("voter_count", 0),
+            (tally.get(key) or {}).get("entitlement_sum", 0),
+        ]
+        for key, label in (
+            ("abstained", "Abstained"),
+            ("absent", "Absent"),
+            ("not_eligible", "Not eligible"),
+        )
+    ]
+    story.append(_p("Motion-level summary", styles["heading"]))
+    story.append(
+        _data_table(
+            ["Category", "Voter count", "Entitlement (UOE)"],
+            summary_rows,
+            [55 * mm, 40 * mm, 75 * mm],
+            styles,
+        )
+    )
 
 
 def generate_meeting_results_pdf(detail: dict[str, Any]) -> bytes:

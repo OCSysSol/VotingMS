@@ -38,6 +38,20 @@ This document covers the complete voter journey: email OTP authentication, persi
 
 ---
 
+### US-UI-OC-01: Voter homepage uses "Select your OC" copy
+
+**Status:** ✅ Implemented
+
+**Description:** As a lot owner, I want the voter homepage and OC selector to refer to my "OC" (Owners Corporation) so the terminology matches Victorian strata usage.
+
+**Acceptance Criteria:**
+
+- [ ] `BuildingSelectPage` subtitle reads `"Select your OC to find and vote on open General Meeting motions."`
+- [ ] `VoterBuildingCombobox` label reads `"Select your OC"`
+- [ ] All unit and E2E tests pass at 100% coverage
+
+---
+
 ### US-003: Lot owner authentication (OTP)
 
 **Status:** ✅ Implemented
