@@ -621,8 +621,49 @@ class TestMain:
         assert response.status_code == 500
         data = response.json()
         assert data["detail"] == "An internal error occurred"
+        assert data["request_id"] == response.headers["x-request-id"]
         # Raw exception message must NOT appear in the response body
         assert "explosion" not in response.text
+
+    async def test_close_general_meeting_integrity_error_returns_409_and_logs(self):
+        """IntegrityError during close_general_meeting rolls back, logs, and raises 409."""
+        import uuid
+        from datetime import UTC, datetime, timedelta
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from fastapi import HTTPException
+        from sqlalchemy.exc import IntegrityError
+        from app.models.general_meeting import GeneralMeeting, GeneralMeetingStatus
+        from app.services.admin_service import close_general_meeting
+
+        gm_id = uuid.uuid4()
+        meeting = GeneralMeeting(
+            id=gm_id,
+            building_id=uuid.uuid4(),
+            title="Test Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=datetime.now(UTC) - timedelta(hours=1),
+            voting_closes_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+
+        gm_result = MagicMock()
+        gm_result.scalar_one_or_none.return_value = meeting
+        motions_result = MagicMock()
+        motions_result.scalars.return_value.all.return_value = []
+        weights_result = MagicMock()
+        weights_result.all.return_value = []
+
+        db = AsyncMock()
+        db.execute = AsyncMock(side_effect=[gm_result, motions_result, MagicMock(), weights_result])
+        db.commit = AsyncMock(side_effect=IntegrityError("stmt", {}, Exception("dup")))
+        db.rollback = AsyncMock()
+
+        with patch("app.services.admin_service.logger") as mock_logger:
+            with pytest.raises(HTTPException) as exc_info:
+                await close_general_meeting(gm_id, db)
+
+        assert exc_info.value.status_code == 409
+        db.rollback.assert_awaited_once()
+        mock_logger.exception.assert_called_once_with("meeting_close_conflict", agm_id=str(gm_id))
 
     async def test_global_exception_handler_function_directly(self):
         """global_exception_handler returns 500 with generic message when called directly (RR3-11).

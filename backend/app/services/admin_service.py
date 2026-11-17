@@ -3451,7 +3451,11 @@ async def start_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession)
 
 
 async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession, background_tasks=None) -> GeneralMeeting:
-    result = await db.execute(select(GeneralMeeting).where(GeneralMeeting.id == general_meeting_id))
+    result = await db.execute(
+        select(GeneralMeeting)
+        .where(GeneralMeeting.id == general_meeting_id)
+        .with_for_update()
+    )
     general_meeting = result.scalar_one_or_none()
     if general_meeting is None:
         raise HTTPException(status_code=404, detail="General Meeting not found")
@@ -3512,11 +3516,10 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
         subs_result = await db.execute(
             select(BallotSubmission.lot_owner_id).where(
                 BallotSubmission.general_meeting_id == general_meeting_id,
-                BallotSubmission.is_absent == False,  # noqa: E712
             )
         )
-        voted_lot_owner_ids: set[uuid.UUID] = {row[0] for row in subs_result.all()}
-        absent_lot_owner_ids = eligible_lot_owner_ids - voted_lot_owner_ids
+        existing_submission_lot_ids: set[uuid.UUID] = {row[0] for row in subs_result.all()}
+        absent_lot_owner_ids = eligible_lot_owner_ids - existing_submission_lot_ids
 
         if absent_lot_owner_ids:
             # Batch-load owner emails for all absent lots via lot_persons JOIN persons
@@ -3576,12 +3579,22 @@ async def close_general_meeting(general_meeting_id: uuid.UUID, db: AsyncSession,
     # RR4-04: Commit ballot data BEFORE computing multi-choice outcomes so that
     # compute_multi_choice_outcomes reads fully-committed Vote rows, not
     # in-flight rows that may be rolled back.
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        logger.exception("meeting_close_conflict", agm_id=str(general_meeting_id))
+        raise HTTPException(
+            status_code=409,
+            detail="Meeting state changed concurrently; please refresh and retry",
+        )
     await db.refresh(general_meeting)
 
     # Compute multi-choice pass/fail outcomes (Slice 4) — runs after commit
     # so it reads the committed ballot data.
     await compute_multi_choice_outcomes(general_meeting_id, db)
+    await db.commit()
+    await db.refresh(general_meeting)
 
     absent_count = len(absent_lot_owner_ids) if eligible_lot_owner_ids else 0
     lot_count = len(eligible_lot_owner_ids) if eligible_lot_owner_ids else 0

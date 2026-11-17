@@ -163,12 +163,22 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # Catch unhandled exceptions that propagate through call_next (RR3-11).
             # BaseHTTPMiddleware re-raises route exceptions via call_next, bypassing
             # FastAPI's app.exception_handler(Exception) registration.  We catch them
-            # here to: (a) log the full traceback server-side, and (b) return a safe
-            # generic 500 response so internal details never reach the client.
-            logger.error("Unhandled exception: %s\n%s", exc, traceback.format_exc())
+            # here to: (a) log the full traceback server-side with structlog contextvars
+            # (request_id, client_session_id, etc.), and (b) return a safe generic 500
+            # response so internal details never reach the client.
+            _structlog_logger.exception(
+                "unhandled_exception",
+                method=str(getattr(request, "method", "")),
+                path=str(getattr(getattr(request, "url", None), "path", "")),
+                exc_type=type(exc).__name__,
+            )
+            request_id = _request_id_var.get()
+            content = {"detail": "An internal error occurred"}
+            if request_id:
+                content["request_id"] = request_id
             error_response = JSONResponse(
                 status_code=500,
-                content={"detail": "An internal error occurred"},
+                content=content,
             )
             for header, value in _SECURITY_HEADERS.items():
                 error_response.headers[header] = value
@@ -548,10 +558,19 @@ def create_app() -> FastAPI:
         HTTPException is intentionally not caught here — FastAPI handles it
         before this handler runs, so it only fires for truly unhandled exceptions.
         """
-        logger.error("Unhandled exception: %s\n%s", exc, traceback.format_exc())
+        _structlog_logger.exception(
+            "unhandled_exception",
+            method=str(getattr(request, "method", "")),
+            path=str(getattr(getattr(request, "url", None), "path", "")),
+            exc_type=type(exc).__name__,
+        )
+        request_id = _request_id_var.get()
+        content = {"detail": "An internal error occurred"}
+        if request_id:  # pragma: no cover
+            content["request_id"] = request_id
         return JSONResponse(
             status_code=500,
-            content={"detail": "An internal error occurred"},
+            content=content,
         )
 
     from app.routers.public import router as public_router
