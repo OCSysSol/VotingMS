@@ -2165,13 +2165,13 @@ describe("AGMReportView", () => {
   // Branch coverage: null/undefined fallbacks in handleMotionExportCSV
   // ---------------------------------------------------------------------------
 
-  it("per-motion CSV: voter_name present produces 'Name <email>' in Owner Name and Email columns", async () => {
+  it("per-motion CSV: owner_name in Owner Name column and voter_name <email> in Email column", async () => {
     const singleMotion: MotionDetail[] = [
       {
         ...motions[0],
         voter_lists: {
           ...motions[0].voter_lists,
-          yes: [{ voter_email: "named@example.com", voter_name: "Jane Doe", lot_number: "L1", entitlement: 100 }],
+          yes: [{ voter_email: "named@example.com", voter_name: "Jane Doe", owner_name: "Jane Doe", lot_number: "L1", entitlement: 100 }],
           no: [],
           abstained: [],
           absent: [],
@@ -2184,6 +2184,113 @@ describe("AGMReportView", () => {
     expect(csv).toContain('"Jane Doe"');
     // Voter Email cell uses voter_name to build "Jane Doe <email>"
     expect(csv).toContain("Jane Doe <named@example.com>");
+  });
+
+  it("per-motion CSV (binary): proxy vote puts actual owner_name in Owner Name column, not proxy voter_name", async () => {
+    const singleMotion: MotionDetail[] = [
+      {
+        ...motions[0],
+        voter_lists: {
+          ...motions[0].voter_lists,
+          yes: [
+            {
+              voter_email: "proxy@example.com",
+              voter_name: "Proxy Person",
+              owner_name: "Actual Owner",
+              proxy_email: "proxy@example.com",
+              lot_number: "L1",
+              entitlement: 100,
+            },
+          ],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+        },
+      },
+    ];
+    const { csv } = await captureMotionCSV(singleMotion);
+    const dataRow = csv.split("\n")[1];
+    expect(dataRow).toContain('"L1","Actual Owner","Proxy Person <proxy@example.com> (proxy)"');
+  });
+
+  it("per-motion CSV (binary): proxy vote with null owner_name leaves Owner Name empty instead of proxy name", async () => {
+    const singleMotion: MotionDetail[] = [
+      {
+        ...motions[0],
+        voter_lists: {
+          ...motions[0].voter_lists,
+          yes: [
+            {
+              voter_email: "proxy@example.com",
+              voter_name: "Proxy Person",
+              owner_name: null,
+              proxy_email: "proxy@example.com",
+              lot_number: "L1",
+              entitlement: 100,
+            },
+          ],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+        },
+      },
+    ];
+    const { csv } = await captureMotionCSV(singleMotion);
+    const dataRow = csv.split("\n")[1];
+    expect(dataRow).toContain('"L1","","Proxy Person <proxy@example.com> (proxy)"');
+  });
+
+  it("per-motion CSV (multi-choice): proxy vote puts actual owner_name in Owner Name column", async () => {
+    const mcMotion: MotionDetail[] = [
+      {
+        id: "mc-proxy-1",
+        title: "Board Election",
+        description: null,
+        display_order: 1,
+        motion_number: "1",
+        motion_type: "general",
+        is_visible: true,
+        is_multi_choice: true,
+        option_limit: 1,
+        tally: {
+          yes: { voter_count: 0, entitlement_sum: 0 },
+          no: { voter_count: 0, entitlement_sum: 0 },
+          abstained: { voter_count: 0, entitlement_sum: 0 },
+          absent: { voter_count: 0, entitlement_sum: 0 },
+          not_eligible: { voter_count: 0, entitlement_sum: 0 },
+          options: [
+            { option_id: "opt-1", option_text: "Alice", display_order: 1, for_voter_count: 1, for_entitlement_sum: 100, against_voter_count: 0, against_entitlement_sum: 0, abstained_voter_count: 0, abstained_entitlement_sum: 0, voter_count: 1, entitlement_sum: 100, outcome: null },
+          ],
+        },
+        voter_lists: {
+          yes: [],
+          no: [],
+          abstained: [],
+          absent: [],
+          not_eligible: [],
+          options: {},
+          options_for: {
+            "opt-1": [
+              {
+                voter_email: "proxy@example.com",
+                voter_name: "Proxy Person",
+                owner_name: "Actual Owner",
+                proxy_email: "proxy@example.com",
+                lot_number: "L1",
+                entitlement: 100,
+              },
+            ],
+          },
+          options_against: {},
+          options_abstained: {},
+        },
+      },
+    ];
+    const { csv } = await captureMotionCSV(mcMotion);
+    const dataRow = csv.split("\n")[1];
+    expect(dataRow).toContain('"L1","Actual Owner","Proxy Person <proxy@example.com> (proxy)","Alice","For"');
   });
 
   it("per-motion CSV: lot_number undefined produces empty string in Lot Number column", async () => {
