@@ -2376,6 +2376,8 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
 
     # Maps (lot_id, email) -> display_name ("Given Surname" or None)
     lot_owner_email_to_name: dict[tuple, str | None] = {}
+    # Maps lot_id -> list of actual lot owner display names (excluding proxies)
+    lot_id_to_owner_names: dict[uuid.UUID, list[str]] = {}
 
     if lot_entitlement:
         # Batch-load emails (with names) via lot_persons JOIN persons — single query (RR3-12)
@@ -2392,11 +2394,16 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
             )
         )
         for row in batch_emails_result.all():
+            name_parts = [p for p in [row[2], row[3]] if p]
+            full_name = " ".join(name_parts).strip()
+            if full_name:
+                names = lot_id_to_owner_names.setdefault(row[0], [])
+                if full_name not in names:
+                    names.append(full_name)
             if row[1] and row[0] in lot_info:
                 lot_info[row[0]]["emails"].append(row[1])
             if row[1]:
-                name_parts = [p for p in [row[2], row[3]] if p]
-                lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
+                lot_owner_email_to_name[(row[0], row[1])] = full_name or None
 
         # Populate proxy names from lot_proxies JOIN persons.
         proxy_rows = await db.execute(
@@ -2446,11 +2453,16 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                 )
             )
             for row in fallback_emails_result.all():
+                name_parts = [p for p in [row[2], row[3]] if p]
+                full_name = " ".join(name_parts).strip()
+                if full_name:
+                    names = lot_id_to_owner_names.setdefault(row[0], [])
+                    if full_name not in names:
+                        names.append(full_name)
                 if row[1] and row[0] in lot_info:
                     lot_info[row[0]]["emails"].append(row[1])
                 if row[1]:
-                    name_parts = [p for p in [row[2], row[3]] if p]
-                    lot_owner_email_to_name[(row[0], row[1])] = " ".join(name_parts).strip() or None
+                    lot_owner_email_to_name[(row[0], row[1])] = full_name or None
 
             # Populate proxy names from lot_proxies for fallback path.
             fallback_proxy_rows = await db.execute(
