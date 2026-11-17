@@ -447,3 +447,24 @@ In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx`:
   - Scrollable detail container (`maxHeight: "55vh"`, `overflowY: "auto"`) listing each lot (`Lot {lot_number}` + optional `In arrear` badge), and each motion (`{motion_number || display_order}. {motion.title}`) with its choice(s) or `"No new votes selected for this lot."` if empty.
   - Preserves existing accessibility: initial focus on `Cancel`, Escape closes, backdrop click closes, Tab/Shift+Tab focus trap.
 
+---
+
+## Compact Frozen-Header Floor Vote Entry Grid
+
+**Status:** Implemented
+
+In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx` and `frontend/src/styles/index.css`:
+- **Full-viewport frozen-header modal (`.vote-grid-overlay`, `.vote-grid-modal`):**
+  - Step 2 expands to `width: 95vw; max-width: 1400px; max-height: calc(100vh - 32px)` with `display: flex; flex-direction: column; overflow: hidden`.
+  - `.vote-grid-modal__header` shows `"Enter Votes"` plus a subtitle (`{N} lot(s) selected · {M} visible motion(s)`) and `← Back` / `×` controls (`flex-shrink: 0`).
+  - `.vote-grid-scroll` wraps the table with `flex: 1; min-height: 0; overflow: auto` so both vertical and horizontal scrolling happen inside the modal body while header and footer remain pinned.
+  - `.vote-grid-modal__footer` pins the `"Submit votes"` action at the bottom (`flex-shrink: 0`).
+- **Sticky headers & frozen motion column (`.vote-grid-table`):**
+  - `thead th` is `position: sticky; top: 0; z-index: 2` (`min-width: 132px`).
+  - `thead th:first-child` is `position: sticky; top: 0; left: 0; z-index: 3` (`min-width: 240px; max-width: 320px`).
+  - `tbody td:first-child` is `position: sticky; left: 0; z-index: 1; background: var(--white)` (and `var(--linen)` on hover or `.vote-grid-table__motion-row`).
+- **De-duplicated multi-choice option rows:**
+  - Multi-choice motions render a motion header row (`.vote-grid-table__motion-row`) with the motion title + `Multi-choice (limit: N)` on the left and per-lot eligibility / prior-vote badge + `{forCount} of {option_limit} voted For` counter in each lot cell.
+  - Each option renders as a sub-row (`.vote-grid-table__option-row`) with the option label once in the sticky left column (`.vote-grid-table__option-label`) and compact `[For] [Against] [Abstain]` button groups (`.vote-grid-btn-group`, `.vote-grid-btn`) per lot cell.
+- **Lot header badge cleanup:**
+  - Lot `<th>` renders `All answered`, `In arrear`, and `sourceSummary` (`Mixed user/floor votes` / `User votes recorded` / `Floor votes recorded`) inside `.vote-grid-lot-badges`, removing the redundant `"Already submitted"` pill.

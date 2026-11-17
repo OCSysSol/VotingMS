@@ -2178,5 +2178,186 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     });
     expect(dialog).not.toBeInTheDocument();
   });
-});
 
+  it("renders .vote-grid-modal, .vote-grid-scroll, and .vote-grid-table in Step 2", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes — Vote Grid/i })).toBeInTheDocument();
+    });
+    expect(document.querySelector(".vote-grid-modal")).toBeInTheDocument();
+    expect(document.querySelector(".vote-grid-scroll")).toBeInTheDocument();
+    expect(document.querySelector(".vote-grid-table")).toBeInTheDocument();
+  });
+
+  it("Step 2 lot header does not render 'Already submitted' alongside 'User votes recorded'", async () => {
+    const user = userEvent.setup();
+    const meetingWithUserVote: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+            yes: [
+              { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
+            ],
+          },
+        },
+      ],
+    };
+    renderPanel({ meeting: meetingWithUserVote });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByText("User votes recorded")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Already submitted")).not.toBeInTheDocument();
+  });
+
+  it("multi-choice with 2+ selected lots renders each option label once in the left column", async () => {
+    const user = userEvent.setup();
+    renderPanel({ meeting: ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+    await waitFor(() => {
+      expect(screen.getByText(/Board Election Entry/)).toBeInTheDocument();
+    });
+    const optionTexts = ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0].options.map((o) => o.text);
+    for (const optText of optionTexts) {
+      expect(screen.getAllByText(optText)).toHaveLength(1);
+    }
+  });
+
+  it("shows Not eligible for in-arrear lot on binary general motion, handles not_eligible voter_lists and hidden motions", async () => {
+    server.use(
+      http.get("http://localhost/api/admin/buildings/:buildingId/lot-owners", () => {
+        return HttpResponse.json([
+          ...ADMIN_LOT_OWNERS,
+          {
+            id: "lo-arrear-bin",
+            building_id: "b1",
+            lot_number: "3C",
+            emails: ["arrear@example.com"],
+            unit_entitlement: 50,
+            financial_position: "in_arrear",
+            proxy_email: null,
+          },
+        ]);
+      })
+    );
+    const meetingWithNotEligibleAndHidden: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-gen-bin",
+          title: "General Binary Motion",
+          motion_type: "general",
+          is_multi_choice: false,
+          is_visible: true,
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+            not_eligible: [
+              { voter_email: "arrear@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
+              { voter_email: "unknown@example.com", lot_number: "UNKNOWN", entitlement: 50, submitted_by_admin: false },
+            ],
+          },
+        },
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          id: "m-hidden",
+          title: "Hidden Motion",
+          is_visible: false,
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingWithNotEligibleAndHidden });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 3C")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 3C"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByText("Not eligible")).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Hidden Motion/)).not.toBeInTheDocument();
+  });
+
+  it("multi-choice header row shows display_order when motion_number is null and 'User voted' for prior user MC vote", async () => {
+    const meetingWithUserMCVote: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0],
+          motion_number: null,
+          display_order: 4,
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0].voter_lists,
+            options_for: {
+              "mc-entry-opt-a": [
+                { voter_email: "user@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
+              ],
+            },
+          },
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderPanel({ meeting: meetingWithUserMCVote });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByText("4. Board Election Entry")).toBeInTheDocument();
+    });
+    expect(screen.getByText("User voted")).toBeInTheDocument();
+  });
+
+  it("shows 'Submitting...' while vote submission is pending", async () => {
+    let resolvePost!: () => void;
+    server.use(
+      http.post(
+        "http://localhost/api/admin/general-meetings/:meetingId/enter-votes",
+        async () => {
+          await new Promise<void>((r) => {
+            resolvePost = r;
+          });
+          return HttpResponse.json({ submitted_count: 1, skipped_count: 0 });
+        }
+      )
+    );
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /Submit votes/ })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("button", { name: /Submit votes/ }));
+    const confirmBtn = await screen.findByRole("button", { name: "Confirm" });
+    await user.click(confirmBtn);
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Submitting..." })).toBeDisabled();
+    });
+    resolvePost();
+  });
+});
