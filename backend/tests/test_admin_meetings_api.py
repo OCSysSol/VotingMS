@@ -2559,6 +2559,47 @@ class TestCloseAGM:
         data = response.json()
         assert "voting_closes_at" in data
 
+    async def test_close_skips_existing_absent_submission(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Close does not fail with UniqueViolationError when an is_absent=True row already exists."""
+        b = Building(name="StaleAbsent Building", manager_email="staleabsent@test.com")
+        db_session.add(b)
+        await db_session.flush()
+        lot = Lot(building_id=b.id, lot_number="101", unit_entitlement=10)
+        db_session.add(lot)
+        await db_session.flush()
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="Stale Absent GeneralMeeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=datetime.now(UTC) - timedelta(hours=2),
+            voting_closes_at=datetime.now(UTC) + timedelta(hours=1),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+        db_session.add(
+            GeneralMeetingLotWeight(
+                general_meeting_id=agm.id,
+                lot_id=lot.id,
+                unit_entitlement_snapshot=10,
+            )
+        )
+        # Pre-existing stale is_absent=True row for this (meeting, lot)
+        db_session.add(
+            BallotSubmission(
+                general_meeting_id=agm.id,
+                lot_owner_id=lot.id,
+                voter_email="stale@test.com",
+                is_absent=True,
+            )
+        )
+        await db_session.commit()
+
+        response = await client.post(f"/api/admin/general-meetings/{agm.id}/close")
+        assert response.status_code == 200
+        assert response.json()["status"] == "closed"
+
 
 # ---------------------------------------------------------------------------
 # POST /api/admin/general-meetings/{agm_id}/start (US-PS04)
