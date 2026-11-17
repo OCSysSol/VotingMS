@@ -634,7 +634,7 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
       const multi_choice_votes: AdminMultiChoiceVoteItem[] = visibleMotions
         .filter((m) => m.is_multi_choice === true && votes_data.multiChoiceChoices[m.id] !== undefined)
         .map((m) => {
-          const motionChoices = votes_data.multiChoiceChoices[m.id] ?? {};
+          const motionChoices = votes_data.multiChoiceChoices[m.id];
           const option_choices: AdminMultiChoiceOptionChoice[] = Object.entries(motionChoices).map(
             ([optionId, choice]) => ({ option_id: optionId, choice })
           );
@@ -1227,10 +1227,8 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                         const isInArrear = lo.financial_position === "in_arrear";
                         const votes_data = lotVotes[lo.id] ?? initialLotVotes();
 
-                        // In-arrear lots: disabled for general/multi_choice, enabled for special
-                        const isDisabled =
-                          isInArrear &&
-                          (motion.motion_type === "general" || motion.is_multi_choice === true);
+                        // In-arrear lots: disabled for general motions, enabled for special
+                        const isDisabled = isInArrear && motion.motion_type === "general";
 
                         if (isDisabled) {
                           return (

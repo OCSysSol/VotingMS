@@ -451,6 +451,8 @@ In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx`:
 
 ## Compact Frozen-Header Floor Vote Entry Grid
 
+**Status:** Implemented
+
 In `frontend/src/pages/admin/AdminVoteEntryPanel.tsx` and `frontend/src/styles/index.css`:
 - **Full-viewport frozen-header modal (`.vote-grid-overlay`, `.vote-grid-modal`):**
   - Step 2 expands to `width: 95vw; max-width: 1400px; max-height: calc(100vh - 32px)` with `display: flex; flex-direction: column; overflow: hidden`.
