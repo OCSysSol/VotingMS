@@ -2366,13 +2366,13 @@ button, input, select, textarea {
   display: inline-flex;
   align-items: center;
   width: fit-content;
-  margin-bottom: 4px;
-  padding: 2px 7px;
+  margin-bottom: 3px;
+  padding: 1px 5px;
   border: 1px solid transparent;
   border-radius: 999px;
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   font-weight: 700;
-  line-height: 1.3;
+  line-height: 1.2;
   white-space: nowrap;
 }
 
@@ -2406,6 +2406,199 @@ button, input, select, textarea {
 .admin-vote-entry__prior-cell--admin {
   background: var(--amber-bg);
   color: var(--amber);
+}
+
+/* === COMPACT FROZEN-HEADER FLOOR VOTE ENTRY GRID === */
+.vote-grid-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1100;
+  padding: 16px;
+}
+
+.vote-grid-modal {
+  background: var(--white);
+  border-radius: var(--r-xl);
+  padding: 16px 20px;
+  width: 95vw;
+  max-width: 1400px;
+  max-height: calc(100vh - 32px);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.vote-grid-modal__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+
+.vote-grid-modal__footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.vote-grid-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+}
+
+.vote-grid-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.85rem;
+}
+
+.vote-grid-table th,
+.vote-grid-table td {
+  border-bottom: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  padding: 6px 8px;
+  vertical-align: middle;
+}
+
+.vote-grid-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--linen);
+  text-align: center;
+  min-width: 132px;
+  border-bottom: 2px solid var(--border);
+  font-size: 0.75rem;
+}
+
+.vote-grid-table thead th:first-child {
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 3;
+  background: var(--linen);
+  text-align: left;
+  min-width: 240px;
+  max-width: 320px;
+  border-right: 2px solid var(--border);
+}
+
+.vote-grid-table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--white);
+  min-width: 240px;
+  max-width: 320px;
+  border-right: 2px solid var(--border);
+}
+
+.vote-grid-table tbody tr:hover td:first-child {
+  background: var(--linen);
+}
+
+.vote-grid-table__motion-row td {
+  background: var(--linen);
+  border-top: 1px solid var(--border);
+}
+
+.vote-grid-table tbody tr.vote-grid-table__motion-row td:first-child {
+  background: var(--linen);
+}
+
+.vote-grid-table__option-row td {
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+
+.vote-grid-table__option-label {
+  padding-left: 20px;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.vote-grid-lot-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  justify-content: center;
+  margin-top: 3px;
+}
+
+.vote-grid-btn-group {
+  display: inline-flex;
+  gap: 3px;
+  justify-content: center;
+}
+
+.vote-grid-btn {
+  padding: 2px 7px;
+  font-size: 0.68rem;
+  font-weight: 400;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--white);
+  cursor: pointer;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.vote-grid-btn--for {
+  color: var(--green);
+  border-color: var(--green);
+}
+
+.vote-grid-btn--for.vote-grid-btn--active {
+  background: var(--green);
+  color: var(--white);
+  font-weight: 700;
+}
+
+.vote-grid-btn--against {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.vote-grid-btn--against.vote-grid-btn--active {
+  background: var(--red);
+  color: var(--white);
+  font-weight: 700;
+}
+
+.vote-grid-btn--abstain {
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+
+.vote-grid-btn--abstain.vote-grid-btn--active {
+  background: var(--text-muted);
+  color: var(--white);
+  font-weight: 700;
+  border-color: var(--text-muted);
+}
+
+.vote-grid-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.vote-grid-btn--active:disabled {
+  opacity: 1;
 }
 
 /* === IN-ARREAR WARNING BANNER (VotingPage) === */

@@ -2178,5 +2178,67 @@ describe("AdminVoteEntryPanel — Bug 2: handleSubmit excludes motions without e
     });
     expect(dialog).not.toBeInTheDocument();
   });
+
+  it("renders .vote-grid-modal, .vote-grid-scroll, and .vote-grid-table in Step 2", async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByRole("dialog", { name: /Enter Floor Votes — Vote Grid/i })).toBeInTheDocument();
+    });
+    expect(document.querySelector(".vote-grid-modal")).toBeInTheDocument();
+    expect(document.querySelector(".vote-grid-scroll")).toBeInTheDocument();
+    expect(document.querySelector(".vote-grid-table")).toBeInTheDocument();
+  });
+
+  it("Step 2 lot header does not render 'Already submitted' alongside 'User votes recorded'", async () => {
+    const user = userEvent.setup();
+    const meetingWithUserVote: GeneralMeetingDetail = {
+      ...ADMIN_MEETING_DETAIL,
+      motions: [
+        {
+          ...ADMIN_MEETING_DETAIL.motions[0],
+          voter_lists: {
+            ...ADMIN_MEETING_DETAIL.motions[0].voter_lists,
+            yes: [
+              { voter_email: "owner1@example.com", lot_number: "1A", entitlement: 100, submitted_by_admin: false },
+            ],
+          },
+        },
+      ],
+    };
+    renderPanel({ meeting: meetingWithUserVote });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByText("Proceed to vote entry (1 lot)"));
+    await waitFor(() => {
+      expect(screen.getByText("User votes recorded")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Already submitted")).not.toBeInTheDocument();
+  });
+
+  it("multi-choice with 2+ selected lots renders each option label once in the left column", async () => {
+    const user = userEvent.setup();
+    renderPanel({ meeting: ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select lot 1A")).toBeInTheDocument();
+    });
+    await user.click(screen.getByLabelText("Select lot 1A"));
+    await user.click(screen.getByLabelText("Select lot 2B"));
+    await user.click(screen.getByText("Proceed to vote entry (2 lots)"));
+    await waitFor(() => {
+      expect(screen.getByText(/Board Election Entry/)).toBeInTheDocument();
+    });
+    const optionTexts = ADMIN_MEETING_DETAIL_MC_VOTE_ENTRY.motions[0].options.map((o) => o.text);
+    for (const optText of optionTexts) {
+      expect(screen.getAllByText(optText)).toHaveLength(1);
+    }
+  });
 });
 

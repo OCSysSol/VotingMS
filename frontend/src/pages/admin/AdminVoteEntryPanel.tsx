@@ -5,7 +5,7 @@
  * Step 2: Enter votes per motion for each selected lot.
  * On submit: POST /api/admin/general-meetings/{id}/enter-votes
  */
-import { useState, useEffect, useCallback, useRef, memo, useMemo } from "react";
+import { Fragment, useState, useEffect, useCallback, useRef, memo, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import {
   listLotOwners,
@@ -408,50 +408,29 @@ const LotBinaryVoteCell = memo(function LotBinaryVoteCell({
           {priorSource === "user" ? "User voted" : "Floor vote recorded"}
         </span>
       )}
-      <div style={{ display: "flex", gap: 4, justifyContent: "center" }}>
-        {(["yes", "no", "abstained"] as VoteChoice[]).map((choice) => (
-          <button
-            key={choice}
-            type="button"
-            disabled={isPriorEntry}
-            onClick={() => onSetChoice(lotId, motionId, choice)}
-            aria-label={`${choice} for lot ${lotNumber} motion ${motionTitle}`}
-            aria-pressed={currentChoice === choice}
-            style={{
-              padding: "3px 8px",
-              fontSize: "0.7rem",
-              fontWeight: currentChoice === choice ? 700 : 400,
-              borderRadius: "var(--r-sm)",
-              border: "1px solid",
-              cursor: isPriorEntry ? "not-allowed" : "pointer",
-              opacity: isPriorEntry && currentChoice !== choice ? 0.5 : 1,
-              background:
-                currentChoice === choice
-                  ? choice === "yes"
-                    ? "var(--green)"
-                    : choice === "no"
-                    ? "var(--red)"
-                    : "var(--text-muted)"
-                  : "var(--white)",
-              color:
-                currentChoice === choice
-                  ? "var(--white)"
-                  : choice === "yes"
-                  ? "var(--green)"
-                  : choice === "no"
-                  ? "var(--red)"
-                  : "var(--text-muted)",
-              borderColor:
-                choice === "yes"
-                  ? "var(--green)"
-                  : choice === "no"
-                  ? "var(--red)"
-                  : "var(--border)",
-            }}
-          >
-            {choice === "yes" ? "For" : choice === "no" ? "Against" : "Abstain"}
-          </button>
-        ))}
+      <div className="vote-grid-btn-group">
+        {(["yes", "no", "abstained"] as VoteChoice[]).map((choice) => {
+          const isActive = currentChoice === choice;
+          const variantClass =
+            choice === "yes"
+              ? "vote-grid-btn--for"
+              : choice === "no"
+              ? "vote-grid-btn--against"
+              : "vote-grid-btn--abstain";
+          return (
+            <button
+              key={choice}
+              type="button"
+              disabled={isPriorEntry}
+              onClick={() => onSetChoice(lotId, motionId, choice)}
+              aria-label={`${choice} for lot ${lotNumber} motion ${motionTitle}`}
+              aria-pressed={isActive}
+              className={`vote-grid-btn ${variantClass}${isActive ? " vote-grid-btn--active" : ""}`}
+            >
+              {choice === "yes" ? "For" : choice === "no" ? "Against" : "Abstain"}
+            </button>
+          );
+        })}
       </div>
     </td>
   );
@@ -931,30 +910,17 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
         role="dialog"
         aria-modal="true"
         aria-label="Enter Floor Votes — Vote Grid"
-        style={{
-          position: "fixed",
-          inset: 0,
-          background: "rgba(0,0,0,0.5)",
-          display: "flex",
-          alignItems: "flex-start",
-          justifyContent: "center",
-          zIndex: 1100,
-          overflowY: "auto",
-          padding: "48px 16px",
-        }}
+        className="vote-grid-overlay"
       >
-        <div
-          style={{
-            background: "var(--white)",
-            borderRadius: "var(--r-xl)",
-            padding: 32,
-            width: "100%",
-            maxWidth: 900,
-            boxShadow: "var(--shadow-lg)",
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <h2 style={{ margin: 0 }}>Enter Votes</h2>
+        <div className="vote-grid-modal">
+          <div className="vote-grid-modal__header">
+            <div>
+              <h2 style={{ margin: 0 }}>Enter Votes</h2>
+              <div style={{ fontSize: "0.8rem", color: "var(--text-secondary)", marginTop: 2 }}>
+                {selectedLotsArr.length} lot{selectedLotsArr.length !== 1 ? "s" : ""} selected ·{" "}
+                {visibleMotions.length} visible motion{visibleMotions.length !== 1 ? "s" : ""}
+              </div>
+            </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
@@ -1021,11 +987,11 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
             </div>
           )}
 
-          <div style={{ overflowX: "auto", marginBottom: 24 }}>
-            <table className="admin-table" style={{ minWidth: 400 }}>
+          <div className="vote-grid-scroll">
+            <table className="admin-table vote-grid-table">
               <thead>
                 <tr>
-                  <th scope="col" style={{ minWidth: 200 }}>Motion</th>
+                  <th scope="col">Motion</th>
                   {selectedLotsArr.map((lo) => {
                     const allAnswered = isLotAnswered(
                       lotVotes[lo.id] ?? initialLotVotes(),
@@ -1041,62 +1007,48 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                       ? "admin"
                       : null;
                     return (
-                      <th key={lo.id} scope="col" style={{ minWidth: 140, textAlign: "center" }}>
+                      <th key={lo.id} scope="col">
                         <div>Lot {lo.lot_number}</div>
-                        {allAnswered && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              fontSize: "0.65rem",
-                              background: "var(--green-bg)",
-                              color: "var(--green)",
-                              borderRadius: "var(--r-sm)",
-                              padding: "1px 6px",
-                              marginTop: 2,
-                            }}
-                          >
-                            All answered
-                          </span>
-                        )}
-                        {lo.financial_position === "in_arrear" && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              fontSize: "0.65rem",
-                              background: "var(--amber-bg)",
-                              color: "var(--amber)",
-                              borderRadius: "var(--r-sm)",
-                              padding: "1px 6px",
-                              marginTop: 2,
-                            }}
-                          >
-                            In arrear
-                          </span>
-                        )}
-                        {/* Fix 8: pre-flight warning for already-submitted lots */}
-                        {hasUserVotes && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              fontSize: "0.65rem",
-                              background: "var(--red-bg)",
-                              color: "var(--red)",
-                              borderRadius: "var(--r-sm)",
-                              padding: "1px 6px",
-                              marginTop: 2,
-                            }}
-                          >
-                            Already submitted
-                          </span>
-                        )}
-                        {sourceSummary && (
-                          <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
-                            {sourceSummary === "mixed"
-                            ? "Mixed user/floor votes"
-                              : sourceSummary === "user"
-                              ? "User votes recorded"
-                              : "Floor votes recorded"}
-                          </span>
+                        {(allAnswered || lo.financial_position === "in_arrear" || sourceSummary) && (
+                          <div className="vote-grid-lot-badges">
+                            {allAnswered && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontSize: "0.62rem",
+                                  background: "var(--green-bg)",
+                                  color: "var(--green)",
+                                  borderRadius: "var(--r-sm)",
+                                  padding: "1px 5px",
+                                }}
+                              >
+                                All answered
+                              </span>
+                            )}
+                            {lo.financial_position === "in_arrear" && (
+                              <span
+                                style={{
+                                  display: "inline-block",
+                                  fontSize: "0.62rem",
+                                  background: "var(--amber-bg)",
+                                  color: "var(--amber)",
+                                  borderRadius: "var(--r-sm)",
+                                  padding: "1px 5px",
+                                }}
+                              >
+                                In arrear
+                              </span>
+                            )}
+                            {sourceSummary && (
+                              <span className={`prior-vote-badge prior-vote-badge--${sourceSummary}`}>
+                                {sourceSummary === "mixed"
+                                  ? "Mixed user/floor votes"
+                                  : sourceSummary === "user"
+                                  ? "User votes recorded"
+                                  : "Floor votes recorded"}
+                              </span>
+                            )}
+                          </div>
                         )}
                       </th>
                     );
@@ -1104,173 +1056,223 @@ export default function AdminVoteEntryPanel({ meeting, onClose, onSuccess }: Adm
                 </tr>
               </thead>
               <tbody>
-                {visibleMotions.map((motion) => (
-                  <tr key={motion.id}>
-                    <td>
-                      <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>
-                        {motion.motion_number?.trim() || String(motion.display_order)}. {motion.title}
-                      </div>
-                      {motion.is_multi_choice === true && (
-                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                          Multi-choice (limit: {motion.option_limit})
-                        </div>
-                      )}
-                    </td>
-                    {selectedLotsArr.map((lo) => {
-                      const isInArrear = lo.financial_position === "in_arrear";
-                      const votes_data = lotVotes[lo.id] ?? initialLotVotes();
-
-                      // In-arrear lots: disabled for general/multi_choice, enabled for special
-                      const isDisabled =
-                        isInArrear &&
-                        (motion.motion_type === "general" || motion.is_multi_choice === true);
-
-                      if (isDisabled) {
-                        return (
-                          <td key={lo.id} style={{ textAlign: "center" }}>
-                            <span
-                              style={{
-                                fontSize: "0.7rem",
-                                color: "var(--text-muted)",
-                                fontStyle: "italic",
-                              }}
-                            >
-                              Not eligible
-                            </span>
-                          </td>
-                        );
-                      }
-
-                      if (motion.is_multi_choice === true) {
-                        // US-AVE2-01: per-option For/Against/Abstain buttons
-                        const motionChoices = votes_data.multiChoiceChoices[motion.id] ?? {};
-                        const forCount = Object.values(motionChoices).filter((c) => c === "for").length;
-                        // Fix 1: mirror voter-side limitReached guard — block "For" when limit reached
-                        const limitReached = motion.option_limit != null && forCount >= motion.option_limit;
-                        const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
-                        const isMCPriorEntry = priorSource !== null;
-
-                        return (
-                          <td
-                            key={lo.id}
-                            className={priorSource ? `admin-vote-entry__prior-cell admin-vote-entry__prior-cell--${priorSource}` : undefined}
-                            style={{ verticalAlign: "top", padding: "8px" }}
-                          >
-                            {priorSource && (
-                              <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
-                                {priorSource === "user" ? "User voted" : "Floor vote recorded"}
-                              </span>
-                            )}
-                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                              {motion.options.map((opt) => {
-                                const currentChoice = motionChoices[opt.id] ?? null;
-                                const truncatedOptText = opt.text.length > 80 ? `${opt.text.slice(0, 80)}...` : opt.text;
-                                return (
-                                  <div key={opt.id}>
-                                    <div
-                                      style={{
-                                        fontSize: "0.72rem",
-                                        color: "var(--text-secondary)",
-                                        marginBottom: 2,
-                                        wordBreak: "break-word",
-                                        overflowWrap: "anywhere",
-                                      }}
-                                    >
-                                      {opt.text}
-                                    </div>
-                                    <div style={{ display: "flex", gap: 3 }}>
-                                      {(["for", "against", "abstained"] as OptionChoice[]).map((choice) => {
-                                        const isActive = currentChoice === choice;
-                                        // Fix 1: disable "For" when limit reached and not already selected For
-                                        const isForDisabled = choice === "for" && limitReached && currentChoice !== "for";
-                                        const isButtonDisabled = isMCPriorEntry || isForDisabled;
-                                        const ariaLabel = isForDisabled
-                                          ? `For option ${truncatedOptText} lot ${lo.lot_number} (limit reached)`
-                                          : `${choice === "for" ? "For" : choice === "against" ? "Against" : "Abstain"} option ${truncatedOptText} lot ${lo.lot_number}`;
-                                        return (
-                                          <button
-                                            key={choice}
-                                            type="button"
-                                            disabled={isButtonDisabled}
-                                            onClick={() =>
-                                              setOptionChoice(lo.id, motion.id, opt.id, choice)
-                                            }
-                                            aria-label={ariaLabel}
-                                            aria-pressed={isActive}
-                                            style={{
-                                              padding: "2px 6px",
-                                              fontSize: "0.65rem",
-                                              fontWeight: isActive ? 700 : 400,
-                                              borderRadius: "var(--r-sm)",
-                                              border: "1px solid",
-                                              cursor: isButtonDisabled ? "not-allowed" : "pointer",
-                                              opacity: isMCPriorEntry && !isActive ? 0.5 : isForDisabled ? 0.4 : 1,
-                                              background: isActive
-                                                ? choice === "for"
-                                                  ? "var(--green)"
-                                                  : choice === "against"
-                                                  ? "var(--red)"
-                                                  : "var(--text-muted)"
-                                                : "var(--white)",
-                                              color: isActive
-                                                ? "var(--white)"
-                                                : choice === "for"
-                                                ? "var(--green)"
-                                                : choice === "against"
-                                                ? "var(--red)"
-                                                : "var(--text-muted)",
-                                              borderColor:
-                                                choice === "for"
-                                                  ? "var(--green)"
-                                                  : choice === "against"
-                                                  ? "var(--red)"
-                                                  : "var(--border)",
-                                            }}
-                                          >
-                                            {choice === "for"
-                                              ? "For"
-                                              : choice === "against"
-                                              ? "Against"
-                                              : "Abstain"}
-                                          </button>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                              <div style={{ fontSize: "0.65rem", color: "var(--text-muted)", marginTop: 2 }}>
-                                {forCount} of {motion.option_limit} voted For
-                              </div>
+                {visibleMotions.map((motion) => {
+                  if (motion.is_multi_choice === true) {
+                    return (
+                      <Fragment key={motion.id}>
+                        <tr className="vote-grid-table__motion-row">
+                          <td>
+                            <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                              {motion.motion_number?.trim() || String(motion.display_order)}. {motion.title}
+                            </div>
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                              Multi-choice (limit: {motion.option_limit})
                             </div>
                           </td>
-                        );
-                      }
+                          {selectedLotsArr.map((lo) => {
+                            const isInArrear = lo.financial_position === "in_arrear";
+                            if (isInArrear) {
+                              return (
+                                <td key={lo.id} style={{ textAlign: "center" }}>
+                                  <span
+                                    style={{
+                                      fontSize: "0.7rem",
+                                      color: "var(--text-muted)",
+                                      fontStyle: "italic",
+                                    }}
+                                  >
+                                    Not eligible
+                                  </span>
+                                </td>
+                              );
+                            }
+                            const votes_data = lotVotes[lo.id] ?? initialLotVotes();
+                            const motionChoices = votes_data.multiChoiceChoices[motion.id] ?? {};
+                            const forCount = Object.values(motionChoices).filter((c) => c === "for").length;
+                            const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
+                            return (
+                              <td
+                                key={lo.id}
+                                className={
+                                  priorSource
+                                    ? `admin-vote-entry__prior-cell admin-vote-entry__prior-cell--${priorSource}`
+                                    : undefined
+                                }
+                                style={{ textAlign: "center" }}
+                              >
+                                {priorSource && (
+                                  <span className={`prior-vote-badge prior-vote-badge--${priorSource}`}>
+                                    {priorSource === "user" ? "User voted" : "Floor vote recorded"}
+                                  </span>
+                                )}
+                                <div style={{ fontSize: "0.7rem", color: "var(--text-muted)" }}>
+                                  {forCount} of {motion.option_limit} voted For
+                                </div>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                        {motion.options.map((opt) => {
+                          const truncatedOptText =
+                            opt.text.length > 80 ? `${opt.text.slice(0, 80)}...` : opt.text;
+                          return (
+                            <tr
+                              key={`${motion.id}-${opt.id}`}
+                              className="vote-grid-table__option-row"
+                            >
+                              <td className="vote-grid-table__option-label">{opt.text}</td>
+                              {selectedLotsArr.map((lo) => {
+                                const isInArrear = lo.financial_position === "in_arrear";
+                                if (isInArrear) {
+                                  return (
+                                    <td
+                                      key={lo.id}
+                                      style={{ textAlign: "center", color: "var(--text-muted)" }}
+                                    >
+                                      —
+                                    </td>
+                                  );
+                                }
+                                const votes_data = lotVotes[lo.id] ?? initialLotVotes();
+                                const motionChoices =
+                                  votes_data.multiChoiceChoices[motion.id] ?? {};
+                                const forCount = Object.values(motionChoices).filter(
+                                  (c) => c === "for"
+                                ).length;
+                                // Fix 1: mirror voter-side limitReached guard — block "For" when limit reached
+                                const limitReached =
+                                  motion.option_limit != null && forCount >= motion.option_limit;
+                                const priorSource =
+                                  priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
+                                const isMCPriorEntry = priorSource !== null;
+                                const currentChoice = motionChoices[opt.id] ?? null;
+                                return (
+                                  <td
+                                    key={lo.id}
+                                    className={
+                                      priorSource
+                                        ? `admin-vote-entry__prior-cell admin-vote-entry__prior-cell--${priorSource}`
+                                        : undefined
+                                    }
+                                    style={{ textAlign: "center" }}
+                                  >
+                                    <div className="vote-grid-btn-group">
+                                      {(["for", "against", "abstained"] as OptionChoice[]).map(
+                                        (choice) => {
+                                          const isActive = currentChoice === choice;
+                                          // Fix 1: disable "For" when limit reached and not already selected For
+                                          const isForDisabled =
+                                            choice === "for" &&
+                                            limitReached &&
+                                            currentChoice !== "for";
+                                          const isButtonDisabled =
+                                            isMCPriorEntry || isForDisabled;
+                                          const ariaLabel = isForDisabled
+                                            ? `For option ${truncatedOptText} lot ${lo.lot_number} (limit reached)`
+                                            : `${
+                                                choice === "for"
+                                                  ? "For"
+                                                  : choice === "against"
+                                                  ? "Against"
+                                                  : "Abstain"
+                                              } option ${truncatedOptText} lot ${lo.lot_number}`;
+                                          const variantClass =
+                                            choice === "for"
+                                              ? "vote-grid-btn--for"
+                                              : choice === "against"
+                                              ? "vote-grid-btn--against"
+                                              : "vote-grid-btn--abstain";
+                                          return (
+                                            <button
+                                              key={choice}
+                                              type="button"
+                                              disabled={isButtonDisabled}
+                                              onClick={() =>
+                                                setOptionChoice(lo.id, motion.id, opt.id, choice)
+                                              }
+                                              aria-label={ariaLabel}
+                                              aria-pressed={isActive}
+                                              className={`vote-grid-btn ${variantClass}${
+                                                isActive ? " vote-grid-btn--active" : ""
+                                              }`}
+                                            >
+                                              {choice === "for"
+                                                ? "For"
+                                                : choice === "against"
+                                                ? "Against"
+                                                : "Abstain"}
+                                            </button>
+                                          );
+                                        }
+                                      )}
+                                    </div>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </Fragment>
+                    );
+                  }
 
-                      // Binary motion — use memoized LotBinaryVoteCell (RR4-11)
-                      const currentChoice = votes_data.choices[motion.id];
-                      const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
-                      return (
-                        <LotBinaryVoteCell
-                          key={lo.id}
-                          lotId={lo.id}
-                          lotNumber={lo.lot_number}
-                          motionId={motion.id}
-                          motionTitle={motion.title}
-                          currentChoice={currentChoice}
-                          onSetChoice={setChoice}
-                          priorSource={priorSource}
-                        />
-                      );
-                    })}
-                  </tr>
-                ))}
+                  return (
+                    <tr key={motion.id}>
+                      <td>
+                        <div style={{ fontWeight: 600, fontSize: "0.875rem" }}>
+                          {motion.motion_number?.trim() || String(motion.display_order)}. {motion.title}
+                        </div>
+                      </td>
+                      {selectedLotsArr.map((lo) => {
+                        const isInArrear = lo.financial_position === "in_arrear";
+                        const votes_data = lotVotes[lo.id] ?? initialLotVotes();
+
+                        // In-arrear lots: disabled for general/multi_choice, enabled for special
+                        const isDisabled =
+                          isInArrear &&
+                          (motion.motion_type === "general" || motion.is_multi_choice === true);
+
+                        if (isDisabled) {
+                          return (
+                            <td key={lo.id} style={{ textAlign: "center" }}>
+                              <span
+                                style={{
+                                  fontSize: "0.7rem",
+                                  color: "var(--text-muted)",
+                                  fontStyle: "italic",
+                                }}
+                              >
+                                Not eligible
+                              </span>
+                            </td>
+                          );
+                        }
+
+                        // Binary motion — use memoized LotBinaryVoteCell (RR4-11)
+                        const currentChoice = votes_data.choices[motion.id];
+                        const priorSource = priorVoteSourceByLotId[lo.id]?.[motion.id] ?? null;
+                        return (
+                          <LotBinaryVoteCell
+                            key={lo.id}
+                            lotId={lo.id}
+                            lotNumber={lo.lot_number}
+                            motionId={motion.id}
+                            motionTitle={motion.title}
+                            currentChoice={currentChoice}
+                            onSetChoice={setChoice}
+                            priorSource={priorSource}
+                          />
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           {!submitResult && (
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <div className="vote-grid-modal__footer">
               <button
                 type="button"
                 className="btn btn--primary"
