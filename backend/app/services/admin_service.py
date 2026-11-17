@@ -2597,9 +2597,12 @@ async def get_general_meeting_detail(general_meeting_id: uuid.UUID, db: AsyncSes
                     submitted_by_admin_username_val = lot_owner_to_submitted_by_admin_username.get(lid)
                     submitted_at_val = lot_owner_to_submitted_at.get(lid)
                 voter_name = lot_owner_email_to_name.get((lid, voter_email))
+                owner_names = lot_id_to_owner_names.get(lid, [])
+                owner_name = ", ".join(owner_names) if owner_names else None
                 result_list.append({
                     "voter_email": voter_email,
                     "voter_name": voter_name,
+                    "owner_name": owner_name,
                     "lot_number": info["lot_number"],
                     "entitlement": info["entitlement"],
                     "proxy_email": proxy_email_val,

@@ -2121,6 +2121,63 @@ class TestGetGeneralMeetingDetail:
         assert len(yes_voters) == 1
         assert yes_voters[0]["voter_email"] == "alice_proxy@vp.com"
         assert yes_voters[0]["voter_name"] == "Alice Brown"
+        assert yes_voters[0]["owner_name"] is None
+
+    async def test_get_general_meeting_detail_proxy_vote_returns_actual_owner_name(
+        self, client: AsyncClient, db_session: AsyncSession
+    ):
+        """Proxy vote populates owner_name with actual lot owner(s), while voter_name holds proxy name."""
+        b = Building(name="ON Proxy Building", manager_email="on_proxy@test.com")
+        db_session.add(b)
+        await db_session.flush()
+
+        lo = LotOwner(building_id=b.id, lot_number="ON1", unit_entitlement=30)
+        db_session.add(lo)
+        await db_session.flush()
+
+        await add_person_to_lot(db_session, lo, "owner1@on.com", given_name="John", surname="Owner")
+        await add_person_to_lot(db_session, lo, "owner2@on.com", given_name="Mary", surname="Owner")
+        await db_session.flush()
+
+        proxy_person = await get_or_create_person(db_session, "proxy@on.com", given_name="Alice", surname="Proxy")
+        db_session.add(LotProxy(lot_id=lo.id, person_id=proxy_person.id))
+        await db_session.flush()
+
+        agm = GeneralMeeting(
+            building_id=b.id,
+            title="ON Proxy Meeting",
+            status=GeneralMeetingStatus.open,
+            meeting_at=meeting_dt(),
+            voting_closes_at=closing_dt(),
+        )
+        db_session.add(agm)
+        await db_session.flush()
+
+        motion = Motion(general_meeting_id=agm.id, title="ON Motion", display_order=1)
+        db_session.add(motion)
+        await db_session.flush()
+
+        db_session.add(GeneralMeetingLotWeight(
+            general_meeting_id=agm.id, lot_id=lo.id, unit_entitlement_snapshot=30,
+        ))
+        db_session.add(Vote(
+            general_meeting_id=agm.id, motion_id=motion.id,
+            voter_email="proxy@on.com", lot_owner_id=lo.id,
+            choice=VoteChoice.yes, status=VoteStatus.submitted,
+        ))
+        db_session.add(BallotSubmission(
+            general_meeting_id=agm.id, lot_owner_id=lo.id,
+            voter_email="proxy@on.com",
+            proxy_email="proxy@on.com",
+        ))
+        await db_session.commit()
+
+        response = await client.get(f"/api/admin/general-meetings/{agm.id}")
+        assert response.status_code == 200
+        yes_voters = response.json()["motions"][0]["voter_lists"]["yes"]
+        assert len(yes_voters) == 1
+        assert yes_voters[0]["voter_name"] == "Alice Proxy"
+        assert yes_voters[0]["owner_name"] == "John Owner, Mary Owner"
 
     async def test_get_general_meeting_detail_proxy_voter_no_name_returns_none(
         self, client: AsyncClient, db_session: AsyncSession

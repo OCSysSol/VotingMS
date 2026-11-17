@@ -347,13 +347,13 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
         const abstainedVoters = motion.voter_lists.options_abstained?.[optTally.option_id] ?? [];
 
         for (const v of forVoters) {
-          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("For")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
+          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.owner_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("For")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
         for (const v of againstVoters) {
-          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("Against")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
+          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.owner_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("Against")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
         for (const v of abstainedVoters) {
-          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("Abstained")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
+          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.owner_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(optTally.option_text)},${csvCell("Abstained")},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
       }
 
@@ -361,7 +361,7 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
       for (const cat of ["absent", "not_eligible"] as const) {
         const label = CATEGORY_LABELS.get(cat) ?? "";
         for (const v of getVoterList(motion.voter_lists, cat)) {
-          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(formatVoterIdentity(v))},${""},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
+          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.owner_name ?? "")},${csvCell(formatVoterIdentity(v))},${""},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
       }
     } else {
@@ -370,7 +370,7 @@ export default function AGMReportView({ motions, agmTitle, totalEntitlement = 0 
       for (const cat of ["yes", "no", "abstained", "absent", "not_eligible"] as const) {
         const label = CATEGORY_LABELS.get(cat) ?? "";
         for (const v of getVoterList(motion.voter_lists, cat)) {
-          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.voter_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
+          rows.push(`${csvCell(v.lot_number ?? "")},${csvCell(v.owner_name ?? "")},${csvCell(formatVoterIdentity(v))},${csvCell(label)},${v.entitlement},${csvCell(v.submitted_by_admin ? "Floor vote" : "Voter")},${csvCell(buildSubmittedAt(v))}`);
         }
       }
     }

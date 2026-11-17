@@ -256,7 +256,7 @@ The `btn--admin` class (linen-200 fill, muted text) matches the density of the e
 | Column | Source |
 |---|---|
 | `Lot Number` | `voter.lot_number` |
-| `Owner Name` | `voter.voter_name ?? ""` |
+| `Owner Name` | `voter.owner_name ?? ""` |
 | `Voter Email` | `voter.voter_email ?? ""` — append ` (proxy)` if `voter.proxy_email` is set |
 | `Vote Choice` | `For` / `Against` / `Abstained` / `Absent` / `Not eligible` |
 | `Entitlement (UOE)` | `voter.entitlement` |
@@ -268,7 +268,7 @@ The `btn--admin` class (linen-200 fill, muted text) matches the density of the e
 | Column | Source |
 |---|---|
 | `Lot Number` | `voter.lot_number` |
-| `Owner Name` | `voter.voter_name ?? ""` |
+| `Owner Name` | `voter.owner_name ?? ""` |
 | `Voter Email` | `voter.voter_email ?? ""` — append ` (proxy)` if `voter.proxy_email` is set |
 | `Option` | `optTally.option_text` — present for option-level rows; `""` for Abstained/Absent/Not eligible rows |
 | `Vote Choice` | `For` / `Against` / `Abstained` / `Absent` / `Not eligible` |
